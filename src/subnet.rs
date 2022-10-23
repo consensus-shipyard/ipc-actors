@@ -2,7 +2,6 @@ use anyhow::anyhow;
 use fil_actors_runtime::runtime::Runtime;
 use fvm_ipld_blockstore::Blockstore;
 use fvm_ipld_encoding::Cbor;
-use fvm_shared::bigint::bigint_ser;
 use fvm_shared::econ::TokenAmount;
 use primitives::{TAmt, TCid};
 use serde::{Deserialize, Serialize};
@@ -22,14 +21,14 @@ pub enum Status {
     Killed,
 }
 
-#[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]
+#[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq)]
 pub struct Subnet {
     pub id: SubnetID,
-    #[serde(with = "bigint_ser")]
+    // #[serde(with = "bigint_ser")]
     pub stake: TokenAmount,
     pub top_down_msgs: TCid<TAmt<StorableMsg, CROSSMSG_AMT_BITWIDTH>>,
     pub nonce: u64,
-    #[serde(with = "bigint_ser")]
+    // #[serde(with = "bigint_ser")]
     pub circ_supply: TokenAmount,
     pub status: Status,
     pub prev_checkpoint: Option<Checkpoint>,

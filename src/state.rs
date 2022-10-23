@@ -9,7 +9,6 @@ use fvm_ipld_encoding::Cbor;
 use fvm_ipld_encoding::RawBytes;
 use fvm_ipld_hamt::BytesKey;
 use fvm_shared::address::Address;
-use fvm_shared::bigint::{bigint_ser, BigInt};
 use fvm_shared::clock::ChainEpoch;
 use fvm_shared::econ::TokenAmount;
 use fvm_shared::error::ExitCode;
@@ -20,9 +19,9 @@ use serde::{Deserialize, Serialize};
 use std::collections::{HashMap, HashSet};
 use std::str::FromStr;
 
-use crate::atomic;
 use crate::exec::{AtomicExec, AtomicExecParams, AtomicExecParamsMeta};
 use crate::subnet_id::SubnetID;
+use crate::{atomic, HierarchicalAddress};
 
 use super::checkpoint::*;
 use super::cross::*;
@@ -34,7 +33,7 @@ use super::types::*;
 pub struct State {
     pub network_name: SubnetID,
     pub total_subnets: u64,
-    #[serde(with = "bigint_ser")]
+    // #[serde(with = "bigint_ser")]
     pub min_stake: TokenAmount,
     pub subnets: TCid<THamt<Cid, Subnet>>,
     pub check_period: ChainEpoch,
@@ -49,7 +48,7 @@ pub struct State {
 }
 
 lazy_static! {
-    static ref MIN_SUBNET_COLLATERAL: BigInt = TokenAmount::from(MIN_COLLATERAL_AMOUNT);
+    static ref MIN_SUBNET_COLLATERAL: TokenAmount = TokenAmount::from_atto(MIN_COLLATERAL_AMOUNT);
 }
 
 impl Cbor for State {}
@@ -111,7 +110,7 @@ impl State {
                     nonce: 0,
                     prev_checkpoint: None,
                 };
-                set_subnet(subnets, &id, subnet)?;
+                set_subnet(subnets, id, subnet)?;
                 Ok(true)
             }
         })?;
@@ -161,9 +160,9 @@ impl State {
     }
 
     /// get checkpoint being populated in the current window.
-    pub fn get_window_checkpoint<'m, BS: Blockstore>(
+    pub fn get_window_checkpoint<BS: Blockstore>(
         &self,
-        store: &'m BS,
+        store: &BS,
         epoch: ChainEpoch,
     ) -> anyhow::Result<Checkpoint> {
         if epoch < 0 {
@@ -197,10 +196,10 @@ impl State {
                     .map_err(|e| anyhow!("error storing bottomup msg: {}", e))?;
             } else {
                 // if we are not the parent, someone is trying to forge messages
-                if mm.from.parent().unwrap_or_else(|| SubnetID::default()) != self.network_name {
+                if mm.from.parent().unwrap_or_default() != self.network_name {
                     continue;
                 }
-                let meta = aux.entry(mm.to.clone()).or_insert(vec![mm]);
+                let meta = aux.entry(mm.to.clone()).or_insert_with(|| vec![mm]);
                 (*meta).push(mm);
             }
             burn_val += &mm.value;
@@ -329,7 +328,7 @@ impl State {
                 None => return Err(anyhow!("no msgmeta found for cid")),
             };
 
-            prev_meta.add_msg(&msg)?;
+            prev_meta.add_msg(msg)?;
 
             // if the cid hasn't changed
             let cid = TCid::from(prev_meta.cid()?);
@@ -411,7 +410,7 @@ impl State {
         match sub {
             Some(mut sub) => {
                 msg.nonce = sub.nonce;
-                sub.store_topdown_msg(store, &msg)?;
+                sub.store_topdown_msg(store, msg)?;
                 sub.nonce += 1;
                 sub.circ_supply += &msg.value;
                 self.flush_subnet(store, &sub)?;
@@ -437,7 +436,7 @@ impl State {
         curr_epoch: ChainEpoch,
     ) -> anyhow::Result<()> {
         // store msg in checkpoint for propagation
-        self.store_msg_in_checkpoint(store, &msg, curr_epoch)?;
+        self.store_msg_in_checkpoint(store, msg, curr_epoch)?;
         // increment nonce
         self.nonce += 1;
 
@@ -508,7 +507,7 @@ impl State {
         self.atomic_exec_registry.update(store, |registry| {
             registry
                 .set(cid.cid().to_bytes().into(), exec)
-                .map_err(|e| e.downcast_wrap(format!("failed to set atomic exec")))?;
+                .map_err(|e| e.downcast_wrap("failed to set atomic exec"))?;
             Ok(())
         })?;
         Ok(())
@@ -522,7 +521,7 @@ impl State {
         self.atomic_exec_registry.update(store, |registry| {
             registry
                 .delete(&cid.cid().to_bytes())
-                .map_err(|e| e.downcast_wrap(format!("failed to delete atomic exec")))?;
+                .map_err(|e| e.downcast_wrap("failed to delete atomic exec"))?;
             Ok(())
         })?;
         Ok(())
@@ -542,7 +541,7 @@ impl State {
         let mut visited = HashSet::new();
         let params = exec.params();
         for (k, v) in params.inputs.iter() {
-            let sn = k.0.subnet();
+            let sn = k.subnet()?;
             if visited.get(&sn).is_none() {
                 let mut msg =
                     self.exec_result_msg(&sn, &v.actor, &params.msgs[0], output.clone(), abort)?;
@@ -569,8 +568,9 @@ impl State {
         abort: bool,
     ) -> anyhow::Result<StorableMsg> {
         // to signal that is a system message we use system_actor_addr as source.
-        let from = Address::new_hierarchical(&self.network_name, &SYSTEM_ACTOR_ADDR)?;
-        let to = Address::new_hierarchical(subnet, actor)?;
+        // TODO: do we expect SYSTEM_ACTOR_ADDR still?
+        let from = HierarchicalAddress::new(&self.network_name, &SYSTEM_ACTOR_ADDR)?;
+        let to = HierarchicalAddress::new(subnet, actor)?;
         let lock_params = atomic::LockParams::new(msg.method, msg.clone().params);
         if abort {
             let method = atomic::METHOD_ABORT;
@@ -588,14 +588,14 @@ impl State {
         let method = atomic::METHOD_UNLOCK;
         let unlock_params = atomic::UnlockParams::new(lock_params, output);
         let enc = RawBytes::serialize(unlock_params)?;
-        return Ok(StorableMsg {
+        Ok(StorableMsg {
             to,
             from,
             value: TokenAmount::zero(),
             nonce: self.nonce,
             method,
             params: enc,
-        });
+        })
     }
 }
 

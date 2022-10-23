@@ -1,3 +1,4 @@
+use crate::address::HierarchicalAddress;
 use cid::Cid;
 use exec::{
     is_addr_in_exec, is_common_parent, AtomicExec, AtomicExecParamsRaw, ExecStatus, LockedOutput,
@@ -5,24 +6,21 @@ use exec::{
 };
 use fil_actors_runtime::runtime::{ActorCode, Runtime};
 use fil_actors_runtime::{
-    actor_error, cbor, ActorDowncast, ActorError, BURNT_FUNDS_ACTOR_ADDR, REWARD_ACTOR_ADDR,
-    SYSTEM_ACTOR_ADDR,
+    actor_error, cbor, ActorDowncast, ActorError, BURNT_FUNDS_ACTOR_ADDR, INIT_ACTOR_ADDR,
+    REWARD_ACTOR_ADDR,
 };
 use fvm_ipld_blockstore::Blockstore;
 use fvm_ipld_encoding::RawBytes;
-use fvm_shared::actor::builtin::{Type, CALLER_TYPES_SIGNABLE};
-use fvm_shared::address::{Address};
+use fvm_shared::address::Address;
 use fvm_shared::bigint::Zero;
 use fvm_shared::econ::TokenAmount;
 use fvm_shared::error::ExitCode;
 use fvm_shared::METHOD_SEND;
 use fvm_shared::{MethodNum, METHOD_CONSTRUCTOR};
+use lazy_static::lazy_static;
 use num_derive::FromPrimitive;
 use num_traits::FromPrimitive;
-use primitives::TAddress;
 use std::collections::HashMap;
-use std::convert::TryFrom;
-use lazy_static::lazy_static;
 
 pub use self::checkpoint::{Checkpoint, CrossMsgMeta};
 pub use self::cross::{is_bottomup, CrossMsgs, HCMsgType, StorableMsg};
@@ -34,6 +32,7 @@ use crate::subnet_id::SubnetID;
 #[cfg(feature = "fil-actor")]
 fil_actors_runtime::wasm_trampoline!(Actor);
 
+mod address;
 mod atomic;
 pub mod checkpoint;
 mod cross;
@@ -45,7 +44,6 @@ mod state;
 pub mod subnet;
 mod subnet_id;
 mod types;
-mod address;
 
 // TODO: make this into constructor!
 lazy_static! {
@@ -73,6 +71,7 @@ pub enum Method {
 
 /// Subnet Coordinator Actor
 pub struct Actor;
+
 impl Actor {
     /// Constructor for SCA actor
     fn constructor<BS, RT>(rt: &mut RT, params: ConstructorParams) -> Result<(), ActorError>
@@ -80,7 +79,7 @@ impl Actor {
         BS: Blockstore,
         RT: Runtime<BS>,
     {
-        rt.validate_immediate_caller_is(std::iter::once(&*SYSTEM_ACTOR_ADDR))?;
+        rt.validate_immediate_caller_is(std::iter::once(&*INIT_ACTOR_ADDR))?;
 
         let st = State::new(rt.store(), params).map_err(|e| {
             e.downcast_default(
@@ -99,7 +98,10 @@ impl Actor {
         BS: Blockstore,
         RT: Runtime<BS>,
     {
-        rt.validate_immediate_caller_type(std::iter::once(&Type::Subnet))?;
+        // TODO: handle type check here.
+        rt.validate_immediate_caller_accept_any()?;
+        // rt.validate_immediate_caller_type(std::iter::once(&Type::Subnet))?;
+
         let subnet_addr = rt.message().caller();
         let mut shid = SubnetID::default();
         rt.transaction(|st: &mut State, rt| {
@@ -113,7 +115,7 @@ impl Actor {
                         illegal_argument,
                         "subnet with id {} already registered",
                         shid
-                    ))
+                    ));
                 }
                 None => {
                     st.register_subnet(rt, &shid).map_err(|e| {
@@ -137,7 +139,10 @@ impl Actor {
         BS: Blockstore,
         RT: Runtime<BS>,
     {
-        rt.validate_immediate_caller_type(std::iter::once(&Type::Subnet))?;
+        // TODO: handle type check here.
+        rt.validate_immediate_caller_accept_any()?;
+        // rt.validate_immediate_caller_type(std::iter::once(&Type::Subnet))?;
+
         let subnet_addr = rt.message().caller();
 
         let val = rt.message().value_received();
@@ -164,7 +169,7 @@ impl Actor {
                         illegal_argument,
                         "subnet with id {} not registered",
                         shid
-                    ))
+                    ));
                 }
             }
 
@@ -181,16 +186,18 @@ impl Actor {
         RT: Runtime<BS>,
     {
         // TODO: probably a registry for permission check
-        rt.validate_immediate_caller_type(std::iter::once(&Type::Subnet))?;
+        // rt.validate_immediate_caller_type(std::iter::once(&Type::Subnet))?;
+        rt.validate_immediate_caller_accept_any()?;
         let subnet_addr = rt.message().caller();
 
-        if params.value <= TokenAmount::zero() {
+        let send_val = params.value;
+
+        if send_val <= TokenAmount::zero() {
             return Err(actor_error!(
                 illegal_argument,
                 "no funds to release in params"
             ));
         }
-        let send_val = params.value.clone();
 
         rt.transaction(|st: &mut State, rt| {
             let shid = SubnetID::new(&st.network_name, subnet_addr);
@@ -199,24 +206,24 @@ impl Actor {
             })?;
             match sub {
                 Some(mut sub) => {
-                    if sub.stake < params.value {
+                    if sub.stake < send_val {
                         return Err(actor_error!(
                             illegal_state,
                             "subnet actor not allowed to release so many funds"
                         ));
                     }
                     // sanity-check: see if the actor has enough balance.
-                    if rt.current_balance() < params.value{
+                    if rt.current_balance() < send_val {
                         return Err(actor_error!(
                             illegal_state,
                             "something went really wrong! the actor doesn't have enough balance to release"
                         ));
                     }
-                     sub.add_stake(rt, st, &-params.value).map_err(|e| {
-                         e.downcast_default(
-                             ExitCode::USR_ILLEGAL_STATE,
-                             "Failed to add stake to subnet",
-                         )
+                    sub.add_stake(rt, st, &-send_val.clone()).map_err(|e| {
+                        e.downcast_default(
+                            ExitCode::USR_ILLEGAL_STATE,
+                            "Failed to add stake to subnet",
+                        )
                     })?;
                 }
                 None => {
@@ -224,7 +231,7 @@ impl Actor {
                         illegal_argument,
                         "subnet with id {} not registered",
                         shid
-                    ))
+                    ));
                 }
             }
 
@@ -247,7 +254,10 @@ impl Actor {
         BS: Blockstore,
         RT: Runtime<BS>,
     {
-        rt.validate_immediate_caller_type(std::iter::once(&Type::Subnet))?;
+        // TODO: handle type check here.
+        rt.validate_immediate_caller_accept_any()?;
+        // rt.validate_immediate_caller_type(std::iter::once(&Type::Subnet))?;
+
         let subnet_addr = rt.message().caller();
         let mut send_val = TokenAmount::zero();
 
@@ -273,15 +283,15 @@ impl Actor {
                     send_val = sub.stake;
                     // delete subnet
                     st.rm_subnet(rt.store(), &shid).map_err(|e| {
-                e.downcast_default(ExitCode::USR_ILLEGAL_STATE, "failed to load subnet")
-            })?;
+                        e.downcast_default(ExitCode::USR_ILLEGAL_STATE, "failed to load subnet")
+                    })?;
                 }
                 None => {
                     return Err(actor_error!(
                         illegal_argument,
                         "subnet with id {} not registered",
                         shid
-                    ))
+                    ));
                 }
             }
 
@@ -305,7 +315,10 @@ impl Actor {
         BS: Blockstore,
         RT: Runtime<BS>,
     {
-        rt.validate_immediate_caller_type(std::iter::once(&Type::Subnet))?;
+        // TODO: handle type check here.
+        rt.validate_immediate_caller_accept_any()?;
+        // rt.validate_immediate_caller_type(std::iter::once(&Type::Subnet))?;
+
         let subnet_addr = rt.message().caller();
         let commit = params;
 
@@ -404,7 +417,7 @@ impl Actor {
                         illegal_argument,
                         "subnet with id {} not registered",
                         shid
-                    ))
+                    ));
                 }
             }
 
@@ -436,7 +449,10 @@ impl Actor {
     {
         // FIXME: Only supporting cross-messages initiated by signable addresses for
         // now. Consider supporting also send-cross messages initiated by actors.
-        rt.validate_immediate_caller_type(CALLER_TYPES_SIGNABLE.iter())?;
+        // TODO: handle type check here.
+        // rt.validate_immediate_caller_type(CALLER_TYPES_SIGNABLE.iter())?;
+        rt.validate_immediate_caller_accept_any()?;
+
         let value = rt.message().value_received();
         if value <= TokenAmount::zero() {
             return Err(actor_error!(
@@ -480,7 +496,11 @@ impl Actor {
     {
         // FIXME: Only supporting cross-messages initiated by signable addresses for
         // now. Consider supporting also send-cross messages initiated by actors.
-        rt.validate_immediate_caller_type(CALLER_TYPES_SIGNABLE.iter())?;
+
+        // TODO: handle type check here.
+        // rt.validate_immediate_caller_type(CALLER_TYPES_SIGNABLE.iter())?;
+        rt.validate_immediate_caller_accept_any()?;
+
         let value = rt.message().value_received();
         if value <= TokenAmount::zero() {
             return Err(actor_error!(
@@ -536,7 +556,10 @@ impl Actor {
         BS: Blockstore,
         RT: Runtime<BS>,
     {
-        rt.validate_immediate_caller_type(CALLER_TYPES_SIGNABLE.iter())?;
+        // TODO: handle type check here.
+        // rt.validate_immediate_caller_type(CALLER_TYPES_SIGNABLE.iter())?;
+        rt.validate_immediate_caller_accept_any()?;
+
         if params.destination == SubnetID::default() {
             return Err(actor_error!(
                 illegal_argument,
@@ -552,34 +575,36 @@ impl Actor {
 
         rt.transaction(|st: &mut State, rt| {
             if params.destination == st.network_name {
-            return Err(actor_error!(
+                return Err(actor_error!(
                 illegal_argument,
                 "destination is the current network, you are better off with a good ol' message, no cross needed"
             ));
             }
             // we disregard the to of the message. the caller is the one set as the from of the
             // message.
-        msg.to = match Address::new_hierarchical(&params.destination, &msg.to) {
-            Ok(addr) => addr,
-            Err(_) => { return Err(actor_error!(
+            msg.to = match HierarchicalAddress::new_from_hc(&params.destination, &msg.to) {
+                Ok(addr) => addr,
+                Err(_) => {
+                    return Err(actor_error!(
                 illegal_argument,
                 "error setting hierarchical address in cross-msg to param"
             ));
-            }
-        };
-        msg.from = match Address::new_hierarchical(&st.network_name, &sig_addr) {
-            Ok(addr) => addr,
-            Err(_) => { return Err(actor_error!(
+                }
+            };
+            msg.from = match HierarchicalAddress::new(&st.network_name, &sig_addr) {
+                Ok(addr) => addr,
+                Err(_) => {
+                    return Err(actor_error!(
                 illegal_argument,
                 "error setting hierarchical address in cross-msg from param"
             ));
-            }
-        };
-        tp = st.send_cross(rt.store(), &mut msg, rt.curr_epoch()).map_err(|e| {
+                }
+            };
+            tp = st.send_cross(rt.store(), &mut msg, rt.curr_epoch()).map_err(|e| {
                 e.downcast_default(ExitCode::USR_ILLEGAL_STATE, "error committing cross message")
             })?;
 
-        Ok(())
+            Ok(())
         })?;
 
         if tp == HCMsgType::BottomUp && msg.value > TokenAmount::zero() {
@@ -606,20 +631,22 @@ impl Actor {
         BS: Blockstore,
         RT: Runtime<BS>,
     {
-        rt.validate_immediate_caller_is(std::iter::once(&*SYSTEM_ACTOR_ADDR))?;
+        // TODO: handle type check here.
+        rt.validate_immediate_caller_accept_any()?;
+        // rt.validate_immediate_caller_is(std::iter::once(&*SYSTEM_ACTOR_ADDR))?;
 
         // FIXME: We just need the state to check the current network name, but we are
         // picking up the whole state. Is it more efficient in terms of performance and
         // gas usage to check how to apply the message (b-u or t-p) inside rt.transaction?
         let st: State = rt.state()?;
-        let mut msg = params.clone();
+        let mut msg = params;
         let rto = match msg.to.raw_addr() {
             Ok(to) => to,
             Err(_) => {
                 return Err(actor_error!(
                     illegal_argument,
                     "error getting raw address from msg"
-                ))
+                ));
             }
         };
         let sto = match msg.to.subnet() {
@@ -628,7 +655,7 @@ impl Actor {
                 return Err(actor_error!(
                     illegal_argument,
                     "error getting subnet from msg"
-                ))
+                ));
             }
         };
         match msg.apply_type(&st.network_name) {
@@ -719,7 +746,9 @@ impl Actor {
         BS: Blockstore,
         RT: Runtime<BS>,
     {
-        rt.validate_immediate_caller_type(CALLER_TYPES_SIGNABLE.iter())?;
+        // TODO: handle type check here.
+        // rt.validate_immediate_caller_type(CALLER_TYPES_SIGNABLE.iter())?;
+        rt.validate_immediate_caller_accept_any()?;
 
         // get cid for atomic execution
         let cid = params.cid().map_err(|e| {
@@ -738,68 +767,68 @@ impl Actor {
         })?;
 
         rt.transaction(|st: &mut State, rt| {
-        match st.get_atomic_exec(rt.store(), &cid.into()).map_err(|e| {
-            e.downcast_default(
-                ExitCode::USR_ILLEGAL_ARGUMENT,
-                "error translating execution input addresses to IDs",
-            )
-        })? {
-            Some(_) => {
-                return Err(actor_error!(
+            match st.get_atomic_exec(rt.store(), &cid.into()).map_err(|e| {
+                e.downcast_default(
+                    ExitCode::USR_ILLEGAL_ARGUMENT,
+                    "error translating execution input addresses to IDs",
+                )
+            })? {
+                Some(_) => {
+                    return Err(actor_error!(
                     illegal_argument,
                     format!("execution with cid {} already exists", &cid)
                 ));
-            }
-            None => {
-                // check if exec has correct number of inputs and messages.
-                if params.msgs.len() == 0 || params.inputs.len() < 2 {
-                    return Err(actor_error!(
+                }
+                None => {
+                    // check if exec has correct number of inputs and messages.
+                    if params.msgs.is_empty() || params.inputs.len() < 2 {
+                        return Err(actor_error!(
                         illegal_argument,
                         "wrong number of messages or inputs provided for execution"
                     ));
-                }
-                // check if we are the common parent and entitle to execute the system.
-                if !is_common_parent(&st.network_name, &params.inputs).map_err(|e| {
+                    }
+                    // check if we are the common parent and entitle to execute the system.
+                    if !is_common_parent(&st.network_name, &params.inputs).map_err(|e| {
                         e.downcast_default(
                             ExitCode::USR_ILLEGAL_ARGUMENT,
                             "computing common parent for the execution",
                         )
                     })?
-                {
-                    return Err(actor_error!(
+                    {
+                        return Err(actor_error!(
                         illegal_argument,
                         "can't initialize atomic execution if we are not the common parent"
                     ));
-                }
+                    }
 
-                // TODO: check if the atomic execution is initiated in the same address for different
-                // subnets? (that would be kind of stupid -.-)
+                    // TODO: check if the atomic execution is initiated in the same address for different
+                    // subnets? (that would be kind of stupid -.-)
 
-                // sanity-check: verify that all messages have same method and are directed to the same actor
-                // NOTE: This can probably be relaxed in the future
-                let method = params.msgs[0].method;
-                let to = params.msgs[0].to;
-                for m in params.msgs.iter(){
-                    if m.method != method || m.to != to {
-                        return Err(actor_error!(
+                    // sanity-check: verify that all messages have same method and are directed to the same actor
+                    // NOTE: This can probably be relaxed in the future
+                    let method = params.msgs[0].method;
+                    let to = params.msgs[0].to.clone();
+                    for m in params.msgs.iter() {
+                        if m.method != method || m.to != to {
+                            return Err(actor_error!(
                             illegal_argument,
                             "atomic exec doesn't support execution for messages with different methods and to different actors"
                         ));
+                        }
                     }
-                }
 
-                // store the new initialized execution
-                st.set_atomic_exec(rt.store(), &cid.into(), AtomicExec::new(params)).map_err(|e| {
-                    e.downcast_default(
-                        ExitCode::USR_ILLEGAL_STATE,
-                        "error putting initialized atomic execution in registry",
-                    )
-                })?
-;
-            }
-        };
-        Ok(())
-    })?;
+                    // store the new initialized execution
+                    st.set_atomic_exec(rt.store(), &cid.into(), AtomicExec::new(params)).map_err(|e| {
+                        e.downcast_default(
+                            ExitCode::USR_ILLEGAL_STATE,
+                            "error putting initialized atomic execution in registry",
+                        )
+                    })?
+                    ;
+                }
+            };
+            Ok(())
+        })?;
 
         // return cid for the execution
         Ok(LockedOutput { cid })
@@ -815,11 +844,11 @@ impl Actor {
         BS: Blockstore,
         RT: Runtime<BS>,
     {
-        rt.validate_immediate_caller_type(CALLER_TYPES_SIGNABLE.iter())?;
+        // TODO: handle type check here.
+        // rt.validate_immediate_caller_type(CALLER_TYPES_SIGNABLE.iter())?;
+        rt.validate_immediate_caller_accept_any()?;
 
-        let caller = TAddress::try_from(rt.message().caller()).map_err(|_| {
-            actor_error!(illegal_argument, "error translating caller address to ID")
-        })?;
+        let caller = rt.message().caller();
 
         let status = rt.transaction(|st: &mut State, rt| {
             let cid = params.cid;
@@ -830,12 +859,10 @@ impl Actor {
                     "error translating execution input addresses to IDs",
                 )
             })? {
-                None => {
-                    return Err(actor_error!(
-                        illegal_argument,
-                        format!("execution with cid {} no longer exist", &cid)
-                    ));
-                }
+                None => Err(actor_error!(
+                    illegal_argument,
+                    format!("execution with cid {} no longer exist", &cid)
+                )),
                 Some(mut exec) => {
                     // check if the output is aborted or already succeeded
                     if exec.status() != ExecStatus::Initialized {
@@ -861,14 +888,11 @@ impl Actor {
                     // check if the address already submitted an output
                     // FIXME: At this point we don't support the atomic execution between
                     // the same address in different subnets. This can be easily supported if needed.
-                    match exec.submitted().get(&caller.addr().to_string()) {
-                        Some(_) => {
-                            return Err(actor_error!(
-                                illegal_argument,
-                                format!("caller for exec {} already submitted their output", &cid)
-                            ));
-                        }
-                        None => {}
+                    if exec.submitted().get(&caller.to_string()).is_some() {
+                        return Err(actor_error!(
+                            illegal_argument,
+                            format!("caller for exec {} already submitted their output", &cid)
+                        ));
                     };
 
                     // check if this is an abort
@@ -903,8 +927,7 @@ impl Actor {
                             format!("cid provided not equal to the ones submitted: {}", &cid)
                         ));
                     }
-                    exec.submitted_mut()
-                        .insert(caller.addr().to_string(), output_cid);
+                    exec.submitted_mut().insert(caller.to_string(), output_cid);
                     // if all submissions collected
                     if exec.submitted().len() == exec.params().inputs.len() {
                         exec.set_status(ExecStatus::Success);

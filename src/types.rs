@@ -1,13 +1,11 @@
-use std::marker::PhantomData;
 use fil_actors_runtime::Array;
-use fvm_shared::address::{Address, Network, NETWORK_DEFAULT};
-use fvm_shared::bigint::bigint_ser;
+use fvm_ipld_encoding::tuple::{Deserialize_tuple, Serialize_tuple};
 use fvm_shared::clock::ChainEpoch;
 use fvm_shared::econ::TokenAmount;
 use serde::{Deserialize, Serialize};
+use std::marker::PhantomData;
 
 use crate::checkpoint::{Checkpoint, CrossMsgMeta};
-use crate::error::Error;
 use crate::subnet_id::SubnetID;
 use crate::StorableMsg;
 
@@ -19,7 +17,7 @@ pub const MIN_COLLATERAL_AMOUNT: u64 = 10_u64.pow(18);
 pub type CrossMsgMetaArray<'bs, BS> = Array<'bs, CrossMsgMeta, BS>;
 pub type CrossMsgArray<'bs, BS> = Array<'bs, StorableMsg, BS>;
 
-#[derive(Serialize, Deserialize)]
+#[derive(Serialize_tuple, Deserialize_tuple)]
 pub struct ConstructorParams {
     pub network_name: String,
     pub checkpoint_period: ChainEpoch,
@@ -27,16 +25,16 @@ pub struct ConstructorParams {
 
 #[derive(Serialize, Deserialize, Clone)]
 pub struct FundParams {
-    #[serde(with = "bigint_ser")]
+    // #[serde(with = "bigint_ser")]
     pub value: TokenAmount,
 }
 
-#[derive(Debug, Serialize, Deserialize)]
+#[derive(Debug, Serialize_tuple, Deserialize_tuple)]
 pub struct CheckpointParams {
     pub checkpoint: Checkpoint,
 }
 
-#[derive(Serialize, Deserialize, Clone)]
+#[derive(Serialize_tuple, Deserialize_tuple, Clone)]
 pub struct CrossMsgParams {
     pub msg: StorableMsg,
     pub destination: SubnetID,

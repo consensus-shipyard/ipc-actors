@@ -3,7 +3,6 @@ use cid::multihash::Code;
 use cid::multihash::MultihashDigest;
 use cid::Cid;
 use fvm_ipld_encoding::{serde_bytes, to_vec, Cbor};
-use fvm_shared::bigint::bigint_ser;
 use fvm_shared::clock::ChainEpoch;
 use fvm_shared::econ::TokenAmount;
 use primitives::{TCid, TLink};
@@ -163,7 +162,7 @@ pub struct CrossMsgMeta {
     pub to: SubnetID,
     pub msgs_cid: TCid<TLink<CrossMsgs>>,
     pub nonce: u64,
-    #[serde(with = "bigint_ser")]
+    // #[serde(with = "bigint_ser")]
     pub value: TokenAmount,
 }
 impl Cbor for CrossMsgMeta {}

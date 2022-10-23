@@ -4,7 +4,6 @@ pub mod account {
 
 pub mod reward {
     use fvm_shared::address::Address;
-    use fvm_shared::bigint::bigint_ser;
     use fvm_shared::econ::TokenAmount;
     use serde::{Deserialize, Serialize};
 
@@ -12,7 +11,6 @@ pub mod reward {
 
     #[derive(Serialize, Deserialize, Clone)]
     pub struct FundingParams {
-        #[serde(with = "bigint_ser")]
         pub value: TokenAmount,
         pub addr: Address,
     }

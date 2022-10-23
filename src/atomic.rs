@@ -2,18 +2,20 @@ use cid::multihash::Code::Blake2b256;
 use cid::multihash::MultihashDigest;
 use cid::Cid;
 use fil_actors_runtime::cbor;
+use fvm_ipld_encoding::tuple::Deserialize_tuple;
 use fvm_ipld_encoding::{serde_bytes, Cbor, RawBytes, DAG_CBOR};
 use fvm_shared::MethodNum;
 use primitives::{TCid, THamt};
-use serde::{Serialize, de::DeserializeOwned};
-use fvm_ipld_encoding::tuple::Deserialize_tuple;
+use serde::{de::DeserializeOwned, Serialize};
 
 /// MethodNum to lock some state in an actor
 /// This methods are only supported in actors
 /// that support atomic executions.
+#[allow(dead_code)]
 pub const METHOD_LOCK: MethodNum = 2;
 /// MethodNum used to trigger the merge of an input with
 /// other input locked states.
+#[allow(dead_code)]
 pub const METHOD_MERGE: MethodNum = 3;
 /// MethodNum called to signal the abortion of an atomic execution
 /// and the unlock of all locked states in the actor for the execution
@@ -37,6 +39,7 @@ pub trait MergeableState<S: Serialize + DeserializeOwned> {
 
 /// Internal map kept by actor supporting atomic executions to track
 /// the states that have been locked and are used in an atomic exec.
+#[allow(dead_code)]
 pub type LockedMap<T> = TCid<THamt<Cid, LockableState<T>>>;
 
 /// Trait that specifies the interface of an actor state able to support
@@ -57,6 +60,7 @@ where
 ///
 /// It returns an option for developers to optionally choose if
 /// to return an output in the function.
+#[allow(dead_code)]
 type ActorResult = anyhow::Result<Option<RawBytes>>;
 
 /// Trait for an actor able to support an atomic execution.
@@ -148,6 +152,8 @@ impl UnlockParams {
     pub fn new(params: LockParams, state: SerializedState) -> Self {
         UnlockParams { params, state }
     }
+
+    #[allow(dead_code)]
     pub fn from_raw_bytes(ser: &RawBytes) -> anyhow::Result<Self> {
         Ok(cbor::deserialize_params(ser)?)
     }

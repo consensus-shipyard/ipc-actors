@@ -1,3 +1,4 @@
+use crate::address::HierarchicalAddress;
 use anyhow::anyhow;
 use cid::Cid;
 use fil_actors_runtime::BURNT_FUNDS_ACTOR_ADDR;
@@ -6,14 +7,12 @@ use fvm_ipld_blockstore::MemoryBlockstore;
 use fvm_ipld_encoding::Cbor;
 use fvm_ipld_encoding::RawBytes;
 use fvm_shared::address::Address;
-use fvm_shared::bigint::bigint_ser;
 use fvm_shared::econ::TokenAmount;
 use fvm_shared::MethodNum;
 use fvm_shared::METHOD_SEND;
 use primitives::{TAmt, TCid, TLink};
 use serde::{Deserialize, Serialize};
 use std::path::Path;
-use crate::address::HierarchicalAddress;
 
 use crate::checkpoint::CrossMsgMeta;
 use crate::SubnetID;
@@ -31,7 +30,7 @@ pub struct StorableMsg {
     pub to: HierarchicalAddress,
     pub method: MethodNum,
     pub params: RawBytes,
-    #[serde(with = "bigint_ser")]
+    // #[serde(with = "bigint_ser")]
     pub value: TokenAmount,
     pub nonce: u64,
 }
@@ -44,7 +43,7 @@ impl Default for StorableMsg {
             to: HierarchicalAddress::new_id(0),
             method: 0,
             params: RawBytes::default(),
-            value: TokenAmount::from(0),
+            value: TokenAmount::default(),
             nonce: 0,
         }
     }
@@ -64,14 +63,14 @@ impl StorableMsg {
         value: TokenAmount,
         nonce: u64,
     ) -> anyhow::Result<Self> {
-        let to = Address::new_hierarchical(
+        let to = HierarchicalAddress::new(
             &match sub_id.parent() {
                 Some(s) => s,
                 None => return Err(anyhow!("error getting parent for subnet addr")),
             },
             sig_addr,
         )?;
-        let from = Address::new_hierarchical(sub_id, &BURNT_FUNDS_ACTOR_ADDR)?;
+        let from = HierarchicalAddress::new(sub_id, &BURNT_FUNDS_ACTOR_ADDR)?;
         Ok(Self {
             from,
             to,
@@ -87,14 +86,14 @@ impl StorableMsg {
         sig_addr: &Address,
         value: TokenAmount,
     ) -> anyhow::Result<Self> {
-        let from = Address::new_hierarchical(
+        let from = HierarchicalAddress::new(
             &match sub_id.parent() {
                 Some(s) => s,
                 None => return Err(anyhow!("error getting parent for subnet addr")),
             },
             sig_addr,
         )?;
-        let to = Address::new_hierarchical(sub_id, sig_addr)?;
+        let to = HierarchicalAddress::new(sub_id, sig_addr)?;
         // the nonce and the rest of message fields are set when the message is committed.
         Ok(Self {
             from,
@@ -127,7 +126,7 @@ impl StorableMsg {
 }
 
 pub fn is_bottomup(from: &SubnetID, to: &SubnetID) -> bool {
-    let index = match from.common_parent(&to) {
+    let index = match from.common_parent(to) {
         Some((ind, _)) => ind,
         None => return false,
     };
