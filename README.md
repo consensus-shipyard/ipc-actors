@@ -1,4 +1,5 @@
 # hierarchical_sca
-Hierarchical Consensus SCA user defined actor implementation
+Hierarchical Consensus SCA user defined actor implementation. Originally it is implemented 
+as a build-in actor, but now it is user defined. 
 
-CURRENTLY THIS REPO IS IN MIGRATION, IT WILL NOT COMPILE
+See `https://github.com/consensus-shipyard/builtin-actors/tree/master/actors/hierarchical_sca` for more info.
