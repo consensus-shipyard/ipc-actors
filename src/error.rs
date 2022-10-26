@@ -6,8 +6,8 @@ pub enum Error {
     InvalidPayload,
     #[error("invalid subnet id")]
     InvalidID,
-    #[error("invalid hierarchical address")]
-    InvalidHierarchicalAddr,
+    #[error("invalid IPC address")]
+    InvalidIPCAddr,
     #[error("fvm shared address error")]
     FVMAddressError(fvm_shared::address::Error),
     #[error("unsigned variant decode error")]

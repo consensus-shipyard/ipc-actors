@@ -21,7 +21,7 @@ use std::str::FromStr;
 
 use crate::exec::{AtomicExec, AtomicExecParams, AtomicExecParamsMeta};
 use crate::subnet_id::SubnetID;
-use crate::{atomic, HierarchicalAddress};
+use crate::{atomic, IPCAddress};
 
 use super::checkpoint::*;
 use super::cross::*;
@@ -33,7 +33,6 @@ use super::types::*;
 pub struct State {
     pub network_name: SubnetID,
     pub total_subnets: u64,
-    // #[serde(with = "bigint_ser")]
     pub min_stake: TokenAmount,
     pub subnets: TCid<THamt<Cid, Subnet>>,
     pub check_period: ChainEpoch,
@@ -449,11 +448,11 @@ impl State {
         store: &BS,
         msg: &mut StorableMsg,
         curr_epoch: ChainEpoch,
-    ) -> anyhow::Result<HCMsgType> {
-        let tp = msg.hc_type()?;
+    ) -> anyhow::Result<IPCMsgType> {
+        let tp = msg.ipc_type()?;
         match tp {
-            HCMsgType::TopDown => self.commit_topdown_msg(store, msg)?,
-            HCMsgType::BottomUp => self.commit_bottomup_msg(store, msg, curr_epoch)?,
+            IPCMsgType::TopDown => self.commit_topdown_msg(store, msg)?,
+            IPCMsgType::BottomUp => self.commit_bottomup_msg(store, msg, curr_epoch)?,
             _ => return Err(anyhow!("cross-msg is not of the right type")),
         };
         Ok(tp)
@@ -569,8 +568,8 @@ impl State {
     ) -> anyhow::Result<StorableMsg> {
         // to signal that is a system message we use system_actor_addr as source.
         // TODO: do we expect SYSTEM_ACTOR_ADDR still?
-        let from = HierarchicalAddress::new(&self.network_name, &SYSTEM_ACTOR_ADDR)?;
-        let to = HierarchicalAddress::new(subnet, actor)?;
+        let from = IPCAddress::new(&self.network_name, &SYSTEM_ACTOR_ADDR)?;
+        let to = IPCAddress::new(subnet, actor)?;
         let lock_params = atomic::LockParams::new(msg.method, msg.clone().params);
         if abort {
             let method = atomic::METHOD_ABORT;

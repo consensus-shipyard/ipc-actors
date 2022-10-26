@@ -24,11 +24,9 @@ pub enum Status {
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq)]
 pub struct Subnet {
     pub id: SubnetID,
-    // #[serde(with = "bigint_ser")]
     pub stake: TokenAmount,
     pub top_down_msgs: TCid<TAmt<StorableMsg, CROSSMSG_AMT_BITWIDTH>>,
     pub nonce: u64,
-    // #[serde(with = "bigint_ser")]
     pub circ_supply: TokenAmount,
     pub status: Status,
     pub prev_checkpoint: Option<Checkpoint>,

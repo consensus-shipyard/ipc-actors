@@ -1,4 +1,4 @@
-use crate::address::HierarchicalAddress;
+use crate::address::IPCAddress;
 use cid::Cid;
 use exec::{
     is_addr_in_exec, is_common_parent, AtomicExec, AtomicExecParamsRaw, ExecStatus, LockedOutput,
@@ -23,7 +23,7 @@ use num_traits::FromPrimitive;
 use std::collections::HashMap;
 
 pub use self::checkpoint::{Checkpoint, CrossMsgMeta};
-pub use self::cross::{is_bottomup, CrossMsgs, HCMsgType, StorableMsg};
+pub use self::cross::{is_bottomup, CrossMsgs, IPCMsgType, StorableMsg};
 pub use self::state::*;
 pub use self::subnet::*;
 pub use self::types::*;
@@ -549,7 +549,7 @@ impl Actor {
     /// before being propagated to the corresponding subnet.
     /// The circulating supply in each subnet needs to be updated as the message passes through them.
     ///
-    /// Params expect a raw message without any subnet context (the hierarchical address is
+    /// Params expect a raw message without any subnet context (the IPC address is
     /// included in the message by the actor).
     fn send_cross<BS, RT>(rt: &mut RT, params: CrossMsgParams) -> Result<(), ActorError>
     where
@@ -567,7 +567,7 @@ impl Actor {
             ));
         }
         let mut msg = params.msg.clone();
-        let mut tp = HCMsgType::Unknown;
+        let mut tp = IPCMsgType::Unknown;
 
         // FIXME: Only supporting cross-messages initiated by signable addresses for
         // now. Consider supporting also send-cross messages initiated by actors.
@@ -582,21 +582,21 @@ impl Actor {
             }
             // we disregard the to of the message. the caller is the one set as the from of the
             // message.
-            msg.to = match HierarchicalAddress::new_from_hc(&params.destination, &msg.to) {
+            msg.to = match IPCAddress::new_from_ipc(&params.destination, &msg.to) {
                 Ok(addr) => addr,
                 Err(_) => {
                     return Err(actor_error!(
                 illegal_argument,
-                "error setting hierarchical address in cross-msg to param"
+                "error setting IPC address in cross-msg to param"
             ));
                 }
             };
-            msg.from = match HierarchicalAddress::new(&st.network_name, &sig_addr) {
+            msg.from = match IPCAddress::new(&st.network_name, &sig_addr) {
                 Ok(addr) => addr,
                 Err(_) => {
                     return Err(actor_error!(
                 illegal_argument,
-                "error setting hierarchical address in cross-msg from param"
+                "error setting IPC address in cross-msg from param"
             ));
                 }
             };
@@ -607,7 +607,7 @@ impl Actor {
             Ok(())
         })?;
 
-        if tp == HCMsgType::BottomUp && msg.value > TokenAmount::zero() {
+        if tp == IPCMsgType::BottomUp && msg.value > TokenAmount::zero() {
             rt.send(
                 *BURNT_FUNDS_ACTOR_ADDR,
                 METHOD_SEND,
@@ -659,7 +659,7 @@ impl Actor {
             }
         };
         match msg.apply_type(&st.network_name) {
-            Ok(HCMsgType::BottomUp) => {
+            Ok(IPCMsgType::BottomUp) => {
                 // perform state transition
                 rt.transaction(|st: &mut State, rt| {
                     st.bottomup_state_transition(&msg).map_err(|e| {
@@ -684,7 +684,7 @@ impl Actor {
                     let _ = rt.send(rto, msg.method, msg.params, msg.value)?;
                 }
             }
-            Ok(HCMsgType::TopDown) => {
+            Ok(IPCMsgType::TopDown) => {
                 // Mint funds for SCA so it can direct them accordingly as part of the message.
                 let params = ext::reward::FundingParams {
                     addr: *SCA_ACTOR_ADDR,

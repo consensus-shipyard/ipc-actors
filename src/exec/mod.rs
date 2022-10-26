@@ -4,11 +4,11 @@ use fil_actors_runtime::{runtime::Runtime, ActorDowncast};
 use fvm_ipld_blockstore::{Blockstore, MemoryBlockstore};
 use fvm_ipld_encoding::Cbor;
 use fvm_shared::address::Address;
-use primitives::{TAddressKey, TAmt, TCid, THamt, TLink, ID};
+use primitives::{TAmt, TCid, THamt, TLink};
 use serde::{Deserialize, Serialize};
 use std::{collections::HashMap, str::FromStr};
 
-use crate::{atomic, Hierarchical, HierarchicalAddress, StorableMsg, SubnetID};
+use crate::{atomic, IPCAddress, StorableMsg, SubnetID};
 
 /// Status of an atomic execution
 #[derive(PartialEq, Eq, Clone, Copy, Debug, Deserialize, Serialize)]
@@ -42,9 +42,6 @@ impl Cbor for AtomicExec {}
 /// in order to be able to use addresses as keys of a hashmap
 /// we use their string format (thus this type).
 type StringifiedAddr = String;
-
-/// A hierarchical address resolved to an ID.
-pub type HierarchicalId = TAddressKey<Hierarchical<ID>>;
 
 impl AtomicExec {
     pub fn new(params: AtomicExecParams) -> Self {
@@ -101,7 +98,7 @@ impl Cbor for AtomicExecParamsRaw {}
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub struct AtomicExecParams {
     pub msgs: Vec<StorableMsg>,
-    pub inputs: HashMap<HierarchicalAddress, LockedStateInfo>,
+    pub inputs: HashMap<IPCAddress, LockedStateInfo>,
 }
 
 /// Output of the initialization of an atomic execution.
@@ -159,7 +156,7 @@ impl AtomicExecParamsRaw {
     {
         let mut out = HashMap::new();
         for (key, val) in self.inputs.into_iter() {
-            let addr = HierarchicalAddress::from_str(&key)?;
+            let addr = IPCAddress::from_str(&key)?;
             let sn = addr.subnet()?;
             let addr = addr.raw_addr()?;
             let id_addr = match rt.resolve_address(&addr) {
@@ -167,7 +164,7 @@ impl AtomicExecParamsRaw {
                 None => return Err(anyhow!("couldn't resolve id address in exec input")),
             };
             // Update with id_addr and subnet
-            let sn_addr = HierarchicalAddress::new(&sn, &id_addr)?;
+            let sn_addr = IPCAddress::new(&sn, &id_addr)?;
             out.insert(sn_addr, val);
         }
         Ok(AtomicExecParams {
@@ -206,7 +203,7 @@ impl AtomicExecParamsRaw {
 /// Computes the common parent for the inputs of the atomic execution.
 pub fn is_common_parent(
     curr: &SubnetID,
-    inputs: &HashMap<HierarchicalAddress, LockedStateInfo>,
+    inputs: &HashMap<IPCAddress, LockedStateInfo>,
 ) -> anyhow::Result<bool> {
     if inputs.is_empty() {
         return Err(anyhow!("wrong length! no inputs in hashmap"));
@@ -229,7 +226,7 @@ pub fn is_common_parent(
 /// Check if the address is involved in the execution
 pub fn is_addr_in_exec(
     caller: &Address,
-    inputs: &HashMap<HierarchicalAddress, LockedStateInfo>,
+    inputs: &HashMap<IPCAddress, LockedStateInfo>,
 ) -> anyhow::Result<bool> {
     let ks: Vec<_> = inputs.clone().into_keys().collect();
 

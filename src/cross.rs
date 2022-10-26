@@ -1,4 +1,4 @@
-use crate::address::HierarchicalAddress;
+use crate::address::IPCAddress;
 use anyhow::anyhow;
 use cid::Cid;
 use fil_actors_runtime::BURNT_FUNDS_ACTOR_ADDR;
@@ -26,11 +26,10 @@ use crate::SubnetID;
 /// corresponding node implementation.
 #[derive(PartialEq, Eq, Clone, Debug, Serialize, Deserialize)]
 pub struct StorableMsg {
-    pub from: HierarchicalAddress,
-    pub to: HierarchicalAddress,
+    pub from: IPCAddress,
+    pub to: IPCAddress,
     pub method: MethodNum,
     pub params: RawBytes,
-    // #[serde(with = "bigint_ser")]
     pub value: TokenAmount,
     pub nonce: u64,
 }
@@ -39,8 +38,8 @@ impl Cbor for StorableMsg {}
 impl Default for StorableMsg {
     fn default() -> Self {
         Self {
-            from: HierarchicalAddress::new_id(0),
-            to: HierarchicalAddress::new_id(0),
+            from: IPCAddress::new_id(0),
+            to: IPCAddress::new_id(0),
             method: 0,
             params: RawBytes::default(),
             value: TokenAmount::default(),
@@ -50,7 +49,7 @@ impl Default for StorableMsg {
 }
 
 #[derive(PartialEq, Eq)]
-pub enum HCMsgType {
+pub enum IPCMsgType {
     Unknown = 0,
     BottomUp,
     TopDown,
@@ -63,14 +62,14 @@ impl StorableMsg {
         value: TokenAmount,
         nonce: u64,
     ) -> anyhow::Result<Self> {
-        let to = HierarchicalAddress::new(
+        let to = IPCAddress::new(
             &match sub_id.parent() {
                 Some(s) => s,
                 None => return Err(anyhow!("error getting parent for subnet addr")),
             },
             sig_addr,
         )?;
-        let from = HierarchicalAddress::new(sub_id, &BURNT_FUNDS_ACTOR_ADDR)?;
+        let from = IPCAddress::new(sub_id, &BURNT_FUNDS_ACTOR_ADDR)?;
         Ok(Self {
             from,
             to,
@@ -86,14 +85,14 @@ impl StorableMsg {
         sig_addr: &Address,
         value: TokenAmount,
     ) -> anyhow::Result<Self> {
-        let from = HierarchicalAddress::new(
+        let from = IPCAddress::new(
             &match sub_id.parent() {
                 Some(s) => s,
                 None => return Err(anyhow!("error getting parent for subnet addr")),
             },
             sig_addr,
         )?;
-        let to = HierarchicalAddress::new(sub_id, sig_addr)?;
+        let to = IPCAddress::new(sub_id, sig_addr)?;
         // the nonce and the rest of message fields are set when the message is committed.
         Ok(Self {
             from,
@@ -104,24 +103,24 @@ impl StorableMsg {
         })
     }
 
-    pub fn hc_type(&self) -> anyhow::Result<HCMsgType> {
+    pub fn ipc_type(&self) -> anyhow::Result<IPCMsgType> {
         let sto = self.to.subnet()?;
         let sfrom = self.from.subnet()?;
         if is_bottomup(&sfrom, &sto) {
-            return Ok(HCMsgType::BottomUp);
+            return Ok(IPCMsgType::BottomUp);
         }
-        Ok(HCMsgType::TopDown)
+        Ok(IPCMsgType::TopDown)
     }
 
-    pub fn apply_type(&self, curr: &SubnetID) -> anyhow::Result<HCMsgType> {
+    pub fn apply_type(&self, curr: &SubnetID) -> anyhow::Result<IPCMsgType> {
         let sto = self.to.subnet()?;
         let sfrom = self.from.subnet()?;
         if curr.common_parent(&sto) == sfrom.common_parent(&sto)
-            && self.hc_type()? == HCMsgType::BottomUp
+            && self.ipc_type()? == IPCMsgType::BottomUp
         {
-            return Ok(HCMsgType::BottomUp);
+            return Ok(IPCMsgType::BottomUp);
         }
-        Ok(HCMsgType::TopDown)
+        Ok(IPCMsgType::TopDown)
     }
 }
 

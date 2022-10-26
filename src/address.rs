@@ -9,26 +9,26 @@ use std::fmt::Formatter;
 use std::str::FromStr;
 
 /// Maximum length for an address payload determined by
-/// the maximum size of the hierarchical address.
+/// the maximum size of the IPC address.
 const MAX_ADDRESS_LEN: usize = 54;
 
-// The default actor id namespace for HC addresses
+// The default actor id namespace for IPC addresses
 lazy_static! {
-    pub static ref DEFAULT_HC_ACTOR_NAMESPACE_ID: ActorID = 1000u64;
+    pub static ref DEFAULT_IPC_ACTOR_NAMESPACE_ID: ActorID = 1000u64;
 }
 
 #[derive(Clone, PartialEq, Eq, Debug, Hash, Serialize, Deserialize)]
-pub struct HierarchicalAddress {
+pub struct IPCAddress {
     inner: Address,
 }
 
-impl fmt::Display for HierarchicalAddress {
+impl fmt::Display for IPCAddress {
     fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result {
         self.inner.fmt(f)
     }
 }
 
-impl HierarchicalAddress {
+impl IPCAddress {
     /// Generates new address using ID protocol
     pub const fn new_id(id: u64) -> Self {
         Self {
@@ -36,7 +36,7 @@ impl HierarchicalAddress {
         }
     }
 
-    /// Generates new hierarchical address
+    /// Generates new IPC address
     pub fn new(sn: &SubnetID, addr: &Address) -> Result<Self, Error> {
         let sn = sn.to_bytes();
         let addr = addr.to_bytes();
@@ -49,14 +49,14 @@ impl HierarchicalAddress {
         let mut key = [0u8; MAX_ADDRESS_LEN];
         key[..sp.len()].copy_from_slice(sp.as_slice());
         Ok(Self {
-            inner: Address::new_delegated(*DEFAULT_HC_ACTOR_NAMESPACE_ID, &key)?,
+            inner: Address::new_delegated(*DEFAULT_IPC_ACTOR_NAMESPACE_ID, &key)?,
         })
     }
 
-    /// Generates new hierarchical address
-    pub fn new_from_hc(sn: &SubnetID, addr: &Self) -> Result<Self, Error> {
+    /// Generates new IPC address
+    pub fn new_from_ipc(sn: &SubnetID, addr: &Self) -> Result<Self, Error> {
         let sn = sn.to_bytes();
-        let addr = addr.clone().to_bytes();
+        let addr = addr.to_bytes();
         let sn_size_vec = to_leb_bytes(sn.len() as u64)?;
         let sn_size: &[u8] = sn_size_vec.as_ref();
         let addr_size_vec = to_leb_bytes(addr.len() as u64)?;
@@ -66,20 +66,20 @@ impl HierarchicalAddress {
         let mut key = [0u8; MAX_ADDRESS_LEN];
         key[..sp.len()].copy_from_slice(sp.as_slice());
         Ok(Self {
-            inner: Address::new_delegated(*DEFAULT_HC_ACTOR_NAMESPACE_ID, &key)?,
+            inner: Address::new_delegated(*DEFAULT_IPC_ACTOR_NAMESPACE_ID, &key)?,
         })
     }
 
-    /// Returns subnets of a hierarchical address
+    /// Returns subnets of a IPC address
     pub fn subnet(&self) -> Result<SubnetID, Error> {
         let bz = self.inner.payload().to_raw_bytes();
         let sn_size = from_leb_bytes(&[bz[0]]).unwrap() as usize;
-        let s = String::from_utf8(bz[2..sn_size + 2].to_vec())
-            .map_err(|_| Error::InvalidHierarchicalAddr)?;
-        SubnetID::from_str(&s).map_err(|_| Error::InvalidHierarchicalAddr)
+        let s =
+            String::from_utf8(bz[2..sn_size + 2].to_vec()).map_err(|_| Error::InvalidIPCAddr)?;
+        SubnetID::from_str(&s).map_err(|_| Error::InvalidIPCAddr)
     }
 
-    /// Returns the raw address of a hierarchical address (without subnet context)
+    /// Returns the raw address of a IPC address (without subnet context)
     pub fn raw_addr(&self) -> Result<Address, Error> {
         let bz = self.inner.payload().to_raw_bytes();
         let sn_size = from_leb_bytes(&[bz[0]]).unwrap() as usize;
@@ -87,9 +87,7 @@ impl HierarchicalAddress {
     }
 
     /// Returns encoded bytes of Address
-    /// TODO: @adlrocha, should we change this to &self?
-    #[allow(clippy::wrong_self_convention)]
-    pub fn to_bytes(self) -> Vec<u8> {
+    pub fn to_bytes(&self) -> Vec<u8> {
         self.inner.to_bytes()
     }
 }
@@ -108,7 +106,7 @@ pub(crate) fn from_leb_bytes(bz: &[u8]) -> Result<u64, Error> {
     Ok(id)
 }
 
-impl FromStr for HierarchicalAddress {
+impl FromStr for IPCAddress {
     type Err = Error;
 
     fn from_str(addr: &str) -> Result<Self, Error> {

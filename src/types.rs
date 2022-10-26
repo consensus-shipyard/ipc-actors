@@ -3,7 +3,6 @@ use fvm_ipld_encoding::tuple::{Deserialize_tuple, Serialize_tuple};
 use fvm_shared::clock::ChainEpoch;
 use fvm_shared::econ::TokenAmount;
 use serde::{Deserialize, Serialize};
-use std::marker::PhantomData;
 
 use crate::checkpoint::{Checkpoint, CrossMsgMeta};
 use crate::subnet_id::SubnetID;
@@ -25,7 +24,6 @@ pub struct ConstructorParams {
 
 #[derive(Serialize, Deserialize, Clone)]
 pub struct FundParams {
-    // #[serde(with = "bigint_ser")]
     pub value: TokenAmount,
 }
 
@@ -38,10 +36,4 @@ pub struct CheckpointParams {
 pub struct CrossMsgParams {
     pub msg: StorableMsg,
     pub destination: SubnetID,
-}
-
-/// A `Hierarchical` is generic in what it wraps, which could be any raw address type, but *not* another `Hierarchical`.
-#[derive(PartialEq, Eq, Hash, Clone, Debug)]
-pub struct Hierarchical<A> {
-    _phantom: PhantomData<A>,
 }

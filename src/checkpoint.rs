@@ -162,7 +162,6 @@ pub struct CrossMsgMeta {
     pub to: SubnetID,
     pub msgs_cid: TCid<TLink<CrossMsgs>>,
     pub nonce: u64,
-    // #[serde(with = "bigint_ser")]
     pub value: TokenAmount,
 }
 impl Cbor for CrossMsgMeta {}

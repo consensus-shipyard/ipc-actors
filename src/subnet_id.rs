@@ -215,7 +215,7 @@ impl FromStr for SubnetID {
 #[cfg(test)]
 mod tests {
     use crate::subnet_id::{SubnetID, ROOTNET_ID};
-    use crate::HierarchicalAddress;
+    use crate::IPCAddress;
     use fvm_shared::address::Address;
     use std::str::FromStr;
 
@@ -237,28 +237,28 @@ mod tests {
 
     // TODO: temporarily disabled for compilation and comply with Delegated Address
     // #[test]
-    // fn test_hierarchical_address() {
+    // fn test_IPC_address() {
     //     let act = Address::new_id(1001);
     //     let sub_id = SubnetID::new(&ROOTNET_ID.clone(), act);
     //     let bls = Address::from_str("f3vvmn62lofvhjd2ugzca6sof2j2ubwok6cj4xxbfzz4yuxfkgobpihhd2thlanmsh3w2ptld2gqkn2jvlss4a").unwrap();
-    //     let blss = HierarchicalAddress::from_str("f3vvmn62lofvhjd2ugzca6sof2j2ubwok6cj4xxbfzz4yuxfkgobpihhd2thlanmsh3w2ptld2gqkn2jvlss4a").unwrap();
-    //     let haddr = HierarchicalAddress::new(&sub_id, &bls).unwrap();
+    //     let blss = IPCAddress::from_str("f3vvmn62lofvhjd2ugzca6sof2j2ubwok6cj4xxbfzz4yuxfkgobpihhd2thlanmsh3w2ptld2gqkn2jvlss4a").unwrap();
+    //     let haddr = IPCAddress::new(&sub_id, &bls).unwrap();
     //     assert_eq!(haddr.raw_addr().unwrap(), bls);
     //     assert_eq!(haddr.subnet().unwrap(), sub_id);
-    //     // assert_eq!(HierarchicalAddress::raw_addr(&bls).unwrap(), bls);
+    //     // assert_eq!(IPCAddress::raw_addr(&bls).unwrap(), bls);
     //
     //     match blss.subnet() {
-    //         Err(e) => assert_eq!(e, Error::InvalidHierarchicalAddr),
-    //         _ => panic!("subnet over non-hierarchical address should have failed"),
+    //         Err(e) => assert_eq!(e, Error::InvalidIPCAddr),
+    //         _ => panic!("subnet over non-IPC address should have failed"),
     //     }
     // }
 
     #[test]
-    fn test_hierarchical_from_str() {
+    fn test_ipc_from_str() {
         let sub_id = SubnetID::new(&ROOTNET_ID.clone(), Address::new_id(100));
-        let addr = HierarchicalAddress::new(&sub_id, &Address::new_id(101)).unwrap();
+        let addr = IPCAddress::new(&sub_id, &Address::new_id(101)).unwrap();
         let st = addr.to_string();
-        let addr_out = HierarchicalAddress::from_str(&st).unwrap();
+        let addr_out = IPCAddress::from_str(&st).unwrap();
         assert_eq!(addr, addr_out);
     }
 
