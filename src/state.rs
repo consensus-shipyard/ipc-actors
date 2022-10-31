@@ -14,7 +14,7 @@ use lazy_static::lazy_static;
 use num_traits::Zero;
 use primitives::{TAmt, TCid, THamt, TLink};
 use serde::{Deserialize, Serialize};
-use std::collections::{HashMap};
+use std::collections::HashMap;
 use std::str::FromStr;
 
 use crate::subnet_id::SubnetID;

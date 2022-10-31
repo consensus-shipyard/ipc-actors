@@ -27,7 +27,6 @@ use crate::subnet_id::SubnetID;
 fil_actors_runtime::wasm_trampoline!(Actor);
 
 mod address;
-// mod atomic;
 pub mod checkpoint;
 mod cross;
 mod error;
