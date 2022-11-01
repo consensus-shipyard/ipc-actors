@@ -37,3 +37,27 @@ pub struct CrossMsgParams {
     pub msg: StorableMsg,
     pub destination: SubnetID,
 }
+
+#[cfg(test)]
+mod tests {
+    use crate::ConstructorParams;
+    use fvm_ipld_encoding::RawBytes;
+
+    #[test]
+    fn serialize_params() {
+        let p = ConstructorParams {
+            network_name: "/root".to_string(),
+            checkpoint_period: 100,
+        };
+        let bytes = fil_actors_runtime::util::cbor::serialize(&p, "").unwrap();
+        let serialized = base64::encode(bytes.bytes());
+
+        let raw_bytes = RawBytes::new(base64::decode(serialized).unwrap());
+        let deserialized =
+            fil_actors_runtime::util::cbor::deserialize::<ConstructorParams>(&raw_bytes, "")
+                .unwrap();
+
+        assert_eq!(p.network_name, deserialized.network_name);
+        assert_eq!(p.checkpoint_period, deserialized.checkpoint_period);
+    }
+}

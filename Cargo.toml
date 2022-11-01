@@ -35,6 +35,7 @@ unsigned-varint = "0.7.1"
 
 [dev-dependencies]
 fil_actors_runtime = { git = "https://github.com/consensus-shipyard/fvm-utils", branch = "v3.0.0", features = ["fil-actor", "test_utils"] }
+base64 = "0.13.1"
 
 [build-dependencies]
 wasm-builder = "3.0.1"
