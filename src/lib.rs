@@ -27,7 +27,7 @@ mod types;
 
 fil_actors_runtime::wasm_trampoline!(Actor);
 
-/// SCA actor methods available
+/// Atomic execution coordinator actor methods available
 #[derive(FromPrimitive)]
 #[repr(u64)]
 pub enum Method {
