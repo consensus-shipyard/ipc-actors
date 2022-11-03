@@ -37,7 +37,7 @@ pub enum Method {
     SubmitAtomicExec = 3,
 }
 
-/// Subnet Coordinator Actor
+/// Atomic execution coordinator actor
 pub struct Actor;
 
 impl Actor {
