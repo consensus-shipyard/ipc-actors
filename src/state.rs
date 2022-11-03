@@ -29,8 +29,8 @@ pub struct State {
     pub network_name: SubnetID,
     pub atomic_exec_registry: TCid<THamt<Cid, AtomicExec>>,
     pub nonce: u64,
-    pub sca_actor_address: Address,
-    pub sca_send_cross_method_num: MethodNum,
+    pub ipc_gateway_address: Address,
+    pub ipc_gateway_cross_method_num: MethodNum,
 }
 
 impl Cbor for State {}
@@ -41,8 +41,8 @@ impl State {
             network_name: SubnetID::from_str(&params.network_name)?,
             atomic_exec_registry: TCid::new_hamt(store)?,
             nonce: Default::default(),
-            sca_actor_address: Address::from_bytes(&params.sca_actor_address)?,
-            sca_send_cross_method_num: MethodNum::from(params.sca_send_cross_method_num),
+            ipc_gateway_address: Address::from_bytes(&params.ipc_gateway_address)?,
+            ipc_gateway_cross_method_num: MethodNum::from(params.ipc_gateway_cross_method_num),
         })
     }
 
@@ -117,8 +117,8 @@ impl State {
                 )?;
 
                 rt.send(
-                    self.sca_actor_address,
-                    self.sca_send_cross_method_num,
+                    self.ipc_gateway_address,
+                    self.ipc_gateway_cross_method_num,
                     cross_payload,
                     TokenAmount::zero(),
                 )?;
