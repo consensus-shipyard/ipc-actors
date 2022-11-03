@@ -116,9 +116,12 @@ impl State {
                     "",
                 )?;
 
-                msgs.push(
-                    (self.ipc_gateway_address, self.ipc_gateway_cross_method_num, cross_payload, TokenAmount::zero())
-                );
+                msgs.push((
+                    self.ipc_gateway_address,
+                    self.ipc_gateway_cross_method_num,
+                    cross_payload,
+                    TokenAmount::zero(),
+                ));
 
                 // mark as sent
                 visited.insert(sn);

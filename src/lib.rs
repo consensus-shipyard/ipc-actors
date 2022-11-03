@@ -48,10 +48,7 @@ impl Actor {
         rt.validate_immediate_caller_is(std::iter::once(&*INIT_ACTOR_ADDR))?;
 
         let st = State::new(rt.store(), params).map_err(|e| {
-            e.downcast_default(
-                ExitCode::USR_ILLEGAL_STATE,
-                "Failed to create actor state",
-            )
+            e.downcast_default(ExitCode::USR_ILLEGAL_STATE, "Failed to create actor state")
         })?;
         rt.create(&st)?;
         Ok(())
@@ -224,20 +221,21 @@ impl Actor {
                         // mutate status
                         exec.set_status(ExecStatus::Aborted);
                         //  propagate result to subnet
-                        let mut m = st.propagate_exec_result(
-                            rt.store(),
-                            &cid.into(),
-                            &exec,
-                            params.output,
-                            rt.curr_epoch(),
-                            true,
-                        )
-                        .map_err(|e| {
-                            e.downcast_default(
-                                ExitCode::USR_ILLEGAL_STATE,
-                                "error propagating execution result to subnets",
+                        let mut m = st
+                            .propagate_exec_result(
+                                rt.store(),
+                                &cid.into(),
+                                &exec,
+                                params.output,
+                                rt.curr_epoch(),
+                                true,
                             )
-                        })?;
+                            .map_err(|e| {
+                                e.downcast_default(
+                                    ExitCode::USR_ILLEGAL_STATE,
+                                    "error propagating execution result to subnets",
+                                )
+                            })?;
 
                         msgs.append(&mut m);
 
@@ -258,20 +256,21 @@ impl Actor {
                     // if all submissions collected
                     if exec.submitted().len() == exec.params().inputs.len() {
                         exec.set_status(ExecStatus::Success);
-                        let mut m = st.propagate_exec_result(
-                            rt.store(),
-                            &cid.into(),
-                            &exec,
-                            params.output,
-                            rt.curr_epoch(),
-                            false,
-                        )
-                        .map_err(|e| {
-                            e.downcast_default(
-                                ExitCode::USR_ILLEGAL_STATE,
-                                "error propagating execution result to subnets",
+                        let mut m = st
+                            .propagate_exec_result(
+                                rt.store(),
+                                &cid.into(),
+                                &exec,
+                                params.output,
+                                rt.curr_epoch(),
+                                false,
                             )
-                        })?;
+                            .map_err(|e| {
+                                e.downcast_default(
+                                    ExitCode::USR_ILLEGAL_STATE,
+                                    "error propagating execution result to subnets",
+                                )
+                            })?;
 
                         msgs.append(&mut m);
 
