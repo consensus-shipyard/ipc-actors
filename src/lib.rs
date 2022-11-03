@@ -31,7 +31,6 @@ fil_actors_runtime::wasm_trampoline!(Actor);
 #[derive(FromPrimitive)]
 #[repr(u64)]
 pub enum Method {
-    /// Constructor for Storage Power Actor
     Constructor = METHOD_CONSTRUCTOR,
     InitAtomicExec = 2,
     SubmitAtomicExec = 3,
