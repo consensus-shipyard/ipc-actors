@@ -27,21 +27,19 @@ mod types;
 
 fil_actors_runtime::wasm_trampoline!(Actor);
 
-/// SCA actor methods available
+/// Atomic execution coordinator actor methods available
 #[derive(FromPrimitive)]
 #[repr(u64)]
 pub enum Method {
-    /// Constructor for Storage Power Actor
     Constructor = METHOD_CONSTRUCTOR,
     InitAtomicExec = 2,
     SubmitAtomicExec = 3,
 }
 
-/// Subnet Coordinator Actor
+/// Atomic execution coordinator actor
 pub struct Actor;
 
 impl Actor {
-    /// Constructor for SCA actor
     fn constructor<BS, RT>(rt: &mut RT, params: ConstructorParams) -> Result<(), ActorError>
     where
         BS: Blockstore,
@@ -52,7 +50,7 @@ impl Actor {
         let st = State::new(rt.store(), params).map_err(|e| {
             e.downcast_default(
                 ExitCode::USR_ILLEGAL_STATE,
-                "Failed to create SCA actor state",
+                "Failed to create actor state",
             )
         })?;
         rt.create(&st)?;

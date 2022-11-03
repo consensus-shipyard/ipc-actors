@@ -22,7 +22,6 @@ use crate::subnet_id::SubnetID;
 use crate::types::CrossMsgParams;
 use crate::{atomic, ConstructorParams};
 
-/// Storage power actor state
 #[derive(Serialize, Deserialize)]
 pub struct State {
     pub network_name: SubnetID,
