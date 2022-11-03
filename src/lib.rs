@@ -41,7 +41,6 @@ pub enum Method {
 pub struct Actor;
 
 impl Actor {
-    /// Constructor for SCA actor
     fn constructor<BS, RT>(rt: &mut RT, params: ConstructorParams) -> Result<(), ActorError>
     where
         BS: Blockstore,
