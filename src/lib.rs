@@ -52,7 +52,7 @@ impl Actor {
         let st = State::new(rt.store(), params).map_err(|e| {
             e.downcast_default(
                 ExitCode::USR_ILLEGAL_STATE,
-                "Failed to create SCA actor state",
+                "Failed to create actor state",
             )
         })?;
         rt.create(&st)?;
