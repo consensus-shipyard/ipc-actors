@@ -174,6 +174,8 @@ impl Actor {
 
         let caller = rt.message().caller();
 
+        let mut msgs = vec![];
+
         let status = rt.transaction(|st: &mut State, rt| {
             let cid = params.cid;
 
@@ -224,11 +226,7 @@ impl Actor {
                         // mutate status
                         exec.set_status(ExecStatus::Aborted);
                         //  propagate result to subnet
-
-                        // TODO: propagate_exec_result will call send and send is not allowed in
-                        // TODO: transaction. We might have to find a work around
-                        st.propagate_exec_result(
-                            rt,
+                        let mut m = st.propagate_exec_result(
                             rt.store(),
                             &cid.into(),
                             &exec,
@@ -242,6 +240,9 @@ impl Actor {
                                 "error propagating execution result to subnets",
                             )
                         })?;
+
+                        msgs.append(&mut m);
+
                         return Ok(exec.status());
                     }
 
@@ -259,8 +260,7 @@ impl Actor {
                     // if all submissions collected
                     if exec.submitted().len() == exec.params().inputs.len() {
                         exec.set_status(ExecStatus::Success);
-                        st.propagate_exec_result(
-                            rt,
+                        let mut m = st.propagate_exec_result(
                             rt.store(),
                             &cid.into(),
                             &exec,
@@ -274,6 +274,9 @@ impl Actor {
                                 "error propagating execution result to subnets",
                             )
                         })?;
+
+                        msgs.append(&mut m);
+
                         return Ok(exec.status());
                     }
                     // persist the execution
@@ -289,6 +292,10 @@ impl Actor {
                 }
             }
         })?;
+
+        for (to, method, payload, amount) in msgs {
+            rt.send(to, method, payload, amount)?;
+        }
 
         // return cid for the execution
         Ok(SubmitOutput { status })

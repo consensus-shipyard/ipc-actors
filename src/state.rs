@@ -1,7 +1,6 @@
 // Copyright: ConsensusLab
 //
 use cid::Cid;
-use fil_actors_runtime::runtime::Runtime;
 use fil_actors_runtime::{ActorDowncast, Map, SYSTEM_ACTOR_ADDR};
 use fvm_ipld_blockstore::Blockstore;
 use fvm_ipld_encoding::Cbor;
@@ -90,16 +89,18 @@ impl State {
     /// Propagates the result of an execution to the corresponding subnets
     /// in a cross-net message.
     #[allow(clippy::too_many_arguments)]
-    pub fn propagate_exec_result<BS: Blockstore, RT: Runtime<BS>>(
+    pub fn propagate_exec_result<BS: Blockstore>(
         &mut self,
-        rt: &RT,
         store: &BS,
         cid: &TCid<TLink<AtomicExecParamsMeta>>,
         exec: &AtomicExec,
         output: atomic::SerializedState, // LockableState to propagate. The same as in SubmitAtomicExecParams
         _curr_epoch: ChainEpoch,
         abort: bool,
-    ) -> anyhow::Result<()> {
+    ) -> anyhow::Result<Vec<(Address, MethodNum, RawBytes, TokenAmount)>> {
+        // This tracks the list of cross message to send
+        let mut msgs = vec![];
+
         let mut visited = HashSet::new();
         let params = exec.params();
         for (k, v) in params.inputs.iter() {
@@ -116,12 +117,9 @@ impl State {
                     "",
                 )?;
 
-                rt.send(
-                    self.ipc_gateway_address,
-                    self.ipc_gateway_cross_method_num,
-                    cross_payload,
-                    TokenAmount::zero(),
-                )?;
+                msgs.push(
+                    (self.ipc_gateway_address, self.ipc_gateway_cross_method_num, cross_payload, TokenAmount::zero())
+                );
 
                 // mark as sent
                 visited.insert(sn);
@@ -133,7 +131,7 @@ impl State {
         // to inspect previous state (but this is a UX matter).
         self.rm_atomic_exec(store, cid)?;
 
-        Ok(())
+        Ok(msgs)
     }
 
     fn exec_result_msg(
