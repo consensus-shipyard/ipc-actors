@@ -17,6 +17,7 @@ use num_derive::FromPrimitive;
 use num_traits::FromPrimitive;
 use std::collections::HashMap;
 
+pub use self::address::*;
 pub use self::checkpoint::{Checkpoint, CrossMsgMeta};
 pub use self::cross::{is_bottomup, CrossMsgs, IPCMsgType, StorableMsg};
 pub use self::state::*;
