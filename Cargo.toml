@@ -1,6 +1,6 @@
 [package]
-name = "fil_actor_hierarchical_sca"
-description = "Subnet Coordinator Actor (SCA) for Hierarchical Consensus"
+name = "ipc_gateway"
+description = "Subnet Coordinator Actor (SCA) for IPC"
 version = "9.0.0-alpha.1"
 license = "MIT OR Apache-2.0"
 authors = ["ConsensusLab", "Protocol Labs", "Filecoin Core Devs"]
