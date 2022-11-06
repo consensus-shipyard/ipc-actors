@@ -1,6 +1,6 @@
 [package]
-name = "ipc-atomic-execution"
-version = "9.0.0-alpha.1"
+name = "ipc_atomic_execution"
+version = "0.0.1"
 license = "MIT OR Apache-2.0"
 authors = ["ConsensusLab", "Protocol Labs", "Filecoin Core Devs"]
 edition = "2018"
@@ -14,6 +14,7 @@ crate-type = ["cdylib", "lib"]
 
 [dependencies]
 fil_actors_runtime = { git = "https://github.com/consensus-shipyard/fvm-utils", branch = "v3.0.0", features = ["fil-actor"] }
+ipc_gateway = { git = "https://github.com/consensus-shipyard/ipc-gateway.git", branch = "introduce_fil_actor_feature" }
 primitives = { git = "https://github.com/consensus-shipyard/fvm-utils", branch = "v3.0.0"}
 fvm_shared = { version = "3.0.0-alpha.5", default-features = false }
 fvm_ipld_hamt = "0.5.1"

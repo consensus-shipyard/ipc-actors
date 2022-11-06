@@ -1,6 +1,5 @@
-use crate::cross::StorableMsg;
-use crate::SubnetID;
 use fvm_ipld_encoding::tuple::{Deserialize_tuple, Serialize_tuple};
+use ipc_gateway::{StorableMsg, SubnetID};
 
 #[derive(Serialize_tuple, Deserialize_tuple)]
 pub struct ConstructorParams {

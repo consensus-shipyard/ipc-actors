@@ -1,12 +1,11 @@
-use crate::address::IPCAddress;
-use crate::cross::StorableMsg;
-use crate::{atomic, SubnetID};
+use crate::atomic;
 use anyhow::anyhow;
 use cid::Cid;
 use fil_actors_runtime::{runtime::Runtime, ActorDowncast};
 use fvm_ipld_blockstore::{Blockstore, MemoryBlockstore};
 use fvm_ipld_encoding::Cbor;
 use fvm_shared::address::Address;
+use ipc_gateway::{IPCAddress, StorableMsg, SubnetID};
 use primitives::{TAmt, TCid, THamt, TLink};
 use serde::{Deserialize, Serialize};
 use std::{collections::HashMap, str::FromStr};
