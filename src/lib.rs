@@ -23,7 +23,7 @@ pub use self::cross::{is_bottomup, CrossMsgs, IPCMsgType, StorableMsg};
 pub use self::state::*;
 pub use self::subnet::*;
 pub use self::types::*;
-use crate::subnet_id::SubnetID;
+pub use crate::subnet_id::SubnetID;
 
 #[cfg(feature = "fil-actor")]
 fil_actors_runtime::wasm_trampoline!(Actor);
