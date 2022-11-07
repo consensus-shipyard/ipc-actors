@@ -1,4 +1,3 @@
-use crate::address::IPCAddress;
 use fil_actors_runtime::runtime::{ActorCode, Runtime};
 use fil_actors_runtime::{
     actor_error, cbor, ActorDowncast, ActorError, BURNT_FUNDS_ACTOR_ADDR, INIT_ACTOR_ADDR,
@@ -22,8 +21,10 @@ pub use self::cross::{is_bottomup, CrossMsgs, IPCMsgType, StorableMsg};
 pub use self::state::*;
 pub use self::subnet::*;
 pub use self::types::*;
-use crate::subnet_id::SubnetID;
+pub use crate::address::IPCAddress;
+pub use crate::subnet_id::SubnetID;
 
+#[cfg(feature = "fil-actor")]
 fil_actors_runtime::wasm_trampoline!(Actor);
 
 mod address;
