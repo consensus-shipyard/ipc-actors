@@ -9,12 +9,12 @@ use fvm_shared::address::Address;
 use fvm_shared::econ::TokenAmount;
 use fvm_shared::MethodNum;
 use ipc_gateway::{IPCAddress, StorableMsg, SubnetID};
+use lazy_static::lazy_static;
 use num_traits::Zero;
 use primitives::{TCid, THamt, TLink};
 use serde::{Deserialize, Serialize};
 use std::collections::HashSet;
 use std::str::FromStr;
-use lazy_static::lazy_static;
 
 use crate::exec::{AtomicExec, AtomicExecParams, AtomicExecParamsMeta};
 use crate::types::CrossMsgParams;
@@ -29,7 +29,7 @@ pub struct State {
     pub network_name: SubnetID,
     pub atomic_exec_registry: TCid<THamt<Cid, AtomicExec>>,
     pub nonce: u64,
-    pub ipc_gateway_address: Address
+    pub ipc_gateway_address: Address,
 }
 
 impl Cbor for State {}

@@ -4,7 +4,7 @@ version = "0.0.1"
 license = "MIT OR Apache-2.0"
 authors = ["ConsensusLab", "Protocol Labs", "Filecoin Core Devs"]
 edition = "2018"
-repository = "https://github.com/filecoin-project/builtin-actors"
+repository = "https://github.com/consensus-shipyard/ipc-atomic-execution"
 keywords = ["filecoin", "web3", "wasm"]
 
 [lib]
@@ -14,7 +14,7 @@ crate-type = ["cdylib", "lib"]
 
 [dependencies]
 fil_actors_runtime = { git = "https://github.com/consensus-shipyard/fvm-utils", branch = "v3.0.0", features = ["fil-actor"] }
-ipc_gateway = { git = "https://github.com/consensus-shipyard/ipc-gateway.git", branch = "introduce_fil_actor_feature" }
+ipc_gateway = { git = "https://github.com/consensus-shipyard/ipc-gateway.git" }
 primitives = { git = "https://github.com/consensus-shipyard/fvm-utils", branch = "v3.0.0"}
 fvm_shared = { version = "3.0.0-alpha.5", default-features = false }
 fvm_ipld_hamt = "0.5.1"
