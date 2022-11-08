@@ -222,7 +222,6 @@ impl Actor {
                                 &cid.into(),
                                 &exec,
                                 params.output,
-                                rt.curr_epoch(),
                                 true,
                             )
                             .map_err(|e| {
@@ -257,7 +256,6 @@ impl Actor {
                                 &cid.into(),
                                 &exec,
                                 params.output,
-                                rt.curr_epoch(),
                                 false,
                             )
                             .map_err(|e| {

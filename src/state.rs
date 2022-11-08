@@ -6,7 +6,6 @@ use fvm_ipld_blockstore::Blockstore;
 use fvm_ipld_encoding::Cbor;
 use fvm_ipld_encoding::RawBytes;
 use fvm_shared::address::Address;
-use fvm_shared::clock::ChainEpoch;
 use fvm_shared::econ::TokenAmount;
 use fvm_shared::MethodNum;
 use ipc_gateway::{IPCAddress, StorableMsg, SubnetID};
@@ -15,18 +14,22 @@ use primitives::{TCid, THamt, TLink};
 use serde::{Deserialize, Serialize};
 use std::collections::HashSet;
 use std::str::FromStr;
+use lazy_static::lazy_static;
 
 use crate::exec::{AtomicExec, AtomicExecParams, AtomicExecParamsMeta};
 use crate::types::CrossMsgParams;
 use crate::{atomic, ConstructorParams};
+
+lazy_static! {
+    pub static ref IPC_GATEWAY_CROSS_METHOD_NUM: MethodNum = 9u64;
+}
 
 #[derive(Serialize, Deserialize)]
 pub struct State {
     pub network_name: SubnetID,
     pub atomic_exec_registry: TCid<THamt<Cid, AtomicExec>>,
     pub nonce: u64,
-    pub ipc_gateway_address: Address,
-    pub ipc_gateway_cross_method_num: MethodNum,
+    pub ipc_gateway_address: Address
 }
 
 impl Cbor for State {}
@@ -38,7 +41,6 @@ impl State {
             atomic_exec_registry: TCid::new_hamt(store)?,
             nonce: Default::default(),
             ipc_gateway_address: Address::from_bytes(&params.ipc_gateway_address)?,
-            ipc_gateway_cross_method_num: MethodNum::from(params.ipc_gateway_cross_method_num),
         })
     }
 
@@ -85,14 +87,12 @@ impl State {
 
     /// Propagates the result of an execution to the corresponding subnets
     /// in a cross-net message.
-    #[allow(clippy::too_many_arguments)]
     pub fn propagate_exec_result<BS: Blockstore>(
         &mut self,
         store: &BS,
         cid: &TCid<TLink<AtomicExecParamsMeta>>,
         exec: &AtomicExec,
         output: atomic::SerializedState, // LockableState to propagate. The same as in SubmitAtomicExecParams
-        _curr_epoch: ChainEpoch,
         abort: bool,
     ) -> anyhow::Result<Vec<(Address, MethodNum, RawBytes, TokenAmount)>> {
         // This tracks the list of cross message to send
@@ -103,20 +103,17 @@ impl State {
         for (k, v) in params.inputs.iter() {
             let sn = k.subnet()?;
             if visited.get(&sn).is_none() {
-                // let mut msg =
-                //     self.exec_result_msg(&sn, &v.actor, &params.msgs[0], output.clone(), abort)?;
                 let msg =
                     self.exec_result_msg(&sn, &v.actor, &params.msgs[0], output.clone(), abort)?;
 
-                // TODO: is this cross message correct?
                 let cross_payload = fil_actors_runtime::util::cbor::serialize(
                     &CrossMsgParams::new(msg, sn.clone()),
-                    "",
+                    "Cross Msg Params",
                 )?;
 
                 msgs.push((
                     self.ipc_gateway_address,
-                    self.ipc_gateway_cross_method_num,
+                    *IPC_GATEWAY_CROSS_METHOD_NUM,
                     cross_payload,
                     TokenAmount::zero(),
                 ));

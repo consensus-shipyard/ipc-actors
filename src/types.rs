@@ -4,7 +4,6 @@ use ipc_gateway::{StorableMsg, SubnetID};
 #[derive(Serialize_tuple, Deserialize_tuple)]
 pub struct ConstructorParams {
     pub ipc_gateway_address: Vec<u8>,
-    pub ipc_gateway_cross_method_num: u8,
     pub network_name: String,
 }
 
