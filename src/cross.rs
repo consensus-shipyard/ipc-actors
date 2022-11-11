@@ -1,4 +1,5 @@
 use crate::address::IPCAddress;
+use crate::ApplyMsgParams;
 use anyhow::anyhow;
 use cid::Cid;
 use fil_actors_runtime::runtime::Runtime;
@@ -53,6 +54,7 @@ impl Default for StorableMsg {
 #[derive(PartialEq, Eq, Clone, Debug, Default, Serialize, Deserialize)]
 pub struct CrossMsg {
     pub msg: StorableMsg,
+    pub wrapped: bool,
 }
 
 #[derive(PartialEq, Eq)]
@@ -68,8 +70,15 @@ impl CrossMsg {
         BS: Blockstore,
         RT: Runtime<BS>,
     {
-        let msg = self.msg;
-        rt.send(rto, msg.method, msg.params, msg.value)
+        if !self.wrapped {
+            let msg = self.msg;
+            rt.send(rto, msg.method, msg.params, msg.value)
+        } else {
+            let method = self.msg.method;
+            let value = self.msg.value.clone();
+            let params = RawBytes::serialize(ApplyMsgParams { cross_msg: self })?;
+            rt.send(rto, method, params, value)
+        }
     }
 }
 

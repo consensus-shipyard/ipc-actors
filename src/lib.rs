@@ -463,6 +463,7 @@ impl Actor {
                         "error creating fund cross-message",
                     )
                 })?,
+                wrapped: false,
             };
             // Commit top-down message.
             st.commit_topdown_msg(rt.store(), &mut f_msg).map_err(|e| {
@@ -522,6 +523,7 @@ impl Actor {
                             "error creating release cross-message",
                         )
                     })?,
+                wrapped: false,
             };
 
             // Commit bottom-up message.
