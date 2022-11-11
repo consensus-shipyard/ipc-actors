@@ -1,6 +1,8 @@
 use crate::address::IPCAddress;
 use anyhow::anyhow;
 use cid::Cid;
+use fil_actors_runtime::runtime::Runtime;
+use fil_actors_runtime::ActorError;
 use fil_actors_runtime::BURNT_FUNDS_ACTOR_ADDR;
 use fvm_ipld_blockstore::Blockstore;
 use fvm_ipld_blockstore::MemoryBlockstore;
@@ -48,11 +50,27 @@ impl Default for StorableMsg {
     }
 }
 
+#[derive(PartialEq, Eq, Clone, Debug, Default, Serialize, Deserialize)]
+pub struct CrossMsg {
+    pub msg: StorableMsg,
+}
+
 #[derive(PartialEq, Eq)]
 pub enum IPCMsgType {
     Unknown = 0,
     BottomUp,
     TopDown,
+}
+
+impl CrossMsg {
+    pub fn send<BS, RT>(self, rt: &mut RT, rto: Address) -> Result<RawBytes, ActorError>
+    where
+        BS: Blockstore,
+        RT: Runtime<BS>,
+    {
+        let msg = self.msg;
+        rt.send(rto, msg.method, msg.params, msg.value)
+    }
 }
 
 impl StorableMsg {
@@ -135,14 +153,14 @@ pub fn is_bottomup(from: &SubnetID, to: &SubnetID) -> bool {
 
 #[derive(PartialEq, Eq, Clone, Debug, Default, Serialize, Deserialize)]
 pub struct CrossMsgs {
-    pub msgs: Vec<StorableMsg>,
+    pub msgs: Vec<CrossMsg>,
     pub metas: Vec<CrossMsgMeta>,
 }
 impl Cbor for CrossMsgs {}
 
 #[derive(PartialEq, Eq, Clone, Debug, Serialize, Deserialize)]
 pub struct MetaTag {
-    pub msgs_cid: TCid<TAmt<StorableMsg>>,
+    pub msgs_cid: TCid<TAmt<CrossMsg>>,
     pub meta_cid: TCid<TAmt<CrossMsgMeta>>,
 }
 impl Cbor for MetaTag {}
@@ -193,7 +211,7 @@ impl CrossMsgs {
         Ok(())
     }
 
-    pub(crate) fn add_msg(&mut self, msg: &StorableMsg) -> anyhow::Result<()> {
+    pub(crate) fn add_msg(&mut self, msg: &CrossMsg) -> anyhow::Result<()> {
         // TODO: Check if the message has already been added.
         self.msgs.push(msg.clone());
         Ok(())

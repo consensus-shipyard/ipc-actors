@@ -245,25 +245,26 @@ impl State {
     pub(crate) fn store_msg_in_checkpoint<BS: Blockstore>(
         &mut self,
         store: &BS,
-        msg: &StorableMsg,
+        cross_msg: &CrossMsg,
         curr_epoch: ChainEpoch,
     ) -> anyhow::Result<()> {
         let mut ch = self.get_window_checkpoint(store, curr_epoch)?;
 
+        let msg = &cross_msg.msg;
         let sto = msg.to.subnet()?;
         let sfrom = msg.from.subnet()?;
         match ch.crossmsg_meta_index(&sfrom, &sto) {
             Some(index) => {
                 let msgmeta = &mut ch.data.cross_msgs[index];
                 let prev_cid = &msgmeta.msgs_cid;
-                let m_cid = self.append_msg_to_meta(store, prev_cid, msg)?;
+                let m_cid = self.append_msg_to_meta(store, prev_cid, cross_msg)?;
                 msgmeta.msgs_cid = m_cid;
                 msgmeta.value += &msg.value;
             }
             None => {
                 let mut msgmeta = CrossMsgMeta::new(&sfrom, &sto);
                 let mut n_mt = CrossMsgs::new();
-                n_mt.msgs = vec![msg.clone()];
+                n_mt.msgs = vec![cross_msg.clone()];
                 let meta_cid = self
                     .check_msg_registry
                     .modify(store, |cross_reg| put_msgmeta(cross_reg, n_mt))?;
@@ -312,7 +313,7 @@ impl State {
         &mut self,
         store: &BS,
         meta_cid: &TCid<TLink<CrossMsgs>>,
-        msg: &StorableMsg,
+        cross_msg: &CrossMsg,
     ) -> anyhow::Result<TCid<TLink<CrossMsgs>>> {
         self.check_msg_registry.modify(store, |cross_reg| {
             // get previous meta stored
@@ -321,7 +322,7 @@ impl State {
                 None => return Err(anyhow!("no msgmeta found for cid")),
             };
 
-            prev_meta.add_msg(msg)?;
+            prev_meta.add_msg(cross_msg)?;
 
             // if the cid hasn't changed
             let cid = TCid::from(prev_meta.cid()?);
@@ -384,8 +385,9 @@ impl State {
     pub(crate) fn commit_topdown_msg<BS: Blockstore>(
         &mut self,
         store: &BS,
-        msg: &mut StorableMsg,
+        cross_msg: &mut CrossMsg,
     ) -> anyhow::Result<()> {
+        let msg = &cross_msg.msg;
         let sto = msg.to.subnet()?;
         // let sfrom = msg.from.subnet()?;
 
@@ -402,10 +404,10 @@ impl State {
             })?;
         match sub {
             Some(mut sub) => {
-                msg.nonce = sub.nonce;
-                sub.store_topdown_msg(store, msg)?;
+                cross_msg.msg.nonce = sub.nonce;
+                sub.store_topdown_msg(store, cross_msg)?;
                 sub.nonce += 1;
-                sub.circ_supply += &msg.value;
+                sub.circ_supply += &cross_msg.msg.value;
                 self.flush_subnet(store, &sub)?;
             }
             None => {
@@ -425,7 +427,7 @@ impl State {
     pub(crate) fn commit_bottomup_msg<BS: Blockstore>(
         &mut self,
         store: &BS,
-        msg: &StorableMsg,
+        msg: &CrossMsg,
         curr_epoch: ChainEpoch,
     ) -> anyhow::Result<()> {
         // store msg in checkpoint for propagation
@@ -440,13 +442,14 @@ impl State {
     pub(crate) fn send_cross<BS: Blockstore>(
         &mut self,
         store: &BS,
-        msg: &mut StorableMsg,
+        cross_msg: &mut CrossMsg,
         curr_epoch: ChainEpoch,
     ) -> anyhow::Result<IPCMsgType> {
+        let msg = &cross_msg.msg;
         let tp = msg.ipc_type()?;
         match tp {
-            IPCMsgType::TopDown => self.commit_topdown_msg(store, msg)?,
-            IPCMsgType::BottomUp => self.commit_bottomup_msg(store, msg, curr_epoch)?,
+            IPCMsgType::TopDown => self.commit_topdown_msg(store, cross_msg)?,
+            IPCMsgType::BottomUp => self.commit_bottomup_msg(store, cross_msg, curr_epoch)?,
             _ => return Err(anyhow!("cross-msg is not of the right type")),
         };
         Ok(tp)

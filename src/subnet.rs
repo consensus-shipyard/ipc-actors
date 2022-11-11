@@ -10,7 +10,7 @@ use crate::subnet_id::SubnetID;
 use crate::CROSSMSG_AMT_BITWIDTH;
 
 use super::checkpoint::*;
-use super::cross::StorableMsg;
+use super::cross::CrossMsg;
 use super::state::State;
 
 #[derive(PartialEq, Eq, Clone, Copy, Debug, Deserialize, Serialize)]
@@ -25,7 +25,7 @@ pub enum Status {
 pub struct Subnet {
     pub id: SubnetID,
     pub stake: TokenAmount,
-    pub top_down_msgs: TCid<TAmt<StorableMsg, CROSSMSG_AMT_BITWIDTH>>,
+    pub top_down_msgs: TCid<TAmt<CrossMsg, CROSSMSG_AMT_BITWIDTH>>,
     pub nonce: u64,
     pub circ_supply: TokenAmount,
     pub status: Status,
@@ -57,11 +57,12 @@ impl Subnet {
     pub(crate) fn store_topdown_msg<BS: Blockstore>(
         &mut self,
         store: &BS,
-        msg: &StorableMsg,
+        cross_msg: &CrossMsg,
     ) -> anyhow::Result<()> {
+        let msg = &cross_msg.msg;
         self.top_down_msgs.update(store, |crossmsgs| {
             crossmsgs
-                .set(msg.nonce, msg.clone())
+                .set(msg.nonce, cross_msg.clone())
                 .map_err(|e| anyhow!("failed to set crossmsg meta array: {:?}", e))
         })
     }
