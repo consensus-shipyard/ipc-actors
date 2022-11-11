@@ -38,6 +38,11 @@ pub struct CrossMsgParams {
     pub destination: SubnetID,
 }
 
+#[derive(Serialize_tuple, Deserialize_tuple, Clone)]
+pub struct ApplyMsgParams {
+    pub msg: StorableMsg,
+}
+
 #[cfg(test)]
 mod tests {
     use crate::ConstructorParams;

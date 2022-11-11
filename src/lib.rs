@@ -616,7 +616,7 @@ impl Actor {
     /// - Determines the type of cross-message.
     /// - Performs the corresponding state changes.
     /// - And updated the latest nonce applied for future checks.
-    fn apply_msg<BS, RT>(rt: &mut RT, params: StorableMsg) -> Result<(), ActorError>
+    fn apply_msg<BS, RT>(rt: &mut RT, params: ApplyMsgParams) -> Result<(), ActorError>
     where
         BS: Blockstore,
         RT: Runtime<BS>,
@@ -629,7 +629,7 @@ impl Actor {
         // picking up the whole state. Is it more efficient in terms of performance and
         // gas usage to check how to apply the message (b-u or t-p) inside rt.transaction?
         let st: State = rt.state()?;
-        let mut msg = params;
+        let mut msg = params.msg;
         let rto = match msg.to.raw_addr() {
             Ok(to) => to,
             Err(_) => {
