@@ -1,3 +1,4 @@
+use cross::CrossMsg;
 use fil_actors_runtime::runtime::{ActorCode, Runtime};
 use fil_actors_runtime::{
     actor_error, cbor, ActorDowncast, ActorError, BURNT_FUNDS_ACTOR_ADDR, INIT_ACTOR_ADDR,
@@ -455,12 +456,15 @@ impl Actor {
 
         rt.transaction(|st: &mut State, rt| {
             // Create fund message
-            let mut f_msg = StorableMsg::new_fund_msg(&params, &sig_addr, value).map_err(|e| {
-                e.downcast_default(
-                    ExitCode::USR_ILLEGAL_STATE,
-                    "error creating fund cross-message",
-                )
-            })?;
+            let mut f_msg = CrossMsg {
+                msg: StorableMsg::new_fund_msg(&params, &sig_addr, value).map_err(|e| {
+                    e.downcast_default(
+                        ExitCode::USR_ILLEGAL_STATE,
+                        "error creating fund cross-message",
+                    )
+                })?,
+                wrapped: false,
+            };
             // Commit top-down message.
             st.commit_topdown_msg(rt.store(), &mut f_msg).map_err(|e| {
                 e.downcast_default(
@@ -511,13 +515,16 @@ impl Actor {
 
         rt.transaction(|st: &mut State, rt| {
             // Create release message
-            let r_msg = StorableMsg::new_release_msg(&st.network_name, &sig_addr, value, st.nonce)
-                .map_err(|e| {
-                    e.downcast_default(
-                        ExitCode::USR_ILLEGAL_STATE,
-                        "error creating release cross-message",
-                    )
-                })?;
+            let r_msg = CrossMsg {
+                msg: StorableMsg::new_release_msg(&st.network_name, &sig_addr, value, st.nonce)
+                    .map_err(|e| {
+                        e.downcast_default(
+                            ExitCode::USR_ILLEGAL_STATE,
+                            "error creating release cross-message",
+                        )
+                    })?,
+                wrapped: false,
+            };
 
             // Commit bottom-up message.
             st.commit_bottomup_msg(rt.store(), &r_msg, rt.curr_epoch())
@@ -556,7 +563,10 @@ impl Actor {
                 "no destination for cross-message explicitly set"
             ));
         }
-        let mut msg = params.msg.clone();
+        let CrossMsgParams {
+            mut cross_msg,
+            destination,
+        } = params;
         let mut tp = IPCMsgType::Unknown;
 
         // FIXME: Only supporting cross-messages initiated by signable addresses for
@@ -564,39 +574,41 @@ impl Actor {
         let sig_addr = resolve_secp_bls(rt, rt.message().caller())?;
 
         rt.transaction(|st: &mut State, rt| {
-            if params.destination == st.network_name {
+            if destination == st.network_name {
                 return Err(actor_error!(
-                illegal_argument,
-                "destination is the current network, you are better off with a good ol' message, no cross needed"
-            ));
+                    illegal_argument,
+                    "destination is the current network, you are better off with a good ol' message, no cross needed"
+                ));
             }
             // we disregard the to of the message. the caller is the one set as the from of the
             // message.
-            msg.to = match IPCAddress::new_from_ipc(&params.destination, &msg.to) {
+            let msg = &mut cross_msg.msg;
+            msg.to = match IPCAddress::new_from_ipc(&destination, &msg.to) {
                 Ok(addr) => addr,
                 Err(_) => {
                     return Err(actor_error!(
-                illegal_argument,
-                "error setting IPC address in cross-msg to param"
-            ));
+                        illegal_argument,
+                        "error setting IPC address in cross-msg to param"
+                    ));
                 }
             };
             msg.from = match IPCAddress::new(&st.network_name, &sig_addr) {
                 Ok(addr) => addr,
                 Err(_) => {
                     return Err(actor_error!(
-                illegal_argument,
-                "error setting IPC address in cross-msg from param"
-            ));
+                        illegal_argument,
+                        "error setting IPC address in cross-msg from param"
+                    ));
                 }
             };
-            tp = st.send_cross(rt.store(), &mut msg, rt.curr_epoch()).map_err(|e| {
+            tp = st.send_cross(rt.store(), &mut cross_msg, rt.curr_epoch()).map_err(|e| {
                 e.downcast_default(ExitCode::USR_ILLEGAL_STATE, "error committing cross message")
             })?;
 
             Ok(())
         })?;
 
+        let msg = cross_msg.msg;
         if tp == IPCMsgType::BottomUp && msg.value > TokenAmount::zero() {
             rt.send(
                 *BURNT_FUNDS_ACTOR_ADDR,
@@ -616,7 +628,7 @@ impl Actor {
     /// - Determines the type of cross-message.
     /// - Performs the corresponding state changes.
     /// - And updated the latest nonce applied for future checks.
-    fn apply_msg<BS, RT>(rt: &mut RT, params: StorableMsg) -> Result<(), ActorError>
+    fn apply_msg<BS, RT>(rt: &mut RT, params: ApplyMsgParams) -> Result<(), ActorError>
     where
         BS: Blockstore,
         RT: Runtime<BS>,
@@ -629,8 +641,9 @@ impl Actor {
         // picking up the whole state. Is it more efficient in terms of performance and
         // gas usage to check how to apply the message (b-u or t-p) inside rt.transaction?
         let st: State = rt.state()?;
-        let mut msg = params;
-        let rto = match msg.to.raw_addr() {
+        let ApplyMsgParams { mut cross_msg } = params;
+
+        let rto = match cross_msg.msg.to.raw_addr() {
             Ok(to) => to,
             Err(_) => {
                 return Err(actor_error!(
@@ -639,7 +652,7 @@ impl Actor {
                 ));
             }
         };
-        let sto = match msg.to.subnet() {
+        let sto = match cross_msg.msg.to.subnet() {
             Ok(to) => to,
             Err(_) => {
                 return Err(actor_error!(
@@ -648,37 +661,38 @@ impl Actor {
                 ));
             }
         };
-        match msg.apply_type(&st.network_name) {
+        match cross_msg.msg.apply_type(&st.network_name) {
             Ok(IPCMsgType::BottomUp) => {
                 // perform state transition
                 rt.transaction(|st: &mut State, rt| {
-                    st.bottomup_state_transition(&msg).map_err(|e| {
+                    st.bottomup_state_transition(&cross_msg.msg).map_err(|e| {
                         e.downcast_default(
                             ExitCode::USR_ILLEGAL_STATE,
                             "failed applying bottomup message",
                         )
                     })?;
                     if sto != st.network_name {
-                        st.commit_topdown_msg(rt.store(), &mut msg).map_err(|e| {
-                            e.downcast_default(
-                                ExitCode::USR_ILLEGAL_STATE,
-                                "error committing topdown messages",
-                            )
-                        })?;
+                        st.commit_topdown_msg(rt.store(), &mut cross_msg)
+                            .map_err(|e| {
+                                e.downcast_default(
+                                    ExitCode::USR_ILLEGAL_STATE,
+                                    "error committing topdown messages",
+                                )
+                            })?;
                     }
                     Ok(())
                 })?;
                 // if directed to current network, execute message.
                 if sto == st.network_name {
                     // FIXME: Should we handle return in some way?
-                    let _ = rt.send(rto, msg.method, msg.params, msg.value)?;
+                    let _ = cross_msg.send(rt, rto)?;
                 }
             }
             Ok(IPCMsgType::TopDown) => {
                 // Mint funds for SCA so it can direct them accordingly as part of the message.
                 let params = ext::reward::FundingParams {
                     addr: *SCA_ACTOR_ADDR,
-                    value: msg.value.clone(),
+                    value: cross_msg.msg.value.clone(),
                 };
                 rt.send(
                     *REWARD_ACTOR_ADDR,
@@ -689,7 +703,7 @@ impl Actor {
 
                 rt.transaction(|st: &mut State, rt| {
                     // perform nonce state transition
-                    if st.applied_topdown_nonce != msg.nonce {
+                    if st.applied_topdown_nonce != cross_msg.msg.nonce {
                         return Err(actor_error!(
                             illegal_state,
                             "the top-down message being applied doesn't hold the subsequent nonce"
@@ -698,12 +712,13 @@ impl Actor {
                     st.applied_topdown_nonce += 1;
                     // if not directed to subnet go down.
                     if sto != st.network_name {
-                        st.commit_topdown_msg(rt.store(), &mut msg).map_err(|e| {
-                            e.downcast_default(
-                                ExitCode::USR_ILLEGAL_STATE,
-                                "error committing top-down message while applying it",
-                            )
-                        })?;
+                        st.commit_topdown_msg(rt.store(), &mut cross_msg)
+                            .map_err(|e| {
+                                e.downcast_default(
+                                    ExitCode::USR_ILLEGAL_STATE,
+                                    "error committing top-down message while applying it",
+                                )
+                            })?;
                     }
                     Ok(())
                 })?;
@@ -711,7 +726,7 @@ impl Actor {
                 // if directed to the current network propagate the message
                 if sto == st.network_name {
                     // FIXME: Should we handle return in some way?
-                    let _ = rt.send(rto, msg.method, msg.params, msg.value)?;
+                    let _ = cross_msg.send(rt, rto)?;
                 }
             }
             _ => {
