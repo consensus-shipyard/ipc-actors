@@ -27,11 +27,12 @@ lazy_static! {
 }
 
 impl SubnetID {
-    pub fn new(parent: &SubnetID, subnet_act: Address) -> SubnetID {
-        SubnetID {
-            parent: parent.to_string(),
-            actor: subnet_act,
-        }
+    pub fn new_from_string(parent: String, subnet_act: Address) -> Self {
+        Self { parent, actor: subnet_act }
+    }
+
+    pub fn new(parent: &SubnetID, subnet_act: Address) -> Self {
+        Self::new_from_string(parent.to_string(), subnet_act)
     }
 
     pub fn to_bytes(&self) -> Vec<u8> {

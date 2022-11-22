@@ -47,6 +47,7 @@ impl IPCAddress {
         let sp = [sn_size, addr_size, sn.as_slice(), addr.as_slice()].concat();
         // include in fixed-length container
         let mut key = [0u8; MAX_ADDRESS_LEN];
+        println!("sp: {:?}", sp);
         key[..sp.len()].copy_from_slice(sp.as_slice());
         Ok(Self {
             inner: Address::new_delegated(*DEFAULT_IPC_ACTOR_NAMESPACE_ID, &key)?,
