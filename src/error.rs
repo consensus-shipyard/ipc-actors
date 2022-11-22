@@ -1,6 +1,8 @@
+use fil_actors_runtime::ActorError;
+use hex::FromHexError;
 use thiserror::Error;
 
-#[derive(Debug, PartialEq, Eq, Error)]
+#[derive(Debug, PartialEq, Error)]
 pub enum Error {
     #[error("invalid address payload")]
     InvalidPayload,
@@ -14,6 +16,21 @@ pub enum Error {
     UnsignedVariantDecodeError(unsigned_varint::decode::Error),
     #[error("unknown network")]
     UnknownNetwork,
+    #[error("hex encoding error")]
+    HexEncoding(FromHexError),
+    #[error("actor error")]
+    Actor(ActorError)
+}
+
+impl From<ActorError> for Error {
+    fn from(e: ActorError) -> Self {
+        Self::Actor(e)
+    }
+}
+impl From<FromHexError> for Error {
+    fn from(e: FromHexError) -> Self {
+        Self::HexEncoding(e)
+    }
 }
 
 impl From<fvm_shared::address::Error> for Error {
