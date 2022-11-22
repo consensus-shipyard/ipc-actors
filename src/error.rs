@@ -19,7 +19,7 @@ pub enum Error {
     #[error("hex encoding error")]
     HexEncoding(FromHexError),
     #[error("actor error")]
-    Actor(ActorError)
+    Actor(ActorError),
 }
 
 impl From<ActorError> for Error {

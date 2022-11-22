@@ -1,12 +1,12 @@
+use crate::error::Error;
 use crate::SubnetID;
+use fil_actors_runtime::cbor;
+use fvm_ipld_encoding::RawBytes;
 use fvm_shared::address::Address;
 use fvm_shared::ActorID;
 use lazy_static::lazy_static;
 use serde::{Deserialize, Serialize};
 use std::str::FromStr;
-use fil_actors_runtime::cbor;
-use fvm_ipld_encoding::RawBytes;
-use crate::error::Error;
 
 // The default actor id namespace for IPC addresses
 lazy_static! {
@@ -16,7 +16,7 @@ lazy_static! {
 #[derive(Clone, PartialEq, Eq, Debug, Hash, Serialize, Deserialize)]
 pub struct IPCAddress {
     subnet_id: SubnetID,
-    raw_address: Address
+    raw_address: Address,
 }
 
 impl IPCAddress {
@@ -33,7 +33,7 @@ impl IPCAddress {
     pub fn new(sn: &SubnetID, addr: &Address) -> Result<Self, Error> {
         Ok(Self {
             subnet_id: sn.clone(),
-            raw_address: *addr
+            raw_address: *addr,
         })
     }
 
@@ -41,7 +41,7 @@ impl IPCAddress {
     pub fn new_from_ipc(sn: &SubnetID, addr: &Self) -> Result<Self, Error> {
         Ok(Self {
             subnet_id: sn.clone(),
-            raw_address: addr.raw_address
+            raw_address: addr.raw_address,
         })
     }
 
@@ -55,7 +55,7 @@ impl IPCAddress {
         Ok(self.raw_address)
     }
 
-  /// Returns encoded bytes of Address
+    /// Returns encoded bytes of Address
     pub fn to_bytes(&self) -> Result<Vec<u8>, Error> {
         Ok(cbor::serialize(self, "ipc-address")?.to_vec())
     }
