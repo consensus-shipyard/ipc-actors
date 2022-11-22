@@ -14,8 +14,8 @@ keywords = ["filecoin", "web3", "wasm"]
 crate-type = ["cdylib", "lib"]
 
 [dependencies]
-fil_actors_runtime = { git = "https://github.com/consensus-shipyard/fvm-utils", branch = "v3.0.0", features = ["fil-actor"] }
-primitives = { git = "https://github.com/consensus-shipyard/fvm-utils", branch = "v3.0.0"}
+fil_actors_runtime = { git = "https://github.com/consensus-shipyard/fvm-utils", features = ["fil-actor"] }
+primitives = { git = "https://github.com/consensus-shipyard/fvm-utils" }
 fvm_shared = { version = "3.0.0-alpha.5", default-features = false }
 fvm_ipld_hamt = "0.5.1"
 num-traits = "0.2.14"
@@ -35,7 +35,6 @@ unsigned-varint = "0.7.1"
 hex = "0.4.3"
 
 [dev-dependencies]
-fil_actors_runtime = { git = "https://github.com/consensus-shipyard/fvm-utils", branch = "v3.0.0", features = ["fil-actor", "test_utils"] }
 base64 = "0.13.1"
 
 [build-dependencies]
