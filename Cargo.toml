@@ -32,7 +32,6 @@ fvm_ipld_blockstore = "0.1.1"
 fvm_ipld_encoding = "0.3.0"
 thiserror = "1.0.37"
 unsigned-varint = "0.7.1"
-hex = "0.4.3"
 
 [dev-dependencies]
 base64 = "0.13.1"

@@ -66,7 +66,11 @@ impl IPCAddress {
     }
 
     pub fn to_string(&self) -> Result<String, Error> {
-        Ok(format!("{}-{}", self.subnet_id.to_string(), self.raw_address.to_string()))
+        Ok(format!(
+            "{}-{}",
+            self.subnet_id.to_string(),
+            self.raw_address.to_string()
+        ))
     }
 }
 
