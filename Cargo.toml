@@ -1,7 +1,7 @@
 [package]
 name = "ipc_gateway"
 description = "Subnet Coordinator Actor (SCA) for IPC"
-version = "9.0.0-alpha.1"
+version = "0.0.1"
 license = "MIT OR Apache-2.0"
 authors = ["ConsensusLab", "Protocol Labs", "Filecoin Core Devs"]
 edition = "2018"
@@ -14,9 +14,9 @@ keywords = ["filecoin", "web3", "wasm"]
 crate-type = ["cdylib", "lib"]
 
 [dependencies]
-fil_actors_runtime = { git = "https://github.com/consensus-shipyard/fvm-utils", branch = "v3.0.0", features = ["fil-actor"] }
-primitives = { git = "https://github.com/consensus-shipyard/fvm-utils", branch = "v3.0.0"}
-fvm_shared = { version = "3.0.0-alpha.5", default-features = false }
+fil_actors_runtime = { git = "https://github.com/consensus-shipyard/fvm-utils", features = ["fil-actor"] }
+primitives = { git = "https://github.com/consensus-shipyard/fvm-utils" }
+fvm_shared = { version = "3.0.0-alpha.12", default-features = false }
 fvm_ipld_hamt = "0.5.1"
 num-traits = "0.2.14"
 num-derive = "0.3.3"
@@ -34,7 +34,6 @@ thiserror = "1.0.37"
 unsigned-varint = "0.7.1"
 
 [dev-dependencies]
-fil_actors_runtime = { git = "https://github.com/consensus-shipyard/fvm-utils", branch = "v3.0.0", features = ["fil-actor", "test_utils"] }
 base64 = "0.13.1"
 
 [build-dependencies]

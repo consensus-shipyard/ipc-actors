@@ -235,7 +235,7 @@ mod tests {
         assert_eq!(root_sub, rootnet);
     }
 
-    // TODO: temporarily disabled for compilation and comply with Delegated Address
+    // // TODO: temporarily disabled for compilation and comply with Delegated Address
     // #[test]
     // fn test_IPC_address() {
     //     let act = Address::new_id(1001);
@@ -257,7 +257,7 @@ mod tests {
     fn test_ipc_from_str() {
         let sub_id = SubnetID::new(&ROOTNET_ID.clone(), Address::new_id(100));
         let addr = IPCAddress::new(&sub_id, &Address::new_id(101)).unwrap();
-        let st = addr.to_string();
+        let st = addr.to_string().unwrap();
         let addr_out = IPCAddress::from_str(&st).unwrap();
         assert_eq!(addr, addr_out);
     }
