@@ -69,11 +69,7 @@ impl IPCAddress {
         // `-` is used as delimiter instead of `/`
         // `/` is harder to parse as `SubnetId` contains `/`, which makes it difficult to
         // determined which is the start of Address
-        Ok(format!(
-            "{}-{}",
-            self.subnet_id,
-            self.raw_address
-        ))
+        Ok(format!("{}-{}", self.subnet_id, self.raw_address))
     }
 }
 
