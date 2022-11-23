@@ -71,8 +71,8 @@ impl IPCAddress {
         // determined which is the start of Address
         Ok(format!(
             "{}-{}",
-            self.subnet_id.to_string(),
-            self.raw_address.to_string()
+            self.subnet_id,
+            self.raw_address
         ))
     }
 }
@@ -81,7 +81,7 @@ impl FromStr for IPCAddress {
     type Err = Error;
 
     fn from_str(addr: &str) -> Result<Self, Error> {
-        let r: Vec<&str> = addr.split("-").collect();
+        let r: Vec<&str> = addr.split('-').collect();
         if r.len() != 2 {
             Err(Error::InvalidIPCAddr)
         } else {
