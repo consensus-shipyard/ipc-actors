@@ -551,14 +551,18 @@ pub fn get_bottomup_msg<'m, BS: Blockstore>(
     crossmsgs: &'m CrossMsgMetaArray<BS>,
     nonce: u64,
 ) -> anyhow::Result<Option<&'m CrossMsgMeta>> {
-    crossmsgs.get(nonce).map_err(|e| anyhow!("failed to get crossmsg meta by nonce: {:?}", e))
+    crossmsgs
+        .get(nonce)
+        .map_err(|e| anyhow!("failed to get crossmsg meta by nonce: {:?}", e))
 }
 
 pub fn get_topdown_msg<'m, BS: Blockstore>(
     crossmsgs: &'m CrossMsgArray<BS>,
     nonce: u64,
 ) -> anyhow::Result<Option<&'m StorableMsg>> {
-    let r = crossmsgs.get(nonce).map_err(|e| anyhow!("failed to get msg by nonce: {:?}", e))?
+    let r = crossmsgs
+        .get(nonce)
+        .map_err(|e| anyhow!("failed to get msg by nonce: {:?}", e))?
         .map(|c| &c.msg);
     Ok(r)
 }

@@ -17,7 +17,7 @@ use num_traits::FromPrimitive;
 use std::collections::HashMap;
 
 pub use self::checkpoint::{Checkpoint, CrossMsgMeta};
-pub use self::cross::{is_bottomup, CrossMsgs, IPCMsgType, StorableMsg, CrossMsg};
+pub use self::cross::{is_bottomup, CrossMsg, CrossMsgs, IPCMsgType, StorableMsg};
 pub use self::state::*;
 pub use self::subnet::*;
 pub use self::types::*;
@@ -469,10 +469,6 @@ impl Actor {
         // FIXME: Only supporting cross-messages initiated by signable addresses for
         // now. Consider supporting also send-cross messages initiated by actors.
 
-        // TODO: handle type check here.
-        // rt.validate_immediate_caller_type(CALLER_TYPES_SIGNABLE.iter())?;
-        rt.validate_immediate_caller_accept_any()?;
-
         let value = rt.message().value_received();
         if value <= TokenAmount::zero() {
             return Err(actor_error!(
@@ -531,10 +527,6 @@ impl Actor {
         BS: Blockstore,
         RT: Runtime<BS>,
     {
-        // TODO: handle type check here.
-        // rt.validate_immediate_caller_type(CALLER_TYPES_SIGNABLE.iter())?;
-        rt.validate_immediate_caller_accept_any()?;
-
         if params.destination == SubnetID::default() {
             return Err(actor_error!(
                 illegal_argument,
@@ -611,10 +603,6 @@ impl Actor {
         BS: Blockstore,
         RT: Runtime<BS>,
     {
-        // TODO: handle type check here.
-        rt.validate_immediate_caller_accept_any()?;
-        // rt.validate_immediate_caller_is(std::iter::once(&*SYSTEM_ACTOR_ADDR))?;
-
         // FIXME: We just need the state to check the current network name, but we are
         // picking up the whole state. Is it more efficient in terms of performance and
         // gas usage to check how to apply the message (b-u or t-p) inside rt.transaction?

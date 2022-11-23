@@ -6,30 +6,35 @@ use fil_actors_runtime::builtin::HAMT_BIT_WIDTH;
 use fil_actors_runtime::runtime::Runtime;
 use fil_actors_runtime::test_utils::expect_abort;
 use fil_actors_runtime::test_utils::{
-    MockRuntime, ACCOUNT_ACTOR_CODE_ID, MULTISIG_ACTOR_CODE_ID, SUBNET_ACTOR_CODE_ID,
-    SYSTEM_ACTOR_CODE_ID,
+    MockRuntime, ACCOUNT_ACTOR_CODE_ID, SUBNET_ACTOR_CODE_ID, SYSTEM_ACTOR_CODE_ID,
 };
-use fil_actors_runtime::{Array, INIT_ACTOR_ADDR};
 use fil_actors_runtime::{
     make_map_with_root_and_bitwidth, ActorError, Map, BURNT_FUNDS_ACTOR_ADDR, REWARD_ACTOR_ADDR,
     STORAGE_POWER_ACTOR_ADDR, SYSTEM_ACTOR_ADDR,
 };
+use fil_actors_runtime::{Array, INIT_ACTOR_ADDR};
 use fvm_ipld_blockstore::Blockstore;
 use fvm_ipld_encoding::RawBytes;
-use fvm_shared::address::{Address};
+use fvm_shared::address::Address;
 use fvm_shared::bigint::bigint_ser::BigIntDe;
 use fvm_shared::bigint::Zero;
 use fvm_shared::econ::TokenAmount;
 use fvm_shared::error::ExitCode;
 use fvm_shared::MethodNum;
 use fvm_shared::METHOD_SEND;
+use ipc_gateway::checkpoint::ChildCheck;
+use ipc_gateway::{
+    ext, get_topdown_msg, is_bottomup, Actor, ApplyMsgParams, Checkpoint, ConstructorParams,
+    CrossMsg, CrossMsgMeta, CrossMsgParams, CrossMsgs, FundParams, IPCAddress, IPCMsgType, Method,
+    State, StorableMsg, Subnet, SubnetID, CROSSMSG_AMT_BITWIDTH, DEFAULT_CHECKPOINT_PERIOD,
+    MAX_NONCE, MIN_COLLATERAL_AMOUNT, SCA_ACTOR_ADDR,
+};
 use lazy_static::lazy_static;
 use primitives::{TCid, TCidContent};
-use ipc_gateway::{Actor, Checkpoint, ConstructorParams, CrossMsg, CROSSMSG_AMT_BITWIDTH, CrossMsgMeta, CrossMsgParams, CrossMsgs, DEFAULT_CHECKPOINT_PERIOD, ext, FundParams, get_topdown_msg, IPCAddress, IPCMsgType, is_bottomup, MAX_NONCE, Method, MIN_COLLATERAL_AMOUNT, SCA_ACTOR_ADDR, State, StorableMsg, Subnet, SubnetID};
-use ipc_gateway::checkpoint::ChildCheck;
 
 lazy_static! {
-    pub static ref ROOTNET_ID: SubnetID = SubnetID::new_from_string(String::from("/root"), Address::new_id(0));
+    pub static ref ROOTNET_ID: SubnetID =
+        SubnetID::new_from_string(String::from("/root"), Address::new_id(0));
     pub static ref SUBNET_ONE: Address = Address::new_id(101);
     pub static ref SUBNET_TWO: Address = Address::new_id(102);
     pub static ref TEST_BLS: Address =
@@ -69,14 +74,16 @@ pub struct Harness {
 impl Harness {
     pub fn construct(&self, rt: &mut MockRuntime) {
         rt.expect_validate_caller_addr(vec![*INIT_ACTOR_ADDR]);
-        let params =
-            ConstructorParams { network_name: self.net_name.to_string(), checkpoint_period: 10 };
+        let params = ConstructorParams {
+            network_name: self.net_name.to_string(),
+            checkpoint_period: 10,
+        };
         rt.set_caller(Cid::default(), *INIT_ACTOR_ADDR);
         rt.call::<Actor>(
             Method::Constructor as MethodNum,
             &RawBytes::serialize(params).unwrap(),
         )
-            .unwrap();
+        .unwrap();
     }
 
     pub fn construct_and_verify(&self, rt: &mut MockRuntime) {
@@ -84,8 +91,9 @@ impl Harness {
         let st: State = rt.get_state();
         let store = &rt.store;
 
-        let empty_bottomup_array =
-            Array::<(), _>::new_with_bit_width(store, CROSSMSG_AMT_BITWIDTH).flush().unwrap();
+        let empty_bottomup_array = Array::<(), _>::new_with_bit_width(store, CROSSMSG_AMT_BITWIDTH)
+            .flush()
+            .unwrap();
 
         assert_eq!(st.network_name, self.net_name);
         assert_eq!(st.min_stake, TokenAmount::from_atto(MIN_COLLATERAL_AMOUNT));
@@ -118,7 +126,9 @@ impl Harness {
         }
 
         let register_ret = SubnetID::new(&self.net_name, *subnet_addr);
-        let ret = rt.call::<Actor>(Method::Register as MethodNum, &RawBytes::default()).unwrap();
+        let ret = rt
+            .call::<Actor>(Method::Register as MethodNum, &RawBytes::default())
+            .unwrap();
         rt.verify();
         let ret: SubnetID = RawBytes::deserialize(&ret).unwrap();
         assert_eq!(ret, register_ret);
@@ -144,7 +154,8 @@ impl Harness {
             return Ok(());
         }
 
-        rt.call::<Actor>(Method::AddStake as MethodNum, &RawBytes::default()).unwrap();
+        rt.call::<Actor>(Method::AddStake as MethodNum, &RawBytes::default())
+            .unwrap();
         rt.verify();
 
         Ok(())
@@ -158,7 +169,9 @@ impl Harness {
         code: ExitCode,
     ) -> Result<(), ActorError> {
         rt.set_caller(*SUBNET_ACTOR_CODE_ID, id.subnet_actor());
-        let params = FundParams { value: value.clone() };
+        let params = FundParams {
+            value: value.clone(),
+        };
 
         if code != ExitCode::OK {
             expect_abort(
@@ -184,7 +197,7 @@ impl Harness {
             Method::ReleaseStake as MethodNum,
             &RawBytes::serialize(params).unwrap(),
         )
-            .unwrap();
+        .unwrap();
         rt.verify();
 
         Ok(())
@@ -216,7 +229,8 @@ impl Harness {
             RawBytes::default(),
             ExitCode::OK,
         );
-        rt.call::<Actor>(Method::Kill as MethodNum, &RawBytes::default()).unwrap();
+        rt.call::<Actor>(Method::Kill as MethodNum, &RawBytes::default())
+            .unwrap();
         rt.verify();
 
         Ok(())
@@ -258,7 +272,7 @@ impl Harness {
             Method::CommitChildCheckpoint as MethodNum,
             &RawBytes::serialize(ch).unwrap(),
         )
-            .unwrap();
+        .unwrap();
         rt.verify();
 
         Ok(())
@@ -297,13 +311,18 @@ impl Harness {
             RawBytes::serialize(*TEST_BLS).unwrap(),
             ExitCode::OK,
         );
-        rt.call::<Actor>(Method::Fund as MethodNum, &RawBytes::serialize(id.clone()).unwrap())
-            .unwrap();
+        rt.call::<Actor>(
+            Method::Fund as MethodNum,
+            &RawBytes::serialize(id.clone()).unwrap(),
+        )
+        .unwrap();
         rt.verify();
 
         let sub = self.get_subnet(rt, id).unwrap();
         let crossmsgs = sub.top_down_msgs.load(rt.store()).unwrap();
-        let msg = get_topdown_msg(&crossmsgs, expected_nonce - 1).unwrap().unwrap();
+        let msg = get_topdown_msg(&crossmsgs, expected_nonce - 1)
+            .unwrap()
+            .unwrap();
         assert_eq!(&sub.circ_supply, expected_circ_sup);
         assert_eq!(sub.nonce, expected_nonce);
         let from = IPCAddress::new(&self.net_name, &TEST_BLS).unwrap();
@@ -353,7 +372,8 @@ impl Harness {
             RawBytes::default(),
             ExitCode::OK,
         );
-        rt.call::<Actor>(Method::Release as MethodNum, &RawBytes::default()).unwrap();
+        rt.call::<Actor>(Method::Release as MethodNum, &RawBytes::default())
+            .unwrap();
         rt.verify();
 
         let st: State = rt.get_state();
@@ -367,7 +387,9 @@ impl Harness {
         let chmeta = &ch.data.cross_msgs[chmeta_ind];
 
         let cross_reg = st.check_msg_registry.load(rt.store()).unwrap();
-        let meta = get_cross_msgs(&cross_reg, &chmeta.msgs_cid.cid()).unwrap().unwrap();
+        let meta = get_cross_msgs(&cross_reg, &chmeta.msgs_cid.cid())
+            .unwrap()
+            .unwrap();
         let msg = meta.msgs[expected_nonce as usize].clone();
 
         assert_eq!(meta.msgs.len(), (expected_nonce + 1) as usize);
@@ -411,8 +433,14 @@ impl Harness {
             value: value.clone(),
         };
         let dest = sub.clone();
-        let cross = CrossMsg { msg, wrapped: false };
-        let params = CrossMsgParams { destination: sub, cross_msg: cross };
+        let cross = CrossMsg {
+            msg,
+            wrapped: false,
+        };
+        let params = CrossMsgParams {
+            destination: sub,
+            cross_msg: cross,
+        };
         if code != ExitCode::OK {
             expect_abort(
                 code,
@@ -445,8 +473,11 @@ impl Harness {
                 ExitCode::OK,
             );
         }
-        rt.call::<Actor>(Method::SendCross as MethodNum, &RawBytes::serialize(params).unwrap())
-            .unwrap();
+        rt.call::<Actor>(
+            Method::SendCross as MethodNum,
+            &RawBytes::serialize(params).unwrap(),
+        )
+        .unwrap();
         rt.verify();
 
         let st: State = rt.get_state();
@@ -459,7 +490,9 @@ impl Harness {
             let chmeta = &ch.data.cross_msgs[chmeta_ind];
 
             let cross_reg = st.check_msg_registry.load(rt.store()).unwrap();
-            let meta = get_cross_msgs(&cross_reg, &chmeta.msgs_cid.cid()).unwrap().unwrap();
+            let meta = get_cross_msgs(&cross_reg, &chmeta.msgs_cid.cid())
+                .unwrap()
+                .unwrap();
             let msg = meta.msgs[nonce as usize].clone();
 
             assert_eq!(meta.msgs.len(), (nonce + 1) as usize);
@@ -469,7 +502,9 @@ impl Harness {
             assert_eq!(msg.msg.value, value);
         } else {
             // top-down
-            let sub = self.get_subnet(rt, &dest.down(&self.net_name).unwrap()).unwrap();
+            let sub = self
+                .get_subnet(rt, &dest.down(&self.net_name).unwrap())
+                .unwrap();
             let crossmsgs = sub.top_down_msgs.load(rt.store()).unwrap();
             let msg = get_topdown_msg(&crossmsgs, nonce - 1).unwrap().unwrap();
             assert_eq!(&sub.circ_supply, expected_circ_sup);
@@ -497,7 +532,6 @@ impl Harness {
         noop: bool,
     ) -> Result<(), ActorError> {
         rt.set_caller(*SYSTEM_ACTOR_CODE_ID, *SYSTEM_ACTOR_ADDR);
-        rt.expect_validate_caller_addr(vec![*SYSTEM_ACTOR_ADDR]);
 
         rt.set_balance(value.clone());
         let params = StorableMsg {
@@ -519,7 +553,13 @@ impl Harness {
                 code,
                 rt.call::<Actor>(
                     Method::ApplyMessage as MethodNum,
-                    &RawBytes::serialize(params).unwrap(),
+                    &RawBytes::serialize(ApplyMsgParams {
+                        cross_msg: CrossMsg {
+                            msg: params.clone(),
+                            wrapped: false,
+                        },
+                    })
+                    .unwrap(),
                 ),
             );
             rt.verify();
@@ -540,14 +580,22 @@ impl Harness {
 
             rt.call::<Actor>(
                 Method::ApplyMessage as MethodNum,
-                &RawBytes::serialize(params).unwrap(),
+                &RawBytes::serialize(ApplyMsgParams {
+                    cross_msg: CrossMsg {
+                        msg: params.clone(),
+                        wrapped: false,
+                    },
+                })
+                .unwrap(),
             )?;
             rt.verify();
             let st: State = rt.get_state();
             assert_eq!(st.applied_bottomup_nonce, msg_nonce);
         } else {
-            let rew_params =
-                ext::reward::FundingParams { addr: *SCA_ACTOR_ADDR, value: params.value.clone() };
+            let rew_params = ext::reward::FundingParams {
+                addr: *SCA_ACTOR_ADDR,
+                value: params.value.clone(),
+            };
             rt.expect_send(
                 *REWARD_ACTOR_ADDR,
                 ext::reward::EXTERNAL_FUNDING_METHOD,
@@ -568,14 +616,22 @@ impl Harness {
             }
             rt.call::<Actor>(
                 Method::ApplyMessage as MethodNum,
-                &RawBytes::serialize(params).unwrap(),
+                &RawBytes::serialize(ApplyMsgParams {
+                    cross_msg: CrossMsg {
+                        msg: params.clone(),
+                        wrapped: false,
+                    },
+                })
+                .unwrap(),
             )?;
             rt.verify();
             let st: State = rt.get_state();
             assert_eq!(st.applied_topdown_nonce, msg_nonce + 1);
 
             if sto != st.network_name {
-                let sub = self.get_subnet(rt, &sto.down(&self.net_name).unwrap()).unwrap();
+                let sub = self
+                    .get_subnet(rt, &sto.down(&self.net_name).unwrap())
+                    .unwrap();
                 let crossmsgs = sub.top_down_msgs.load(rt.store()).unwrap();
                 let msg = get_topdown_msg(&crossmsgs, td_nonce).unwrap().unwrap();
                 assert_eq!(&msg.from, from);
@@ -591,115 +647,6 @@ impl Harness {
         Ok(())
     }
 
-    // pub fn init_atomic_exec(
-    //     &self,
-    //     rt: &mut MockRuntime,
-    //     caller: &Address,
-    //     params: AtomicExecParamsRaw,
-    //     result: LockedOutput,
-    //     code: ExitCode,
-    // ) -> Result<(), ActorError> {
-    //     rt.set_caller(*ACCOUNT_ACTOR_CODE_ID, *caller);
-    //     rt.expect_validate_caller_type(vec![*ACCOUNT_ACTOR_CODE_ID, *MULTISIG_ACTOR_CODE_ID]);
-    //
-    //     if code != ExitCode::OK {
-    //         expect_abort(
-    //             code,
-    //             rt.call::<Actor>(
-    //                 Method::InitAtomicExec as MethodNum,
-    //                 &RawBytes::serialize(params).unwrap(),
-    //             ),
-    //         );
-    //         rt.verify();
-    //         return Ok(());
-    //     }
-    //
-    //     let ret = rt
-    //         .call::<Actor>(
-    //             Method::InitAtomicExec as MethodNum,
-    //             &RawBytes::serialize(params.clone()).unwrap(),
-    //         )
-    //         .unwrap();
-    //     rt.verify();
-    //     let ret: LockedOutput = RawBytes::deserialize(&ret).unwrap();
-    //
-    //     let st: State = rt.get_state();
-    //     let exec = st.get_atomic_exec(rt.store(), &ret.cid.into()).unwrap().unwrap();
-    //     let params = rt.call_fn(|rt| params.input_into_ids(rt)).unwrap();
-    //     assert_eq!(exec.params(), &params);
-    //     assert_eq!(exec.status(), ExecStatus::Initialized);
-    //     assert_eq!(ret, result);
-    //
-    //     Ok(())
-    // }
-    //
-    // pub fn submit_atomic_exec(
-    //     &self,
-    //     rt: &mut MockRuntime,
-    //     caller: &Address,
-    //     exec_params: AtomicExecParamsRaw,
-    //     submit_params: SubmitExecParams,
-    //     result: SubmitOutput,
-    //     len_submitted: usize,
-    //     code: ExitCode,
-    // ) -> Result<(), ActorError> {
-    //     rt.set_caller(*ACCOUNT_ACTOR_CODE_ID, *caller);
-    //     rt.expect_validate_caller_type(vec![*ACCOUNT_ACTOR_CODE_ID, *MULTISIG_ACTOR_CODE_ID]);
-    //
-    //     if code != ExitCode::OK {
-    //         expect_abort(
-    //             code,
-    //             rt.call::<Actor>(
-    //                 Method::SubmitAtomicExec as MethodNum,
-    //                 &RawBytes::serialize(submit_params).unwrap(),
-    //             ),
-    //         );
-    //         rt.verify();
-    //         return Ok(());
-    //     }
-    //
-    //     let ret = rt
-    //         .call::<Actor>(
-    //             Method::SubmitAtomicExec as MethodNum,
-    //             &RawBytes::serialize(submit_params.clone()).unwrap(),
-    //         )
-    //         .unwrap();
-    //     rt.verify();
-    //     let ret: SubmitOutput = RawBytes::deserialize(&ret).unwrap();
-    //
-    //     let st: State = rt.get_state();
-    //
-    //     if result.status != ExecStatus::Initialized {
-    //         // Check that the execution has been cleaned after it's finalized
-    //         if st.get_atomic_exec(rt.store(), &submit_params.cid.into()).unwrap().is_some() {
-    //             panic!("execution should have been cleaned when finalized");
-    //         }
-    //         for (k, _) in exec_params.inputs.iter() {
-    //             let addr = Address::from_str(k).unwrap();
-    //             let sn = addr.subnet().unwrap();
-    //             let sub = st.get_subnet(rt.store(), &sn).unwrap().unwrap();
-    //             let crossmsgs = sub.top_down_msgs.load(rt.store()).unwrap();
-    //             let msg = get_topdown_msg(&crossmsgs, 0).unwrap().unwrap();
-    //             match result.status {
-    //                 ExecStatus::Aborted => assert_eq!(msg.method, METHOD_ABORT),
-    //                 ExecStatus::Success => {
-    //                     assert_eq!(msg.method, METHOD_UNLOCK);
-    //                     let uparams = UnlockParams::from_raw_bytes(msg.params.borrow()).unwrap();
-    //                     assert_eq!(uparams.state, submit_params.output);
-    //                 }
-    //                 _ => panic!("wrong method in cross-net message propagating atomic exec result"),
-    //             }
-    //         }
-    //     } else {
-    //         let exec = st.get_atomic_exec(rt.store(), &submit_params.cid.into()).unwrap().unwrap();
-    //         assert_eq!(exec.status(), result.status);
-    //         assert_eq!(exec.submitted().len(), len_submitted);
-    //         assert_eq!(ret, result);
-    //     }
-    //
-    //     Ok(())
-    // }
-
     pub fn check_state(&self) {
         // TODO: https://github.com/filecoin-project/builtin-actors/issues/44
     }
@@ -714,7 +661,8 @@ impl Harness {
 pub fn verify_empty_map(rt: &MockRuntime, key: Cid) {
     let map =
         make_map_with_root_and_bitwidth::<_, BigIntDe>(&key, &rt.store, HAMT_BIT_WIDTH).unwrap();
-    map.for_each(|_key, _val| panic!("expected no keys")).unwrap();
+    map.for_each(|_key, _val| panic!("expected no keys"))
+        .unwrap();
 }
 
 pub fn has_childcheck_source<'a>(
@@ -736,9 +684,17 @@ pub fn add_msg_meta(
     value: TokenAmount,
 ) {
     let mh_code = Code::Blake2b256;
-    let c = TCid::from(Cid::new_v1(fvm_ipld_encoding::DAG_CBOR, mh_code.digest(&rand)));
-    let meta =
-        CrossMsgMeta { from: from.clone(), to: to.clone(), msgs_cid: c, nonce: 0, value };
+    let c = TCid::from(Cid::new_v1(
+        fvm_ipld_encoding::DAG_CBOR,
+        mh_code.digest(&rand),
+    ));
+    let meta = CrossMsgMeta {
+        from: from.clone(),
+        to: to.clone(),
+        msgs_cid: c,
+        nonce: 0,
+        value,
+    };
     ch.append_msgmeta(meta).unwrap();
 }
 
@@ -746,5 +702,7 @@ fn get_cross_msgs<'m, BS: Blockstore>(
     registry: &'m Map<BS, CrossMsgs>,
     cid: &Cid,
 ) -> anyhow::Result<Option<&'m CrossMsgs>> {
-    registry.get(&cid.to_bytes()).map_err(|e| anyhow!("error getting fross messages: {:?}", e))
+    registry
+        .get(&cid.to_bytes())
+        .map_err(|e| anyhow!("error getting fross messages: {:?}", e))
 }
