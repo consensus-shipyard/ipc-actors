@@ -66,6 +66,9 @@ impl IPCAddress {
     }
 
     pub fn to_string(&self) -> Result<String, Error> {
+        // `-` is used as delimiter instead of `/`
+        // `/` is harder to parse as `SubnetId` contains `/`, which makes it difficult to
+        // determined which is the start of Address
         Ok(format!(
             "{}-{}",
             self.subnet_id.to_string(),
