@@ -66,8 +66,7 @@ impl IPCAddress {
     }
 
     pub fn to_string(&self) -> Result<String, Error> {
-        let bytes = self.to_bytes()?;
-        Ok(hex::encode(bytes))
+        Ok(format!("{}-{}", self.subnet_id.to_string(), self.raw_address.to_string()))
     }
 }
 
@@ -75,7 +74,14 @@ impl FromStr for IPCAddress {
     type Err = Error;
 
     fn from_str(addr: &str) -> Result<Self, Error> {
-        let bytes = hex::decode(addr)?;
-        Self::from_bytes(&bytes)
+        let r: Vec<&str> = addr.split("-").collect();
+        if r.len() != 2 {
+            Err(Error::InvalidIPCAddr)
+        } else {
+            Ok(Self {
+                raw_address: Address::from_str(r[1])?,
+                subnet_id: SubnetID::from_str(r[0])?,
+            })
+        }
     }
 }

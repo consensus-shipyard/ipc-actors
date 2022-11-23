@@ -258,6 +258,7 @@ mod tests {
         let sub_id = SubnetID::new(&ROOTNET_ID.clone(), Address::new_id(100));
         let addr = IPCAddress::new(&sub_id, &Address::new_id(101)).unwrap();
         let st = addr.to_string().unwrap();
+        println!("{}", st);
         let addr_out = IPCAddress::from_str(&st).unwrap();
         assert_eq!(addr, addr_out);
     }
