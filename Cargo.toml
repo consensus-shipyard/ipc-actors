@@ -16,7 +16,7 @@ crate-type = ["cdylib", "lib"]
 [dependencies]
 fil_actors_runtime = { git = "https://github.com/consensus-shipyard/fvm-utils", features = ["fil-actor"] }
 primitives = { git = "https://github.com/consensus-shipyard/fvm-utils" }
-fvm_shared = { version = "3.0.0-alpha.12", default-features = false }
+fvm_shared = { version = "=3.0.0-alpha.5", default-features = false }
 fvm_ipld_hamt = "0.5.1"
 num-traits = "0.2.14"
 num-derive = "0.3.3"
