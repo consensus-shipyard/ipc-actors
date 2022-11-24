@@ -1,4 +1,3 @@
-use cross::CrossMsg;
 use fil_actors_runtime::runtime::{ActorCode, Runtime};
 use fil_actors_runtime::{
     actor_error, cbor, ActorDowncast, ActorError, BURNT_FUNDS_ACTOR_ADDR, INIT_ACTOR_ADDR,
@@ -18,7 +17,7 @@ use num_traits::FromPrimitive;
 use std::collections::HashMap;
 
 pub use self::checkpoint::{Checkpoint, CrossMsgMeta};
-pub use self::cross::{is_bottomup, CrossMsgs, IPCMsgType, StorableMsg};
+pub use self::cross::{is_bottomup, CrossMsg, CrossMsgs, IPCMsgType, StorableMsg};
 pub use self::state::*;
 pub use self::subnet::*;
 pub use self::types::*;
@@ -90,9 +89,6 @@ impl Actor {
         BS: Blockstore,
         RT: Runtime<BS>,
     {
-        // TODO: handle type check here.
-        rt.validate_immediate_caller_accept_any()?;
-
         let subnet_addr = rt.message().caller();
         let mut shid = SubnetID::default();
         rt.transaction(|st: &mut State, rt| {
@@ -130,10 +126,6 @@ impl Actor {
         BS: Blockstore,
         RT: Runtime<BS>,
     {
-        // TODO: handle type check here.
-        rt.validate_immediate_caller_accept_any()?;
-        // rt.validate_immediate_caller_type(std::iter::once(&Type::Subnet))?;
-
         let subnet_addr = rt.message().caller();
 
         let val = rt.message().value_received();
@@ -176,9 +168,6 @@ impl Actor {
         BS: Blockstore,
         RT: Runtime<BS>,
     {
-        // TODO: probably a registry for permission check
-        // rt.validate_immediate_caller_type(std::iter::once(&Type::Subnet))?;
-        rt.validate_immediate_caller_accept_any()?;
         let subnet_addr = rt.message().caller();
 
         let send_val = params.value;
@@ -245,10 +234,6 @@ impl Actor {
         BS: Blockstore,
         RT: Runtime<BS>,
     {
-        // TODO: handle type check here.
-        rt.validate_immediate_caller_accept_any()?;
-        // rt.validate_immediate_caller_type(std::iter::once(&Type::Subnet))?;
-
         let subnet_addr = rt.message().caller();
         let mut send_val = TokenAmount::zero();
 
@@ -306,10 +291,6 @@ impl Actor {
         BS: Blockstore,
         RT: Runtime<BS>,
     {
-        // TODO: handle type check here.
-        rt.validate_immediate_caller_accept_any()?;
-        // rt.validate_immediate_caller_type(std::iter::once(&Type::Subnet))?;
-
         let subnet_addr = rt.message().caller();
         let commit = params;
 
@@ -440,9 +421,6 @@ impl Actor {
     {
         // FIXME: Only supporting cross-messages initiated by signable addresses for
         // now. Consider supporting also send-cross messages initiated by actors.
-        // TODO: handle type check here.
-        // rt.validate_immediate_caller_type(CALLER_TYPES_SIGNABLE.iter())?;
-        rt.validate_immediate_caller_accept_any()?;
 
         let value = rt.message().value_received();
         if value <= TokenAmount::zero() {
@@ -490,10 +468,6 @@ impl Actor {
     {
         // FIXME: Only supporting cross-messages initiated by signable addresses for
         // now. Consider supporting also send-cross messages initiated by actors.
-
-        // TODO: handle type check here.
-        // rt.validate_immediate_caller_type(CALLER_TYPES_SIGNABLE.iter())?;
-        rt.validate_immediate_caller_accept_any()?;
 
         let value = rt.message().value_received();
         if value <= TokenAmount::zero() {
@@ -553,10 +527,6 @@ impl Actor {
         BS: Blockstore,
         RT: Runtime<BS>,
     {
-        // TODO: handle type check here.
-        // rt.validate_immediate_caller_type(CALLER_TYPES_SIGNABLE.iter())?;
-        rt.validate_immediate_caller_accept_any()?;
-
         if params.destination == SubnetID::default() {
             return Err(actor_error!(
                 illegal_argument,
@@ -633,10 +603,6 @@ impl Actor {
         BS: Blockstore,
         RT: Runtime<BS>,
     {
-        // TODO: handle type check here.
-        rt.validate_immediate_caller_accept_any()?;
-        // rt.validate_immediate_caller_is(std::iter::once(&*SYSTEM_ACTOR_ADDR))?;
-
         // FIXME: We just need the state to check the current network name, but we are
         // picking up the whole state. Is it more efficient in terms of performance and
         // gas usage to check how to apply the message (b-u or t-p) inside rt.transaction?
