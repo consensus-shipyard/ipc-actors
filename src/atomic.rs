@@ -8,22 +8,6 @@ use fvm_shared::MethodNum;
 use primitives::{TCid, THamt};
 use serde::{de::DeserializeOwned, Serialize};
 
-/// MethodNum to lock some state in an actor
-/// This methods are only supported in actors
-/// that support atomic executions.
-#[allow(dead_code)]
-pub const METHOD_LOCK: MethodNum = 2;
-/// MethodNum used to trigger the merge of an input with
-/// other input locked states.
-#[allow(dead_code)]
-pub const METHOD_MERGE: MethodNum = 3;
-/// MethodNum called to signal the abortion of an atomic execution
-/// and the unlock of all locked states in the actor for the execution
-pub const METHOD_ABORT: MethodNum = 4;
-/// MethodNum to trigger the merge of the output of an execution
-/// into the state of an actor, and the unlock of all locked states.
-pub const METHOD_UNLOCK: MethodNum = 5;
-
 /// Trait that determines the functions that need to be implemented by
 /// a state object to be lockable and be used in an atomic execution.
 ///
@@ -102,6 +86,8 @@ impl SerializedState {
     pub fn new(ser: Vec<u8>) -> Self {
         SerializedState { ser }
     }
+
+    #[allow(dead_code)]
     pub fn cid(&self) -> Cid {
         Cid::new_v1(DAG_CBOR, Blake2b256.digest(self.ser.as_slice()))
     }
@@ -123,6 +109,7 @@ pub struct LockParams {
 impl Cbor for LockParams {}
 
 impl LockParams {
+    #[allow(dead_code)]
     pub fn new(method: MethodNum, params: RawBytes) -> Self {
         LockParams { method, params }
     }
@@ -150,6 +137,7 @@ pub struct UnlockParams {
 }
 impl Cbor for UnlockParams {}
 impl UnlockParams {
+    #[allow(dead_code)]
     pub fn new(params: LockParams, state: SerializedState) -> Self {
         UnlockParams { params, state }
     }

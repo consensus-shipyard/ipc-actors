@@ -1,22 +1,18 @@
-use crate::exec::{
-    is_addr_in_exec, is_common_parent, AtomicExec, AtomicExecParamsRaw, ExecStatus, LockedOutput,
-    SubmitExecParams, SubmitOutput,
-};
 use crate::state::State;
-use cid::Cid;
 use fil_actors_runtime::runtime::{ActorCode, Runtime};
 use fil_actors_runtime::{actor_error, cbor, ActorDowncast, ActorError, INIT_ACTOR_ADDR};
 use fvm_ipld_blockstore::Blockstore;
 use fvm_ipld_encoding::RawBytes;
+use fvm_shared::econ::TokenAmount;
 use fvm_shared::error::ExitCode;
 use fvm_shared::{MethodNum, METHOD_CONSTRUCTOR};
+use ipc_gateway::{ApplyMsgParams, CrossMsg, StorableMsg};
 use num_derive::FromPrimitive;
-use num_traits::FromPrimitive;
+use num_traits::{FromPrimitive, Zero};
 
-use crate::types::ConstructorParams;
+pub use crate::types::{ConstructorParams, PreCommitParams, RevokeParams};
 
 mod atomic;
-mod exec;
 mod state;
 mod types;
 
@@ -28,8 +24,8 @@ fil_actors_runtime::wasm_trampoline!(Actor);
 #[repr(u64)]
 pub enum Method {
     Constructor = METHOD_CONSTRUCTOR,
-    InitAtomicExec = 2,
-    SubmitAtomicExec = 3,
+    PreCommit = 2,
+    Revoke = 3,
 }
 
 /// Atomic execution coordinator actor
@@ -50,246 +46,168 @@ impl Actor {
         Ok(())
     }
 
-    /// Initializes an atomic execution to be orchestrated by the current subnet.
-    /// This method verifies that the execution is being orchestrated by the right subnet
-    /// and that its semantics and inputs are correct.
-    fn init_atomic_exec<BS, RT>(
-        rt: &mut RT,
-        params: AtomicExecParamsRaw,
-    ) -> Result<LockedOutput, ActorError>
+    /// Records a pre-commitment from an actor to perform an atomic
+    /// execution. This method is to be invoked by a wrapped crossnet
+    /// message originating in one of the execution actors involved in
+    /// the atomic execution. Once the coordinator actor collects
+    /// pre-commitments from all the execution actors, it emits for
+    /// each of the execution actors a crossnet message triggering the
+    /// specified method to commit the atomic execution.
+    fn pre_commit<BS, RT>(rt: &mut RT, params: ApplyMsgParams) -> Result<bool, ActorError>
     where
         BS: Blockstore,
         RT: Runtime<BS>,
     {
-        // TODO: handle type check here.
-        // rt.validate_immediate_caller_type(CALLER_TYPES_SIGNABLE.iter())?;
-        rt.validate_immediate_caller_accept_any()?;
+        let st: State = rt.state()?;
 
-        // get cid for atomic execution
-        let cid = params.cid().map_err(|e| {
-            e.downcast_default(
-                ExitCode::USR_ILLEGAL_ARGUMENT,
-                "error computing Cid for params",
-            )
-        })?;
+        // Check if the cross-message comes from the IPC gateway actor
+        rt.validate_immediate_caller_is(std::iter::once(&st.ipc_gateway_address))?;
 
-        // translate inputs into id addresses for the subnet.
-        let params = params.input_into_ids(rt).map_err(|e| {
-            e.downcast_default(
-                ExitCode::USR_ILLEGAL_ARGUMENT,
-                "error translating execution input addresses to IDs",
-            )
-        })?;
+        let ApplyMsgParams {
+            cross_msg:
+                CrossMsg {
+                    msg: StorableMsg { from, params, .. },
+                    ..
+                },
+        } = params;
 
-        rt.transaction(|st: &mut State, rt| {
-            match st.get_atomic_exec(rt.store(), &cid.into()).map_err(|e| {
-                e.downcast_default(
-                    ExitCode::USR_ILLEGAL_ARGUMENT,
-                    "error translating execution input addresses to IDs",
-                )
-            })? {
-                Some(_) => {
-                    return Err(actor_error!(
-                    illegal_argument,
-                    format!("execution with cid {} already exists", &cid)
-                ));
+        let params: PreCommitParams = cbor::deserialize_params(&params)?;
+        let actors = &params.actors;
+        let exec_id = &params.exec_id;
+
+        if !actors.contains(&from) {
+            return Err(actor_error!(
+                illegal_argument,
+                "unexpected cross-message origin"
+            ));
+        }
+
+        let msgs = rt.transaction(|st: &mut State, rt| {
+            st.modify_atomic_exec(rt.store(), exec_id.clone(), actors.clone(), |entry| {
+                // Record the pre-commitment
+                entry.insert(from, params.commit);
+
+                // Check if any pre-commitment is missing
+                for actor in actors {
+                    if !entry.contains_key(actor) {
+                        return Ok(None);
+                    }
                 }
-                None => {
-                    // check if exec has correct number of inputs and messages.
-                    if params.msgs.is_empty() || params.inputs.len() < 2 {
-                        return Err(actor_error!(
-                        illegal_argument,
-                        "wrong number of messages or inputs provided for execution"
-                    ));
-                    }
-                    // check if we are the common parent and entitle to execute the system.
-                    if !is_common_parent(&st.network_name, &params.inputs).map_err(|e| {
-                        e.downcast_default(
-                            ExitCode::USR_ILLEGAL_ARGUMENT,
-                            "computing common parent for the execution",
-                        )
-                    })?
-                    {
-                        return Err(actor_error!(
-                        illegal_argument,
-                        "can't initialize atomic execution if we are not the common parent"
-                    ));
-                    }
 
-                    // TODO: check if the atomic execution is initiated in the same address for different
-                    // subnets? (that would be kind of stupid -.-)
-
-                    // sanity-check: verify that all messages have same method and are directed to the same actor
-                    // NOTE: This can probably be relaxed in the future
-                    let method = params.msgs[0].method;
-                    let to = params.msgs[0].to.clone();
-                    for m in params.msgs.iter() {
-                        if m.method != method || m.to != to {
-                            return Err(actor_error!(
-                            illegal_argument,
-                            "atomic exec doesn't support execution for messages with different methods and to different actors"
-                        ));
-                        }
-                    }
-
-                    // store the new initialized execution
-                    st.set_atomic_exec(rt.store(), &cid.into(), AtomicExec::new(params)).map_err(|e| {
-                        e.downcast_default(
-                            ExitCode::USR_ILLEGAL_STATE,
-                            "error putting initialized atomic execution in registry",
-                        )
-                    })?
-                    ;
-                }
-            };
-            Ok(())
+                // Prepare messages to commit the atomic execution
+                let mut msgs = Vec::new();
+                entry.iter_mut().for_each(|(addr, &mut method)| {
+                    msgs.push(CrossMsg {
+                        msg: StorableMsg {
+                            to: addr.to_owned(),
+                            method,
+                            params: exec_id.clone(),
+                            ..Default::default()
+                        },
+                        wrapped: true,
+                    });
+                });
+                Ok(Some(msgs))
+            })
+            .map_err(|e| {
+                e.downcast_default(ExitCode::USR_ILLEGAL_STATE, "failed to update registry")
+            })
         })?;
 
-        // return cid for the execution
-        Ok(LockedOutput { cid })
-    }
+        match msgs {
+            Some(msgs) => {
+                // Send the messages to commit the atomic execution
+                for msg in msgs {
+                    rt.send(
+                        st.ipc_gateway_address,
+                        ipc_gateway::Method::SendCross as MethodNum,
+                        RawBytes::serialize(msg)?,
+                        TokenAmount::zero(),
+                    )?;
+                }
 
-    /// This method submits the result of an atomic execution and mutates its state
-    /// accordingly.
-    fn submit_atomic_exec<BS, RT>(
-        rt: &mut RT,
-        params: SubmitExecParams,
-    ) -> Result<SubmitOutput, ActorError>
-    where
-        BS: Blockstore,
-        RT: Runtime<BS>,
-    {
-        // TODO: handle type check here.
-        // rt.validate_immediate_caller_type(CALLER_TYPES_SIGNABLE.iter())?;
-        rt.validate_immediate_caller_accept_any()?;
-
-        let caller = rt.message().caller();
-
-        let mut msgs = vec![];
-
-        let status = rt.transaction(|st: &mut State, rt| {
-            let cid = params.cid;
-
-            match st.get_atomic_exec(rt.store(), &cid.into()).map_err(|e| {
-                e.downcast_default(
-                    ExitCode::USR_ILLEGAL_ARGUMENT,
-                    "error translating execution input addresses to IDs",
-                )
-            })? {
-                None => Err(actor_error!(
-                    illegal_argument,
-                    format!("execution with cid {} no longer exist", &cid)
-                )),
-                Some(mut exec) => {
-                    // check if the output is aborted or already succeeded
-                    if exec.status() != ExecStatus::Initialized {
-                        return Err(actor_error!(
-                            illegal_state,
-                            format!("execution with cid {} no longer exist", &cid)
-                        ));
-                    }
-
-                    // check if the user is involved in the execution
-                    if !is_addr_in_exec(&caller, &exec.params().inputs).map_err(|e| {
-                        e.downcast_default(
-                            ExitCode::USR_ILLEGAL_ARGUMENT,
-                            "error checking if address is involved in the execution",
-                        )
-                    })? {
-                        return Err(actor_error!(
-                            illegal_argument,
-                            format!("caller not part of the execution for cid {}", &cid)
-                        ));
-                    }
-
-                    // check if the address already submitted an output
-                    // FIXME: At this point we don't support the atomic execution between
-                    // the same address in different subnets. This can be easily supported if needed.
-                    if exec.submitted().get(&caller.to_string()).is_some() {
-                        return Err(actor_error!(
-                            illegal_argument,
-                            format!("caller for exec {} already submitted their output", &cid)
-                        ));
-                    };
-
-                    // check if this is an abort
-                    if params.abort {
-                        // mutate status
-                        exec.set_status(ExecStatus::Aborted);
-                        //  propagate result to subnet
-                        let mut m = st
-                            .propagate_exec_result(
-                                rt.store(),
-                                &cid.into(),
-                                &exec,
-                                params.output,
-                                true,
-                            )
-                            .map_err(|e| {
-                                e.downcast_default(
-                                    ExitCode::USR_ILLEGAL_STATE,
-                                    "error propagating execution result to subnets",
-                                )
-                            })?;
-
-                        msgs.append(&mut m);
-
-                        return Ok(exec.status());
-                    }
-
-                    // if not aborting
-                    let output_cid = params.output.cid();
-                    // check if all the submitted are equal to current cid
-                    let out_cids: Vec<Cid> = exec.submitted().values().cloned().collect();
-                    if !out_cids.iter().all(|&c| c == output_cid) {
-                        return Err(actor_error!(
-                            illegal_argument,
-                            format!("cid provided not equal to the ones submitted: {}", &cid)
-                        ));
-                    }
-                    exec.submitted_mut().insert(caller.to_string(), output_cid);
-                    // if all submissions collected
-                    if exec.submitted().len() == exec.params().inputs.len() {
-                        exec.set_status(ExecStatus::Success);
-                        let mut m = st
-                            .propagate_exec_result(
-                                rt.store(),
-                                &cid.into(),
-                                &exec,
-                                params.output,
-                                false,
-                            )
-                            .map_err(|e| {
-                                e.downcast_default(
-                                    ExitCode::USR_ILLEGAL_STATE,
-                                    "error propagating execution result to subnets",
-                                )
-                            })?;
-
-                        msgs.append(&mut m);
-
-                        return Ok(exec.status());
-                    }
-                    // persist the execution
-                    let status = exec.status();
-                    st.set_atomic_exec(rt.store(), &cid.into(), exec)
+                // Remove the atomic execution entry
+                rt.transaction(|st: &mut State, rt| {
+                    st.rm_atomic_exec(rt.store(), exec_id.clone(), actors.clone())
                         .map_err(|e| {
                             e.downcast_default(
                                 ExitCode::USR_ILLEGAL_STATE,
-                                "error putting aborted atomic execution in registry",
+                                "failed to remove atomic exec from registry",
                             )
-                        })?;
-                    Ok(status)
-                }
-            }
-        })?;
+                        })
+                })?;
 
-        for (to, method, payload, amount) in msgs {
-            rt.send(to, method, payload, amount)?;
+                Ok(true)
+            }
+            None => Ok(false),
+        }
+    }
+
+    /// Removes a pre-commitment from an actor to perform an atomic
+    /// execution. This method is to be invoked by a wrapped crossnet
+    /// message originating in one of the execution actors involved in
+    /// the atomic execution.
+    fn revoke<BS, RT>(rt: &mut RT, params: ApplyMsgParams) -> Result<(), ActorError>
+    where
+        BS: Blockstore,
+        RT: Runtime<BS>,
+    {
+        let st: State = rt.state()?;
+
+        // Check if the cross-message comes from the IPC gateway actor
+        rt.validate_immediate_caller_is(std::iter::once(&st.ipc_gateway_address))?;
+
+        let ApplyMsgParams {
+            cross_msg:
+                CrossMsg {
+                    msg: StorableMsg { from, params, .. },
+                    ..
+                },
+        } = params;
+
+        let params: RevokeParams = cbor::deserialize_params(&params)?;
+        let actors = &params.actors;
+        let exec_id = &params.exec_id;
+
+        if !actors.contains(&from) {
+            return Err(actor_error!(
+                illegal_argument,
+                "unexpected cross-message origin"
+            ));
         }
 
-        // return cid for the execution
-        Ok(SubmitOutput { status })
+        let msg = rt.transaction(|st: &mut State, rt| {
+            st.modify_atomic_exec(rt.store(), exec_id.clone(), actors.clone(), |entry| {
+                // Remove the pre-commitment
+                entry.remove_entry(&from);
+
+                // Prepare a message to rollback the atomic execution
+                Ok(Some(CrossMsg {
+                    msg: StorableMsg {
+                        to: from,
+                        method: params.rollback,
+                        params: exec_id.clone(),
+                        ..Default::default()
+                    },
+                    wrapped: true,
+                }))
+            })
+            .map_err(|e| {
+                e.downcast_default(ExitCode::USR_ILLEGAL_STATE, "failed to update registry")
+            })
+        })?;
+
+        if let Some(msg) = msg {
+            // Send the message to rollback the atomic execution
+            rt.send(
+                st.ipc_gateway_address,
+                ipc_gateway::Method::SendCross as MethodNum,
+                RawBytes::serialize(msg)?,
+                TokenAmount::zero(),
+            )?;
+        }
+
+        Ok(())
     }
 }
 
@@ -308,13 +226,13 @@ impl ActorCode for Actor {
                 Self::constructor(rt, cbor::deserialize_params(params)?)?;
                 Ok(RawBytes::default())
             }
-            Some(Method::InitAtomicExec) => {
-                let res = Self::init_atomic_exec(rt, cbor::deserialize_params(params)?)?;
+            Some(Method::PreCommit) => {
+                let res = Self::pre_commit(rt, cbor::deserialize_params(params)?)?;
                 Ok(RawBytes::serialize(res)?)
             }
-            Some(Method::SubmitAtomicExec) => {
-                let res = Self::submit_atomic_exec(rt, cbor::deserialize_params(params)?)?;
-                Ok(RawBytes::serialize(res)?)
+            Some(Method::Revoke) => {
+                Self::revoke(rt, cbor::deserialize_params(params)?)?;
+                Ok(RawBytes::default())
             }
             None => Err(actor_error!(unhandled_message; "Invalid method")),
         }
