@@ -89,6 +89,8 @@ impl Actor {
         BS: Blockstore,
         RT: Runtime<BS>,
     {
+        rt.validate_immediate_caller_accept_any()?;
+
         let subnet_addr = rt.message().caller();
         let mut shid = SubnetID::default();
         rt.transaction(|st: &mut State, rt| {
@@ -126,6 +128,8 @@ impl Actor {
         BS: Blockstore,
         RT: Runtime<BS>,
     {
+        rt.validate_immediate_caller_accept_any()?;
+
         let subnet_addr = rt.message().caller();
 
         let val = rt.message().value_received();
@@ -168,6 +172,8 @@ impl Actor {
         BS: Blockstore,
         RT: Runtime<BS>,
     {
+        rt.validate_immediate_caller_accept_any()?;
+
         let subnet_addr = rt.message().caller();
 
         let send_val = params.value;
@@ -234,6 +240,8 @@ impl Actor {
         BS: Blockstore,
         RT: Runtime<BS>,
     {
+        rt.validate_immediate_caller_accept_any()?;
+
         let subnet_addr = rt.message().caller();
         let mut send_val = TokenAmount::zero();
 
@@ -291,6 +299,8 @@ impl Actor {
         BS: Blockstore,
         RT: Runtime<BS>,
     {
+        rt.validate_immediate_caller_accept_any()?;
+
         let subnet_addr = rt.message().caller();
         let commit = params;
 
@@ -419,6 +429,8 @@ impl Actor {
         BS: Blockstore,
         RT: Runtime<BS>,
     {
+        rt.validate_immediate_caller_accept_any()?;
+
         // FIXME: Only supporting cross-messages initiated by signable addresses for
         // now. Consider supporting also send-cross messages initiated by actors.
 
@@ -466,6 +478,8 @@ impl Actor {
         BS: Blockstore,
         RT: Runtime<BS>,
     {
+        rt.validate_immediate_caller_accept_any()?;
+
         // FIXME: Only supporting cross-messages initiated by signable addresses for
         // now. Consider supporting also send-cross messages initiated by actors.
 
@@ -527,6 +541,8 @@ impl Actor {
         BS: Blockstore,
         RT: Runtime<BS>,
     {
+        rt.validate_immediate_caller_accept_any()?;
+
         if params.destination == SubnetID::default() {
             return Err(actor_error!(
                 illegal_argument,
@@ -603,6 +619,8 @@ impl Actor {
         BS: Blockstore,
         RT: Runtime<BS>,
     {
+        rt.validate_immediate_caller_accept_any()?;
+
         // FIXME: We just need the state to check the current network name, but we are
         // picking up the whole state. Is it more efficient in terms of performance and
         // gas usage to check how to apply the message (b-u or t-p) inside rt.transaction?

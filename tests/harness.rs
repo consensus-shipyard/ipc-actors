@@ -115,6 +115,7 @@ impl Harness {
         rt.set_caller(*SUBNET_ACTOR_CODE_ID, *subnet_addr);
         rt.set_value(value.clone());
         rt.set_balance(value.clone());
+        rt.expect_validate_caller_any();
 
         if code != ExitCode::OK {
             expect_abort(
@@ -144,6 +145,7 @@ impl Harness {
     ) -> Result<(), ActorError> {
         rt.set_caller(*SUBNET_ACTOR_CODE_ID, id.subnet_actor());
         rt.set_value(value.clone());
+        rt.expect_validate_caller_any();
 
         if code != ExitCode::OK {
             expect_abort(
@@ -169,6 +171,8 @@ impl Harness {
         code: ExitCode,
     ) -> Result<(), ActorError> {
         rt.set_caller(*SUBNET_ACTOR_CODE_ID, id.subnet_actor());
+        rt.expect_validate_caller_any();
+
         let params = FundParams {
             value: value.clone(),
         };
@@ -211,6 +215,7 @@ impl Harness {
         code: ExitCode,
     ) -> Result<(), ActorError> {
         rt.set_caller(*SUBNET_ACTOR_CODE_ID, id.subnet_actor());
+        rt.expect_validate_caller_any();
 
         if code != ExitCode::OK {
             expect_abort(
@@ -245,6 +250,7 @@ impl Harness {
         burn_value: TokenAmount,
     ) -> Result<(), ActorError> {
         rt.set_caller(*SUBNET_ACTOR_CODE_ID, id.subnet_actor());
+        rt.expect_validate_caller_any();
 
         if code != ExitCode::OK {
             expect_abort(
@@ -289,6 +295,7 @@ impl Harness {
         expected_circ_sup: &TokenAmount,
     ) -> Result<(), ActorError> {
         rt.set_caller(*ACCOUNT_ACTOR_CODE_ID, *funder);
+        rt.expect_validate_caller_any();
 
         rt.set_value(value.clone());
         if code != ExitCode::OK {
@@ -345,6 +352,7 @@ impl Harness {
         prev_meta: &Cid,
     ) -> Result<Cid, ActorError> {
         rt.set_caller(*ACCOUNT_ACTOR_CODE_ID, *releaser);
+        rt.expect_validate_caller_any();
 
         rt.set_value(value.clone());
         if code != ExitCode::OK {
@@ -421,6 +429,7 @@ impl Harness {
         expected_circ_sup: &TokenAmount,
     ) -> Result<(), ActorError> {
         rt.set_caller(*ACCOUNT_ACTOR_CODE_ID, *from);
+        rt.expect_validate_caller_any();
 
         rt.set_value(value.clone());
 
@@ -532,6 +541,7 @@ impl Harness {
         noop: bool,
     ) -> Result<(), ActorError> {
         rt.set_caller(*SYSTEM_ACTOR_CODE_ID, *SYSTEM_ACTOR_ADDR);
+        rt.expect_validate_caller_any();
 
         rt.set_balance(value.clone());
         let params = StorableMsg {
