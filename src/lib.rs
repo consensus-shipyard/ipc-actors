@@ -10,9 +10,8 @@ use ipc_gateway::{ApplyMsgParams, CrossMsg, StorableMsg};
 use num_derive::FromPrimitive;
 use num_traits::{FromPrimitive, Zero};
 
-pub use crate::types::{ConstructorParams, PreCommitParams, RevokeParams};
+pub use crate::types::{AtomicExecID, ConstructorParams, PreCommitParams, RevokeParams};
 
-mod atomic;
 mod state;
 mod types;
 
