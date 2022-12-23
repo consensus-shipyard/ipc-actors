@@ -13,7 +13,10 @@ keywords = ["filecoin", "web3", "wasm"]
 crate-type = ["cdylib", "lib"]
 
 [workspace]
-members = [ "primitives" ]
+members = [
+        "primitives",
+        "examples/fungible-token",
+]
 
 [dependencies]
 fil_actors_runtime = { git = "https://github.com/consensus-shipyard/fvm-utils", features = ["fil-actor"] }
