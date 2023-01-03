@@ -1,0 +1,35 @@
+[package]
+name = "ipc-subnet-actor"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+fil_actors_runtime = { git = "https://github.com/consensus-shipyard/fvm-utils", features = ["fil-actor"] }
+ipc-gateway = { path = "../gateway" }
+primitives = { git = "https://github.com/consensus-shipyard/fvm-utils"}
+fvm_shared = { version = "=3.0.0-alpha.5", default-features = false }
+fvm_ipld_hamt = "0.5.1"
+num-traits = "0.2.14"
+num-derive = "0.3.3"
+log = "0.4.14"
+indexmap = { version = "1.8.0", features = ["serde-1"] }
+cid = { version = "0.8.3", default-features = false, features = ["serde-codec"] }
+integer-encoding = { version = "3.0.3", default-features = false }
+lazy_static = "1.4.0"
+serde_tuple = "0.5"
+serde = { version = "1.0.136", features = ["derive"] }
+anyhow = "1.0.56"
+fvm_ipld_blockstore = "0.1.1"
+fvm_ipld_encoding = "0.3.0"
+thiserror = "1.0.37"
+unsigned-varint = "0.7.1"
+num = "0.4.0"
+
+[dev-dependencies]
+# Enable test-utils only in dev
+fil_actors_runtime = { git = "https://github.com/consensus-shipyard/fvm-utils", features = ["fil-actor", "test_utils"] }
+base64 = "0.13.1"
+
+[build-dependencies]
+wasm-builder = "3.0.1"
+wasmtime = "0.35.2"
