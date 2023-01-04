@@ -1,11 +1,17 @@
 [package]
 name = "ipc-subnet-actor"
-version = "0.1.0"
+description = "IPC subnet actor code"
+version = "0.0.1"
+license = "MIT OR Apache-2.0"
+authors = ["ConsensusLab", "Protocol Labs", "Filecoin Core Devs"]
 edition = "2021"
+repository = "https://github.com/consensus-shipyard/ipc-gateway"
+keywords = ["filecoin", "web3", "wasm", "ipc"]
 
 [dependencies]
 fil_actors_runtime = { git = "https://github.com/consensus-shipyard/fvm-utils", features = ["fil-actor"] }
 ipc-gateway = { path = "../gateway" }
+ipc-sdk = { path = "../sdk" }
 primitives = { git = "https://github.com/consensus-shipyard/fvm-utils"}
 fvm_shared = { version = "=3.0.0-alpha.5", default-features = false }
 fvm_ipld_hamt = "0.5.1"

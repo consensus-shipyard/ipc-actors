@@ -7,9 +7,8 @@ use fvm_shared::clock::ChainEpoch;
 use fvm_shared::econ::TokenAmount;
 use fvm_shared::error::ExitCode;
 use ipc_gateway::Status::{Active, Inactive};
-use ipc_gateway::{
-    get_bottomup_msg, Checkpoint, IPCAddress, State, SubnetID, DEFAULT_CHECKPOINT_PERIOD,
-};
+use ipc_gateway::{get_bottomup_msg, Checkpoint, IPCAddress, State, DEFAULT_CHECKPOINT_PERIOD};
+use ipc_sdk::subnet_id::SubnetID;
 use primitives::TCid;
 use std::ops::Mul;
 use std::str::FromStr;

@@ -1,5 +1,5 @@
 // Copyright: ConsensusLab
-//
+
 use anyhow::anyhow;
 use cid::Cid;
 use fil_actors_runtime::runtime::Runtime;
@@ -17,7 +17,7 @@ use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::str::FromStr;
 
-use crate::subnet_id::SubnetID;
+use ipc_sdk::subnet_id::SubnetID;
 
 use super::checkpoint::*;
 use super::cross::*;

@@ -21,13 +21,12 @@ pub use self::cross::{is_bottomup, CrossMsg, CrossMsgs, IPCMsgType, StorableMsg}
 pub use self::state::*;
 pub use self::subnet::*;
 pub use self::types::*;
-pub use crate::address::IPCAddress;
-pub use crate::subnet_id::SubnetID;
+pub use ipc_sdk::address::IPCAddress;
+pub use ipc_sdk::subnet_id::SubnetID;
 
 #[cfg(feature = "fil-actor")]
 fil_actors_runtime::wasm_trampoline!(Actor);
 
-mod address;
 pub mod checkpoint;
 mod cross;
 mod error;
@@ -35,7 +34,6 @@ mod error;
 pub mod ext;
 mod state;
 pub mod subnet;
-mod subnet_id;
 mod types;
 
 // TODO: make this into constructor!

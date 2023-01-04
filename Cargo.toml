@@ -1,18 +1,16 @@
 [package]
-name = "ipc"
-description = "Collection of all IPC related modules"
+name = "ipc_actors"
+description = "Collection of all IPC actors related modules"
 version = "0.0.1"
 license = "MIT OR Apache-2.0"
 authors = ["ConsensusLab", "Protocol Labs", "Filecoin Core Devs"]
-edition = "2018"
+edition = "2021"
 repository = "https://github.com/consensus-shipyard/ipc-gateway"
-keywords = ["filecoin", "web3", "wasm"]
+keywords = ["filecoin", "web3", "wasm", "ipc"]
 
 [workspace]
 members = [
     "gateway",
-    "subnet-actor"
+    "subnet-actor",
+    "sdk"
 ]
-
-[build-dependencies]
-wasm-builder = "3.0.1"

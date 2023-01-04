@@ -11,7 +11,7 @@ mod test {
     use fvm_shared::error::ExitCode;
     use ipc_gateway::{Checkpoint, FundParams, SubnetID, MIN_COLLATERAL_AMOUNT};
     use ipc_subnet_actor::{
-        ext, Actor, ConsensusType, ConstructParams, JoinParams, Method, State, Status,
+        Actor, ConsensusType, ConstructParams, JoinParams, Method, State, Status,
     };
     use num_traits::Zero;
     use primitives::TCid;
@@ -602,7 +602,7 @@ mod test {
         runtime.set_caller(Cid::default(), sender.clone());
         runtime.expect_send(
             sender.clone(),
-            ext::account::PUBKEY_ADDRESS_METHOD as u64,
+            ipc_sdk::account::PUBKEY_ADDRESS_METHOD as u64,
             RawBytes::default(),
             TokenAmount::zero(),
             cbor::serialize(&sender.clone(), "test").unwrap(),

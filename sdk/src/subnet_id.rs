@@ -218,9 +218,9 @@ impl FromStr for SubnetID {
 
 #[cfg(test)]
 mod tests {
-    use crate::subnet_id::{SubnetID, ROOTNET_ID};
     use crate::IPCAddress;
     use fvm_shared::address::Address;
+    use sdk::subnet_id::{SubnetID, ROOTNET_ID};
     use std::str::FromStr;
 
     #[test]
