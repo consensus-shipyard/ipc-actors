@@ -415,14 +415,19 @@ impl Actor {
         Ok(())
     }
 
-    /// Fund injects new funds from an account of the parent chain to a subnet.
+    /// Deposit fund from root to the specified `ipc_address`.
     ///
-    /// This functions receives a transaction with the FILs that want to be injected in the subnet.
-    /// - Funds injected are frozen.
-    /// - A new fund cross-message is created and stored to propagate it to the subnet. It will be
-    /// picked up by miners to include it in the next possible block.
-    /// - The cross-message nonce is updated.
-    fn fund<BS, RT>(rt: &mut RT, params: SubnetID) -> Result<(), ActorError>
+    /// # Arguments
+    ///
+    /// * `root_ipc_addr` - The root ipc address to send the fund from
+    /// * `to_ipc_addr` - The target ipc address to send the fund to
+    /// * `amount` - The amount to send
+    fn deposit<BS, RT>(
+        rt: &mut RT,
+        root_ipc_addr: IPCAddress,
+        to_ipc_addr: IPCAddress,
+        amount: TokenAmount,
+    ) -> Result<(), ActorError>
     where
         BS: Blockstore,
         RT: Runtime<BS>,
@@ -432,36 +437,24 @@ impl Actor {
         // FIXME: Only supporting cross-messages initiated by signable addresses for
         // now. Consider supporting also send-cross messages initiated by actors.
 
-        let value = rt.message().value_received();
-        if value <= TokenAmount::zero() {
-            return Err(actor_error!(
-                illegal_argument,
-                "no funds included in fund message"
-            ));
-        }
+        // TODO: how do we map the ipc address to address for fund deposit?
+        let to = to_ipc_addr.raw_addr()?;
+        let from = root_ipc_addr.raw_addr()?;
 
-        let sig_addr = resolve_secp_bls(rt, rt.message().caller())?;
+        // TODO: check `from` actually has enough fund for deposit?
+        // TODO: we need to book keep the funds of each address in the ipc-gateway?
 
-        rt.transaction(|st: &mut State, rt| {
-            // Create fund message
-            let mut f_msg = CrossMsg {
-                msg: StorableMsg::new_fund_msg(&params, &sig_addr, value).map_err(|e| {
-                    e.downcast_default(
-                        ExitCode::USR_ILLEGAL_STATE,
-                        "error creating fund cross-message",
-                    )
-                })?,
-                wrapped: false,
-            };
-            // Commit top-down message.
-            st.commit_topdown_msg(rt.store(), &mut f_msg).map_err(|e| {
-                e.downcast_default(
-                    ExitCode::USR_ILLEGAL_STATE,
-                    "error committing top-down message",
-                )
-            })?;
-            Ok(())
-        })?;
+        // TODO: deduct the stored fund amount of `from` address
+
+        // TODO: increment the stored fund amount of `to` address
+
+        // performs the actual send fund operation
+        rt.send(
+            to,
+            METHOD_SEND,
+            RawBytes::default(),
+            value.clone(),
+        )?;
 
         Ok(())
     }
