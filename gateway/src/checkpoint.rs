@@ -5,10 +5,11 @@ use cid::Cid;
 use fvm_ipld_encoding::{serde_bytes, to_vec, Cbor};
 use fvm_shared::clock::ChainEpoch;
 use fvm_shared::econ::TokenAmount;
+use ipc_sdk::subnet_id::SubnetID;
 use primitives::{TCid, TLink};
 use serde::{Deserialize, Serialize};
 
-use crate::{CrossMsgs, SubnetID};
+use crate::CrossMsgs;
 
 #[derive(PartialEq, Eq, Clone, Debug, Serialize, Deserialize)]
 pub struct Checkpoint {

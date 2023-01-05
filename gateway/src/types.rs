@@ -2,11 +2,11 @@ use fil_actors_runtime::Array;
 use fvm_ipld_encoding::tuple::{Deserialize_tuple, Serialize_tuple};
 use fvm_shared::clock::ChainEpoch;
 use fvm_shared::econ::TokenAmount;
+use ipc_sdk::subnet_id::SubnetID;
 use serde::{Deserialize, Serialize};
 
 use crate::checkpoint::{Checkpoint, CrossMsgMeta};
 use crate::cross::CrossMsg;
-use crate::subnet_id::SubnetID;
 
 pub const CROSSMSG_AMT_BITWIDTH: u32 = 3;
 pub const DEFAULT_CHECKPOINT_PERIOD: ChainEpoch = 10;

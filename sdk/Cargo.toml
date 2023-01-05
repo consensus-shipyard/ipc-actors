@@ -1,0 +1,20 @@
+[package]
+name = "ipc-sdk"
+description = "Common types and util functions for IPC actors"
+version = "0.0.1"
+license = "MIT OR Apache-2.0"
+authors = ["ConsensusLab", "Protocol Labs", "Filecoin Core Devs"]
+edition = "2021"
+repository = "https://github.com/consensus-shipyard/ipc-actors"
+keywords = ["filecoin", "web3", "wasm", "ipc"]
+
+# See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
+
+[dependencies]
+fvm_ipld_encoding = "0.3.0"
+lazy_static = "1.4.0"
+serde_tuple = "0.5"
+serde = { version = "1.0.136", features = ["derive"] }
+fvm_shared = { version = "=3.0.0-alpha.5", default-features = false }
+thiserror = "1.0.38"
+fil_actors_runtime = { git = "https://github.com/consensus-shipyard/fvm-utils", features = ["fil-actor"] }

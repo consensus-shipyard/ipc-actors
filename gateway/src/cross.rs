@@ -1,4 +1,3 @@
-use crate::address::IPCAddress;
 use crate::ApplyMsgParams;
 use anyhow::anyhow;
 use cid::Cid;
@@ -13,12 +12,13 @@ use fvm_shared::address::Address;
 use fvm_shared::econ::TokenAmount;
 use fvm_shared::MethodNum;
 use fvm_shared::METHOD_SEND;
+use ipc_sdk::address::IPCAddress;
+use ipc_sdk::subnet_id::SubnetID;
 use primitives::{TAmt, TCid, TLink};
 use serde::{Deserialize, Serialize};
 use std::path::Path;
 
 use crate::checkpoint::CrossMsgMeta;
-use crate::SubnetID;
 
 /// StorableMsg stores all the relevant information required
 /// to execute cross-messages.

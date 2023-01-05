@@ -6,8 +6,8 @@ use fvm_shared::econ::TokenAmount;
 use primitives::{TAmt, TCid};
 use serde::{Deserialize, Serialize};
 
-use crate::subnet_id::SubnetID;
 use crate::CROSSMSG_AMT_BITWIDTH;
+use ipc_sdk::subnet_id::SubnetID;
 
 use super::checkpoint::*;
 use super::cross::CrossMsg;

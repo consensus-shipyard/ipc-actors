@@ -1,5 +1,5 @@
 use crate::error::Error;
-use crate::SubnetID;
+use crate::subnet_id::SubnetID;
 use fil_actors_runtime::cbor;
 use fvm_ipld_encoding::RawBytes;
 use fvm_shared::address::Address;
