@@ -5,7 +5,7 @@ version = "0.0.1"
 license = "MIT OR Apache-2.0"
 authors = ["ConsensusLab", "Protocol Labs", "Filecoin Core Devs"]
 edition = "2021"
-repository = "https://github.com/consensus-shipyard/ipc-gateway"
+repository = "https://github.com/consensus-shipyard/ipc-actors"
 keywords = ["filecoin", "web3", "wasm", "ipc"]
 
 [lib]
