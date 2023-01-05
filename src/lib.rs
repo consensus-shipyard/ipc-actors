@@ -20,6 +20,7 @@ mod exec;
 mod state;
 mod types;
 
+#[cfg(feature = "fil-actor")]
 fil_actors_runtime::wasm_trampoline!(Actor);
 
 /// Atomic execution coordinator actor methods available
