@@ -3,10 +3,11 @@
 use anyhow::anyhow;
 use cid::Cid;
 use fil_actors_runtime::runtime::Runtime;
-use fil_actors_runtime::{ActorDowncast, Map};
+use fil_actors_runtime::{actor_error, ActorDowncast, ActorError, Map};
 use fvm_ipld_blockstore::Blockstore;
 use fvm_ipld_encoding::Cbor;
 use fvm_ipld_hamt::BytesKey;
+use fvm_shared::address::Address;
 use fvm_shared::clock::ChainEpoch;
 use fvm_shared::econ::TokenAmount;
 use fvm_shared::error::ExitCode;
@@ -24,6 +25,11 @@ use super::cross::*;
 use super::subnet::*;
 use super::types::*;
 
+// TODO: maybe we can consider putting owner into PostBoxItem, we can
+// TODO: reduce write and read directly.
+// TODO: TCid<THamt<TCid<TLink<PostBoxItem>>, ()>> should do it
+type PostBox = TCid<THamt<Address, TCid<THamt<TCid<TLink<PostBoxItem>>, ()>>>>;
+
 /// Storage power actor state
 #[derive(Serialize, Deserialize)]
 pub struct State {
@@ -34,6 +40,9 @@ pub struct State {
     pub check_period: ChainEpoch,
     pub checkpoints: TCid<THamt<ChainEpoch, Checkpoint>>,
     pub check_msg_registry: TCid<THamt<TCid<TLink<CrossMsgs>>, CrossMsgs>>,
+    /// `postbox` keeps track for an EOA of all the cross-net messages triggered by
+    /// an actor that need to be propagated further through the hierarchy.
+    pub postbox: PostBox,
     pub nonce: u64,
     pub bottomup_nonce: u64,
     pub bottomup_msg_meta: TCid<TAmt<CrossMsgMeta, CROSSMSG_AMT_BITWIDTH>>,
@@ -60,6 +69,7 @@ impl State {
             },
             checkpoints: TCid::new_hamt(store)?,
             check_msg_registry: TCid::new_hamt(store)?,
+            postbox: TCid::new_hamt(store)?,
             nonce: Default::default(),
             bottomup_nonce: Default::default(),
             bottomup_msg_meta: TCid::new_amt(store)?,
@@ -480,6 +490,76 @@ impl State {
     /// noop is triggered to notify when a crossMsg fails to be applied successfully.
     pub fn noop_msg(&self) {
         panic!("error committing cross-msg. noop should be returned but not implemented yet");
+    }
+
+    /// Insert a cross message to the `postbox` before propagate can be called for the
+    /// message to be propagated upwards or downwards.
+    ///
+    /// # Arguments
+    /// * `st` - The blockstore
+    /// * `owner` - The owner of the message that started the cross message
+    /// * `gas` - The gas needed to propagate this message
+    /// * `msg` - The actual cross msg to store in `postbox`
+    pub(crate) fn insert_postbox<BS: Blockstore>(
+        &mut self,
+        st: &BS,
+        owner: Address,
+        gas: TokenAmount,
+        msg: CrossMsg,
+    ) -> anyhow::Result<()> {
+        let item = PostBoxItem::new(gas, msg, owner);
+        self.postbox.update(st, |postbox| {
+            let addr_key = BytesKey::from(owner.to_bytes());
+
+            let wrapped_items = postbox.get(&addr_key)?;
+            let mut hamt = if let Some(cid) = wrapped_items {
+                // cid needs to load here as `postbox.get` cannot get a mutable ref.
+                cid.load(st)?
+            } else {
+                let cid: TCid<THamt<TCid<TLink<PostBoxItem>>, ()>> = TCid::new_hamt(st)?;
+                cid.load(st)?
+            };
+
+            let item_cid: TCid<TLink<PostBoxItem>, PostBoxItem> = TCid::new_link(st, &item)?;
+            hamt.set(BytesKey::from(item_cid.cid().to_bytes()), ())?;
+            let cid = hamt.flush()?;
+
+            postbox.set(addr_key, TCid::from(cid))?;
+
+            Ok(())
+        })
+    }
+
+    pub(crate) fn load_from_postbox<BS: Blockstore>(
+        &mut self,
+        st: &BS,
+        cid: Cid,
+    ) -> Result<PostBoxItem, ActorError> {
+        // TODO: use postbox to check cid actually exists, but postbox should just cid as key
+        // TODO: to the hamt, the check can be much more efficient.
+
+        let tcid = TCid::<TLink<PostBoxItem>>::from(cid);
+        if let Some(i) = tcid.maybe_load(st).map_err(|e| {
+            e.downcast_default(ExitCode::USR_ILLEGAL_STATE, "message does not exist")
+        })? {
+            Ok(PostBoxItem::new(
+                i.gas.clone(),
+                i.cross_msg.clone(),
+                i.owner,
+            ))
+        } else {
+            Err(actor_error!(illegal_state, "cid does not exist in postbox"))
+        }
+    }
+
+    pub(crate) fn remove_from_postbox<BS: Blockstore>(
+        &mut self,
+        _st: &BS,
+        _cid: Cid,
+    ) -> Result<(), ActorError> {
+        // TODO: remove cid from postbox, but postbox should just cid as key
+        // TODO: to the hamt, the check can be much more efficient.
+        Ok(())
     }
 }
 

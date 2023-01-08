@@ -56,6 +56,7 @@ pub enum Method {
     Release = 8,
     SendCross = 9,
     ApplyMessage = 10,
+    Propagate = 11,
 }
 
 /// Subnet Coordinator Actor
@@ -612,18 +613,16 @@ impl Actor {
     /// - Determines the type of cross-message.
     /// - Performs the corresponding state changes.
     /// - And updated the latest nonce applied for future checks.
-    fn apply_msg<BS, RT>(rt: &mut RT, params: ApplyMsgParams) -> Result<(), ActorError>
+    fn apply_msg<BS, RT>(rt: &mut RT, params: ApplyMsgParams) -> Result<RawBytes, ActorError>
     where
         BS: Blockstore,
         RT: Runtime<BS>,
     {
         rt.validate_immediate_caller_accept_any()?;
 
-        // FIXME: We just need the state to check the current network name, but we are
-        // picking up the whole state. Is it more efficient in terms of performance and
-        // gas usage to check how to apply the message (b-u or t-p) inside rt.transaction?
-        let st: State = rt.state()?;
-        let ApplyMsgParams { mut cross_msg } = params;
+        // TODO: Why do we need `ApplyMsgParams` as an extra layer of `CrossMsg`?
+        // TODO: There are no other struct inside `ApplyMsgParams`.
+        let ApplyMsgParams { cross_msg } = params;
 
         let rto = match cross_msg.msg.to.raw_addr() {
             Ok(to) => to,
@@ -643,31 +642,22 @@ impl Actor {
                 ));
             }
         };
+
+        let st: State = rt.state()?;
         match cross_msg.msg.apply_type(&st.network_name) {
             Ok(IPCMsgType::BottomUp) => {
-                // perform state transition
-                rt.transaction(|st: &mut State, rt| {
-                    st.bottomup_state_transition(&cross_msg.msg).map_err(|e| {
-                        e.downcast_default(
-                            ExitCode::USR_ILLEGAL_STATE,
-                            "failed applying bottomup message",
-                        )
-                    })?;
-                    if sto != st.network_name {
-                        st.commit_topdown_msg(rt.store(), &mut cross_msg)
-                            .map_err(|e| {
-                                e.downcast_default(
-                                    ExitCode::USR_ILLEGAL_STATE,
-                                    "error committing topdown messages",
-                                )
-                            })?;
-                    }
-                    Ok(())
-                })?;
                 // if directed to current network, execute message.
                 if sto == st.network_name {
-                    // FIXME: Should we handle return in some way?
-                    let _ = cross_msg.send(rt, rto)?;
+                    rt.transaction(|st: &mut State, _| {
+                        st.bottomup_state_transition(&cross_msg.msg).map_err(|e| {
+                            e.downcast_default(
+                                ExitCode::USR_ILLEGAL_STATE,
+                                "failed applying bottomup message",
+                            )
+                        })?;
+                        Ok(())
+                    })?;
+                    return cross_msg.send(rt, rto);
                 }
             }
             Ok(IPCMsgType::TopDown) => {
@@ -683,43 +673,143 @@ impl Actor {
                     TokenAmount::zero(),
                 )?;
 
-                rt.transaction(|st: &mut State, rt| {
-                    // perform nonce state transition
-                    if st.applied_topdown_nonce != cross_msg.msg.nonce {
-                        return Err(actor_error!(
-                            illegal_state,
-                            "the top-down message being applied doesn't hold the subsequent nonce"
-                        ));
-                    }
-                    st.applied_topdown_nonce += 1;
-                    // if not directed to subnet go down.
-                    if sto != st.network_name {
-                        st.commit_topdown_msg(rt.store(), &mut cross_msg)
-                            .map_err(|e| {
-                                e.downcast_default(
-                                    ExitCode::USR_ILLEGAL_STATE,
-                                    "error committing top-down message while applying it",
-                                )
-                            })?;
-                    }
-                    Ok(())
-                })?;
+                // TODO: this check should still be enforced in propagate?
+                // TODO: We might run into nonce not sequential issue. Currently we
+                // TODO: are sharing the nonce across the network, this might be slow
+                // TODO: as owners needs to execute one after anotehr and each owner
+                // TODO: might have a different speed and it might cause congestion?
+                if st.applied_topdown_nonce != cross_msg.msg.nonce {
+                    return Err(actor_error!(
+                        illegal_state,
+                        "the top-down message being applied doesn't hold the subsequent nonce"
+                    ));
+                }
 
-                // if directed to the current network propagate the message
                 if sto == st.network_name {
-                    // FIXME: Should we handle return in some way?
-                    let _ = cross_msg.send(rt, rto)?;
+                    rt.transaction(|st: &mut State, _| {
+                        st.applied_topdown_nonce += 1;
+                        Ok(())
+                    })?;
+
+                    // We can return the send result
+                    return cross_msg.send(rt, rto);
                 }
             }
             _ => {
                 return Err(actor_error!(
                     illegal_argument,
                     "cross-message to apply dosen't have the right type"
-                ));
+                ))
             }
         };
 
-        Ok(())
+        rt.transaction(|st: &mut State, rt| {
+            let owner = rt.message().caller();
+            // TODO: how to set the gas?
+            st.insert_postbox(rt.store(), owner, TokenAmount::zero(), cross_msg)
+                .map_err(|e| {
+                    e.downcast_default(ExitCode::USR_ILLEGAL_STATE, "error save topdown messages")
+                })?;
+            Ok(())
+        })?;
+
+        Ok(RawBytes::default())
+    }
+
+    fn propagate<BS, RT>(rt: &mut RT, params: PropagateParams) -> Result<RawBytes, ActorError>
+    where
+        BS: Blockstore,
+        RT: Runtime<BS>,
+    {
+        // TODO: update this to EOA
+        rt.validate_immediate_caller_accept_any()?;
+
+        let PropagateParams { gas, postbox_cid } = params;
+        let owner = rt.message().caller();
+
+        rt.transaction(|st: &mut State, rt| {
+            let postbox_item = st.load_from_postbox(rt.store(), postbox_cid)?;
+
+            if postbox_item.owner != owner {
+                return Err(actor_error!(illegal_state, "owner not match"));
+            }
+
+            if postbox_item.gas < gas {
+                return Err(actor_error!(illegal_state, "not enough gas"));
+            }
+
+            // TODO: how to enforce gas?
+
+            let PostBoxItem { cross_msg, .. } = postbox_item;
+            Self::commit_cross_message(rt, st, cross_msg)?;
+            st.remove_from_postbox(rt.store(), postbox_cid)
+
+            // TODO: we need to remove the cross message from postbox?
+        })?;
+
+        Ok(RawBytes::default())
+    }
+
+    /// Commit the cross message to storage.
+    ///
+    /// ALWAYS CALL THIS IN A TRANSACTION.
+    fn commit_cross_message<BS, RT>(
+        rt: &mut RT,
+        st: &mut State,
+        mut cross_msg: CrossMsg,
+    ) -> Result<(), ActorError>
+    where
+        BS: Blockstore,
+        RT: Runtime<BS>,
+    {
+        let sto = cross_msg
+            .msg
+            .to
+            .subnet()
+            .map_err(|_| actor_error!(illegal_argument, "error getting subnet from msg"))?;
+        if sto == st.network_name {
+            return Err(actor_error!(illegal_state, "should already be committed"));
+        }
+
+        // TODO: runtime should expose is in transaction to ensure in transaction check
+        match cross_msg.msg.apply_type(&st.network_name).map_err(|e| {
+            e.downcast_default(
+                ExitCode::USR_ILLEGAL_STATE,
+                "cannot convert cross message type",
+            )
+        })? {
+            IPCMsgType::Unknown => Err(actor_error!(illegal_state, "unknown cross message type")),
+            IPCMsgType::BottomUp => {
+                st.bottomup_state_transition(&cross_msg.msg).map_err(|e| {
+                    e.downcast_default(
+                        ExitCode::USR_ILLEGAL_STATE,
+                        "failed applying bottomup message",
+                    )
+                })?;
+                if sto != st.network_name {
+                    st.commit_topdown_msg(rt.store(), &mut cross_msg)
+                        .map_err(|e| {
+                            e.downcast_default(
+                                ExitCode::USR_ILLEGAL_STATE,
+                                "error committing topdown messages",
+                            )
+                        })?;
+                }
+
+                Ok(())
+            }
+            IPCMsgType::TopDown => {
+                st.applied_topdown_nonce += 1;
+                st.commit_topdown_msg(rt.store(), &mut cross_msg)
+                    .map_err(|e| {
+                        e.downcast_default(
+                            ExitCode::USR_ILLEGAL_STATE,
+                            "error committing top-down message while applying it",
+                        )
+                    })?;
+                Ok(())
+            }
+        }
     }
 }
 
@@ -772,6 +862,10 @@ impl ActorCode for Actor {
             }
             Some(Method::ApplyMessage) => {
                 Self::apply_msg(rt, cbor::deserialize_params(params)?)?;
+                Ok(RawBytes::default())
+            }
+            Some(Method::Propagate) => {
+                Self::propagate(rt, cbor::deserialize_params(params)?)?;
                 Ok(RawBytes::default())
             }
             None => Err(actor_error!(unhandled_message; "Invalid method")),

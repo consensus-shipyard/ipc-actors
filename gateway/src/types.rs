@@ -1,8 +1,13 @@
+use cid::multihash::Code;
+use cid::Cid;
 use fil_actors_runtime::Array;
 use fvm_ipld_encoding::tuple::{Deserialize_tuple, Serialize_tuple};
+use fvm_ipld_encoding::Cbor;
+use fvm_shared::address::Address;
 use fvm_shared::clock::ChainEpoch;
 use fvm_shared::econ::TokenAmount;
 use ipc_sdk::subnet_id::SubnetID;
+use primitives::CodeType;
 use serde::{Deserialize, Serialize};
 
 use crate::checkpoint::{Checkpoint, CrossMsgMeta};
@@ -41,6 +46,40 @@ pub struct CrossMsgParams {
 #[derive(Serialize_tuple, Deserialize_tuple, Clone)]
 pub struct ApplyMsgParams {
     pub cross_msg: CrossMsg,
+}
+
+#[derive(Serialize_tuple, Deserialize_tuple, Clone)]
+pub struct PropagateParams {
+    pub gas: TokenAmount,
+    /// The postbox message cid
+    pub postbox_cid: Cid,
+}
+
+/// The item to store in the `State::postbox`
+#[derive(Serialize_tuple, Deserialize_tuple, PartialEq, Eq, Clone)]
+pub struct PostBoxItem {
+    pub gas: TokenAmount,
+    pub cross_msg: CrossMsg,
+    pub owner: Address,
+}
+
+impl Cbor for PostBoxItem {}
+
+// The implementation does not matter, we just need to extract the cid
+impl CodeType for PostBoxItem {
+    fn code() -> Code {
+        Code::Blake2b256
+    }
+}
+
+impl PostBoxItem {
+    pub fn new(gas: TokenAmount, cross_msg: CrossMsg, owner: Address) -> Self {
+        Self {
+            gas,
+            cross_msg,
+            owner,
+        }
+    }
 }
 
 #[cfg(test)]
