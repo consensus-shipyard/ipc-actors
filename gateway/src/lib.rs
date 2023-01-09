@@ -1,3 +1,5 @@
+#![feature(let_chains)] // For some simpler syntax for if let Some conditions
+
 use fil_actors_runtime::runtime::{ActorCode, Runtime};
 use fil_actors_runtime::{
     actor_error, cbor, ActorDowncast, ActorError, BURNT_FUNDS_ACTOR_ADDR, INIT_ACTOR_ADDR,
@@ -39,6 +41,7 @@ mod types;
 // TODO: make this into constructor!
 lazy_static! {
     pub static ref SCA_ACTOR_ADDR: Address = Address::new_id(100);
+    pub static ref MIN_CROSS_MSG_GAS: TokenAmount = TokenAmount::zero();
 }
 
 /// SCA actor methods available
@@ -704,12 +707,20 @@ impl Actor {
         };
 
         rt.transaction(|st: &mut State, rt| {
-            let owner = rt.message().caller();
-            // TODO: how to set the gas?
-            st.insert_postbox(rt.store(), owner, TokenAmount::zero(), cross_msg)
-                .map_err(|e| {
-                    e.downcast_default(ExitCode::USR_ILLEGAL_STATE, "error save topdown messages")
-                })?;
+            let owner = cross_msg
+                .msg
+                .from
+                .raw_addr()
+                .map_err(|_| actor_error!(illegal_argument, "invalid address"))?;
+            st.insert_postbox(
+                rt.store(),
+                Some(vec![owner]),
+                MIN_CROSS_MSG_GAS.clone(),
+                cross_msg,
+            )
+            .map_err(|e| {
+                e.downcast_default(ExitCode::USR_ILLEGAL_STATE, "error save topdown messages")
+            })?;
             Ok(())
         })?;
 
@@ -728,9 +739,12 @@ impl Actor {
         let owner = rt.message().caller();
 
         rt.transaction(|st: &mut State, rt| {
-            let postbox_item = st.load_from_postbox(rt.store(), postbox_cid)?;
+            let postbox_item = st.load_from_postbox(rt.store(), postbox_cid).map_err(|e| {
+                log::error!("encountered error loading from postbox: {:?}", e);
+                actor_error!(unhandled_message, "cannot load from postbox")
+            })?;
 
-            if postbox_item.owner != owner {
+            if let Some(owners) = postbox_item.owners && !owners.contains(&owner) {
                 return Err(actor_error!(illegal_state, "owner not match"));
             }
 
@@ -738,13 +752,9 @@ impl Actor {
                 return Err(actor_error!(illegal_state, "not enough gas"));
             }
 
-            // TODO: how to enforce gas?
-
             let PostBoxItem { cross_msg, .. } = postbox_item;
             Self::commit_cross_message(rt, st, cross_msg)?;
             st.remove_from_postbox(rt.store(), postbox_cid)
-
-            // TODO: we need to remove the cross message from postbox?
         })?;
 
         Ok(RawBytes::default())

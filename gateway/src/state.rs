@@ -25,10 +25,9 @@ use super::cross::*;
 use super::subnet::*;
 use super::types::*;
 
-// TODO: maybe we can consider putting owner into PostBoxItem, we can
-// TODO: reduce write and read directly.
-// TODO: TCid<THamt<TCid<TLink<PostBoxItem>>, ()>> should do it
-type PostBox = TCid<THamt<Address, TCid<THamt<TCid<TLink<PostBoxItem>>, ()>>>>;
+/// We are using a HAMT to track the cid of `PostboxItem`, the hamt
+/// is really a indicator of whether is cid is already processed.
+type PostBox = TCid<THamt<TCid<TLink<PostBoxItem>>, ()>>;
 
 /// Storage power actor state
 #[derive(Serialize, Deserialize)]
@@ -497,35 +496,22 @@ impl State {
     ///
     /// # Arguments
     /// * `st` - The blockstore
-    /// * `owner` - The owner of the message that started the cross message
+    /// * `owners` - The owners of the message that started the cross message. If None means
+    ///              anyone can propagate this message. Allows multiple owners.
     /// * `gas` - The gas needed to propagate this message
     /// * `msg` - The actual cross msg to store in `postbox`
     pub(crate) fn insert_postbox<BS: Blockstore>(
         &mut self,
         st: &BS,
-        owner: Address,
+        owners: Option<Vec<Address>>,
         gas: TokenAmount,
         msg: CrossMsg,
     ) -> anyhow::Result<()> {
-        let item = PostBoxItem::new(gas, msg, owner);
+        let item = PostBoxItem::new(gas, msg, owners);
+        let cid: TCid<TLink<PostBoxItem>, PostBoxItem> = TCid::new_link(st, &item)?;
         self.postbox.update(st, |postbox| {
-            let addr_key = BytesKey::from(owner.to_bytes());
-
-            let wrapped_items = postbox.get(&addr_key)?;
-            let mut hamt = if let Some(cid) = wrapped_items {
-                // cid needs to load here as `postbox.get` cannot get a mutable ref.
-                cid.load(st)?
-            } else {
-                let cid: TCid<THamt<TCid<TLink<PostBoxItem>>, ()>> = TCid::new_hamt(st)?;
-                cid.load(st)?
-            };
-
-            let item_cid: TCid<TLink<PostBoxItem>, PostBoxItem> = TCid::new_link(st, &item)?;
-            hamt.set(BytesKey::from(item_cid.cid().to_bytes()), ())?;
-            let cid = hamt.flush()?;
-
-            postbox.set(addr_key, TCid::from(cid))?;
-
+            let key = BytesKey::from(cid.cid().to_bytes());
+            postbox.set(key, ())?;
             Ok(())
         })
     }
@@ -534,9 +520,12 @@ impl State {
         &mut self,
         st: &BS,
         cid: Cid,
-    ) -> Result<PostBoxItem, ActorError> {
-        // TODO: use postbox to check cid actually exists, but postbox should just cid as key
-        // TODO: to the hamt, the check can be much more efficient.
+    ) -> anyhow::Result<PostBoxItem> {
+        let postbox = self.postbox.load(st)?;
+        let contains_key = postbox.contains_key(&BytesKey::from(cid.to_bytes()))?;
+        if !contains_key {
+            return Err(anyhow!("cid not found in postbox"));
+        }
 
         let tcid = TCid::<TLink<PostBoxItem>>::from(cid);
         if let Some(i) = tcid.maybe_load(st).map_err(|e| {
@@ -545,20 +534,27 @@ impl State {
             Ok(PostBoxItem::new(
                 i.gas.clone(),
                 i.cross_msg.clone(),
-                i.owner,
+                i.owners.clone(),
             ))
         } else {
-            Err(actor_error!(illegal_state, "cid does not exist in postbox"))
+            Err(anyhow!("cid does not exist in postbox"))
         }
     }
 
     pub(crate) fn remove_from_postbox<BS: Blockstore>(
         &mut self,
-        _st: &BS,
-        _cid: Cid,
+        st: &BS,
+        cid: Cid,
     ) -> Result<(), ActorError> {
-        // TODO: remove cid from postbox, but postbox should just cid as key
-        // TODO: to the hamt, the check can be much more efficient.
+        self.postbox
+            .modify(st, |postbox| {
+                postbox.delete(&BytesKey::from(cid.to_bytes()))?;
+                Ok(())
+            })
+            .map_err(|e| {
+                log::error!("encountered error deleting from postbox: {:?}", e);
+                actor_error!(unhandled_message, "cannot delete from postbox")
+            })?;
         Ok(())
     }
 }

@@ -60,7 +60,7 @@ pub struct PropagateParams {
 pub struct PostBoxItem {
     pub gas: TokenAmount,
     pub cross_msg: CrossMsg,
-    pub owner: Address,
+    pub owners: Option<Vec<Address>>,
 }
 
 impl Cbor for PostBoxItem {}
@@ -73,11 +73,11 @@ impl CodeType for PostBoxItem {
 }
 
 impl PostBoxItem {
-    pub fn new(gas: TokenAmount, cross_msg: CrossMsg, owner: Address) -> Self {
+    pub fn new(gas: TokenAmount, cross_msg: CrossMsg, owners: Option<Vec<Address>>) -> Self {
         Self {
             gas,
             cross_msg,
-            owner,
+            owners,
         }
     }
 }
