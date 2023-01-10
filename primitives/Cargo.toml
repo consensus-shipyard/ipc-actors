@@ -1,0 +1,19 @@
+[package]
+name = "ipc_atomic_execution_primitives"
+version = "0.0.1"
+description = "Primitives useful for implementing aotmic execution actors"
+edition = "2018"
+
+[dependencies]
+ipc_gateway = { git = "https://github.com/consensus-shipyard/ipc-actors", package = "ipc-gateway" }
+fvm_primitives = { git = "https://github.com/consensus-shipyard/fvm-utils", package = "primitives"}
+
+ipc_atomic_execution = { version = "0.0.1", path = "../" }
+
+fvm_ipld_hamt = "0.5.1"
+cid = { version = "0.8.3", default-features = false, features = ["serde-codec"] }
+serde_tuple = "0.5"
+serde = { version = "1.0.136", features = ["derive"] }
+anyhow = "1.0.56"
+fvm_ipld_blockstore = "0.1.1"
+fvm_ipld_encoding = "0.3.0"
