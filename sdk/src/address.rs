@@ -3,15 +3,10 @@ use crate::subnet_id::SubnetID;
 use fil_actors_runtime::cbor;
 use fvm_ipld_encoding::RawBytes;
 use fvm_shared::address::Address;
-use fvm_shared::ActorID;
-use lazy_static::lazy_static;
 use serde::{Deserialize, Serialize};
 use std::str::FromStr;
 
-// The default actor id namespace for IPC addresses
-lazy_static! {
-    pub static ref DEFAULT_IPC_ACTOR_NAMESPACE_ID: ActorID = 1000u64;
-}
+const IPC_SEPARATOR_ADDR: &str = ":";
 
 #[derive(Clone, PartialEq, Eq, Debug, Hash, Serialize, Deserialize)]
 pub struct IPCAddress {
@@ -20,28 +15,11 @@ pub struct IPCAddress {
 }
 
 impl IPCAddress {
-    /// Generates new address using ID protocol
-    pub fn new_id(id: u64) -> Self {
-        let d = SubnetID::default();
-        Self {
-            subnet_id: d,
-            raw_address: Address::new_id(id),
-        }
-    }
-
     /// Generates new IPC address
     pub fn new(sn: &SubnetID, addr: &Address) -> Result<Self, Error> {
         Ok(Self {
             subnet_id: sn.clone(),
             raw_address: *addr,
-        })
-    }
-
-    /// Generates new IPC address
-    pub fn new_from_ipc(sn: &SubnetID, addr: &Self) -> Result<Self, Error> {
-        Ok(Self {
-            subnet_id: sn.clone(),
-            raw_address: addr.raw_address,
         })
     }
 
@@ -66,10 +44,10 @@ impl IPCAddress {
     }
 
     pub fn to_string(&self) -> Result<String, Error> {
-        // `-` is used as delimiter instead of `/`
-        // `/` is harder to parse as `SubnetId` contains `/`, which makes it difficult to
-        // determined which is the start of Address
-        Ok(format!("{}-{}", self.subnet_id, self.raw_address))
+        Ok(format!(
+            "{}{}{}",
+            self.subnet_id, IPC_SEPARATOR_ADDR, self.raw_address
+        ))
     }
 }
 
@@ -77,7 +55,7 @@ impl FromStr for IPCAddress {
     type Err = Error;
 
     fn from_str(addr: &str) -> Result<Self, Error> {
-        let r: Vec<&str> = addr.split('-').collect();
+        let r: Vec<&str> = addr.split(IPC_SEPARATOR_ADDR).collect();
         if r.len() != 2 {
             Err(Error::InvalidIPCAddr)
         } else {
@@ -86,5 +64,46 @@ impl FromStr for IPCAddress {
                 subnet_id: SubnetID::from_str(r[0])?,
             })
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use crate::address::IPCAddress;
+    use crate::subnet_id::{SubnetID, ROOTNET_ID};
+    use fvm_shared::address::Address;
+    use std::str::FromStr;
+
+    #[test]
+    fn test_ipc_address() {
+        let act = Address::new_id(1001);
+        let sub_id = SubnetID::new(&ROOTNET_ID.clone(), act);
+        let bls = Address::from_str("f3vvmn62lofvhjd2ugzca6sof2j2ubwok6cj4xxbfzz4yuxfkgobpihhd2thlanmsh3w2ptld2gqkn2jvlss4a").unwrap();
+        let haddr = IPCAddress::new(&sub_id, &bls).unwrap();
+
+        let str = haddr.to_string().unwrap();
+
+        let blss = IPCAddress::from_str(&str).unwrap();
+        assert_eq!(haddr.raw_addr().unwrap(), bls);
+        assert_eq!(haddr.subnet().unwrap(), sub_id);
+        assert_eq!(haddr, blss);
+    }
+
+    #[test]
+    fn test_ipc_from_str() {
+        let sub_id = SubnetID::new(&ROOTNET_ID.clone(), Address::new_id(100));
+        let addr = IPCAddress::new(&sub_id, &Address::new_id(101)).unwrap();
+        let st = addr.to_string().unwrap();
+        let addr_out = IPCAddress::from_str(&st).unwrap();
+        assert_eq!(addr, addr_out);
+    }
+
+    #[test]
+    fn test_ipc_serialization() {
+        let sub_id = SubnetID::new(&ROOTNET_ID.clone(), Address::new_id(100));
+        let addr = IPCAddress::new(&sub_id, &Address::new_id(101)).unwrap();
+        let st = addr.to_bytes().unwrap();
+        let addr_out = IPCAddress::from_bytes(&st).unwrap();
+        assert_eq!(addr, addr_out);
     }
 }

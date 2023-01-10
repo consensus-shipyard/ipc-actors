@@ -27,15 +27,11 @@ lazy_static! {
 }
 
 impl SubnetID {
-    pub fn new_from_string(parent: String, subnet_act: Address) -> Self {
+    pub fn new(parent: &SubnetID, subnet_act: Address) -> Self {
         Self {
-            parent,
+            parent: parent.to_string(),
             actor: subnet_act,
         }
-    }
-
-    pub fn new(parent: &SubnetID, subnet_act: Address) -> Self {
-        Self::new_from_string(parent.to_string(), subnet_act)
     }
 
     pub fn to_bytes(&self) -> Vec<u8> {
@@ -218,7 +214,6 @@ impl FromStr for SubnetID {
 
 #[cfg(test)]
 mod tests {
-    use crate::address::IPCAddress;
     use crate::subnet_id::{SubnetID, ROOTNET_ID};
     use fvm_shared::address::Address;
     use std::str::FromStr;
@@ -237,33 +232,6 @@ mod tests {
         assert_eq!(rootnet.to_string(), "/root");
         let root_sub = SubnetID::from_str(&rootnet.to_string()).unwrap();
         assert_eq!(root_sub, rootnet);
-    }
-
-    // // TODO: temporarily disabled for compilation and comply with Delegated Address
-    // #[test]
-    // fn test_IPC_address() {
-    //     let act = Address::new_id(1001);
-    //     let sub_id = SubnetID::new(&ROOTNET_ID.clone(), act);
-    //     let bls = Address::from_str("f3vvmn62lofvhjd2ugzca6sof2j2ubwok6cj4xxbfzz4yuxfkgobpihhd2thlanmsh3w2ptld2gqkn2jvlss4a").unwrap();
-    //     let blss = IPCAddress::from_str("f3vvmn62lofvhjd2ugzca6sof2j2ubwok6cj4xxbfzz4yuxfkgobpihhd2thlanmsh3w2ptld2gqkn2jvlss4a").unwrap();
-    //     let haddr = IPCAddress::new(&sub_id, &bls).unwrap();
-    //     assert_eq!(haddr.raw_addr().unwrap(), bls);
-    //     assert_eq!(haddr.subnet().unwrap(), sub_id);
-    //     // assert_eq!(IPCAddress::raw_addr(&bls).unwrap(), bls);
-    //
-    //     match blss.subnet() {
-    //         Err(e) => assert_eq!(e, Error::InvalidIPCAddr),
-    //         _ => panic!("subnet over non-IPC address should have failed"),
-    //     }
-    // }
-
-    #[test]
-    fn test_ipc_from_str() {
-        let sub_id = SubnetID::new(&ROOTNET_ID.clone(), Address::new_id(100));
-        let addr = IPCAddress::new(&sub_id, &Address::new_id(101)).unwrap();
-        let st = addr.to_string().unwrap();
-        let addr_out = IPCAddress::from_str(&st).unwrap();
-        assert_eq!(addr, addr_out);
     }
 
     #[test]
