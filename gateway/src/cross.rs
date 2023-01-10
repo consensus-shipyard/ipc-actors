@@ -13,7 +13,7 @@ use fvm_shared::econ::TokenAmount;
 use fvm_shared::MethodNum;
 use fvm_shared::METHOD_SEND;
 use ipc_sdk::address::IPCAddress;
-use ipc_sdk::subnet_id::{ROOTNET_ID, SubnetID};
+use ipc_sdk::subnet_id::SubnetID;
 use primitives::{TAmt, TCid, TLink};
 use serde::{Deserialize, Serialize};
 use std::path::Path;
@@ -38,20 +38,7 @@ pub struct StorableMsg {
 }
 impl Cbor for StorableMsg {}
 
-impl Default for StorableMsg {
-    fn default() -> Self {
-        Self {
-            from: IPCAddress::new(&ROOTNET_ID, &Address::new_id(0)).unwrap(),
-            to: IPCAddress::new(&ROOTNET_ID, &Address::new_id(0)).unwrap(),
-            method: 0,
-            params: RawBytes::default(),
-            value: TokenAmount::default(),
-            nonce: 0,
-        }
-    }
-}
-
-#[derive(PartialEq, Eq, Clone, Debug, Default, Serialize, Deserialize)]
+#[derive(PartialEq, Eq, Clone, Debug, Serialize, Deserialize)]
 pub struct CrossMsg {
     pub msg: StorableMsg,
     pub wrapped: bool,
@@ -125,8 +112,9 @@ impl StorableMsg {
             from,
             to,
             method: METHOD_SEND,
+            params: RawBytes::default(),
             value,
-            ..Default::default()
+            nonce: 0,
         })
     }
 

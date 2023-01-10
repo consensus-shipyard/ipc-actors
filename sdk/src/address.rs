@@ -44,10 +44,10 @@ impl IPCAddress {
     }
 
     pub fn to_string(&self) -> Result<String, Error> {
-        // `IPC_SEPARATOR_ADDR` is used as delimiter instead of `/`
-        // `/` is harder to parse as `SubnetId` contains `/`, which makes it difficult to
-        // determined which is the start of Address
-        Ok(format!("{}{}{}", self.subnet_id, IPC_SEPARATOR_ADDR, self.raw_address))
+        Ok(format!(
+            "{}{}{}",
+            self.subnet_id, IPC_SEPARATOR_ADDR, self.raw_address
+        ))
     }
 }
 
@@ -70,9 +70,9 @@ impl FromStr for IPCAddress {
 #[cfg(test)]
 mod tests {
     use crate::address::IPCAddress;
+    use crate::subnet_id::{SubnetID, ROOTNET_ID};
     use fvm_shared::address::Address;
     use std::str::FromStr;
-    use crate::subnet_id::{ROOTNET_ID, SubnetID};
 
     #[test]
     fn test_ipc_address() {
