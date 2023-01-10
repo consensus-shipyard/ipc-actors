@@ -13,7 +13,7 @@ use fvm_shared::econ::TokenAmount;
 use fvm_shared::MethodNum;
 use fvm_shared::METHOD_SEND;
 use ipc_sdk::address::IPCAddress;
-use ipc_sdk::subnet_id::SubnetID;
+use ipc_sdk::subnet_id::{ROOTNET_ID, SubnetID};
 use primitives::{TAmt, TCid, TLink};
 use serde::{Deserialize, Serialize};
 use std::path::Path;
@@ -41,8 +41,8 @@ impl Cbor for StorableMsg {}
 impl Default for StorableMsg {
     fn default() -> Self {
         Self {
-            from: IPCAddress::new_id(0),
-            to: IPCAddress::new_id(0),
+            from: IPCAddress::new(&ROOTNET_ID, &Address::new_id(0)).unwrap(),
+            to: IPCAddress::new(&ROOTNET_ID, &Address::new_id(0)).unwrap(),
             method: 0,
             params: RawBytes::default(),
             value: TokenAmount::default(),

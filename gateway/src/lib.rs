@@ -567,7 +567,8 @@ impl Actor {
             // we disregard the to of the message. the caller is the one set as the from of the
             // message.
             let msg = &mut cross_msg.msg;
-            msg.to = match IPCAddress::new_from_ipc(&destination, &msg.to) {
+            let to = msg.to.raw_addr().map_err(|_| actor_error!(illegal_argument, "invalid to addr"))?;
+            msg.to = match IPCAddress::new(&destination, &to) {
                 Ok(addr) => addr,
                 Err(_) => {
                     return Err(actor_error!(
