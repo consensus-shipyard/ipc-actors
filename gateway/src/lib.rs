@@ -3,7 +3,7 @@
 use fil_actors_runtime::runtime::{ActorCode, Runtime};
 use fil_actors_runtime::{
     actor_error, cbor, ActorDowncast, ActorError, BURNT_FUNDS_ACTOR_ADDR, INIT_ACTOR_ADDR,
-    REWARD_ACTOR_ADDR,
+    REWARD_ACTOR_ADDR, CALLER_TYPES_SIGNABLE,
 };
 use fvm_ipld_blockstore::Blockstore;
 use fvm_ipld_encoding::RawBytes;
@@ -431,10 +431,8 @@ impl Actor {
         BS: Blockstore,
         RT: Runtime<BS>,
     {
-        rt.validate_immediate_caller_accept_any()?;
-
-        // FIXME: Only supporting cross-messages initiated by signable addresses for
-        // now. Consider supporting also send-cross messages initiated by actors.
+        // funds can only be moved between subnets by signable addresses
+        rt.validate_immediate_caller_type(CALLER_TYPES_SIGNABLE.iter())?;
 
         let value = rt.message().value_received();
         if value <= TokenAmount::zero() {
@@ -480,7 +478,9 @@ impl Actor {
         BS: Blockstore,
         RT: Runtime<BS>,
     {
-        rt.validate_immediate_caller_accept_any()?;
+        // funds can only be moved between subnets by signable addresses
+        rt.validate_immediate_caller_type(CALLER_TYPES_SIGNABLE.iter())?;
+
 
         // FIXME: Only supporting cross-messages initiated by signable addresses for
         // now. Consider supporting also send-cross messages initiated by actors.
@@ -537,13 +537,20 @@ impl Actor {
     /// The circulating supply in each subnet needs to be updated as the message passes through them.
     ///
     /// Params expect a raw message without any subnet context (the IPC address is
-    /// included in the message by the actor).
+    /// included in the message by the actor). Only actors are allowed to send arbitrary
+    /// cross-messages as a side-effect of their execution. For plain token exchanges
+    /// fund and release have to be used.
     fn send_cross<BS, RT>(rt: &mut RT, params: CrossMsgParams) -> Result<(), ActorError>
     where
         BS: Blockstore,
         RT: Runtime<BS>,
     {
-        rt.validate_immediate_caller_accept_any()?;
+        // only actor are allowed to send cross-message
+        rt.validate_immediate_caller_not_type(CALLER_TYPES_SIGNABLE.iter())?;
+
+        // FIXME: Should we add an additional check to ensure that the included message
+        // has an actor ID as from and thus that the message doesn't come from a
+        // account actor or a multisig?
 
         if params.destination == SubnetID::default() {
             return Err(actor_error!(
@@ -556,10 +563,6 @@ impl Actor {
             destination,
         } = params;
         let mut tp = IPCMsgType::Unknown;
-
-        // FIXME: Only supporting cross-messages initiated by signable addresses for
-        // now. Consider supporting also send-cross messages initiated by actors.
-        let sig_addr = resolve_secp_bls(rt, rt.message().caller())?;
 
         rt.transaction(|st: &mut State, rt| {
             if destination == st.network_name {
@@ -580,7 +583,7 @@ impl Actor {
                     ));
                 }
             };
-            msg.from = match IPCAddress::new(&st.network_name, &sig_addr) {
+            msg.from = match IPCAddress::new(&st.network_name, &rt.message().caller()) {
                 Ok(addr) => addr,
                 Err(_) => {
                     return Err(actor_error!(
