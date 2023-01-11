@@ -12,5 +12,8 @@ keywords = ["filecoin", "web3", "wasm", "ipc"]
 members = [
     "gateway",
     "subnet-actor",
-    "sdk"
+    "sdk",
+    "atomic-exec",
+    "atomic-exec/primitives",
+    "atomic-exec/examples/fungible-token",
 ]
