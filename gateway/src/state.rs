@@ -27,7 +27,8 @@ use super::types::*;
 
 /// We are using a HAMT to track the cid of `PostboxItem`, the hamt
 /// is really a indicator of whether is cid is already processed.
-type PostBox = TCid<THamt<TCid<TLink<PostBoxItem>>, ()>>;
+/// TODO: maybe cid is not the best way to be used as the key.
+type PostBox = TCid<THamt<Cid, Vec<u8>>>;
 
 /// Storage power actor state
 #[derive(Serialize, Deserialize)]
@@ -459,7 +460,6 @@ impl State {
         match tp {
             IPCMsgType::TopDown => self.commit_topdown_msg(store, cross_msg)?,
             IPCMsgType::BottomUp => self.commit_bottomup_msg(store, cross_msg, curr_epoch)?,
-            _ => return Err(anyhow!("cross-msg is not of the right type")),
         };
         Ok(tp)
     }
@@ -504,14 +504,15 @@ impl State {
         &mut self,
         st: &BS,
         owners: Option<Vec<Address>>,
-        gas: TokenAmount,
         msg: CrossMsg,
     ) -> anyhow::Result<()> {
-        let item = PostBoxItem::new(gas, msg, owners);
-        let cid: TCid<TLink<PostBoxItem>, PostBoxItem> = TCid::new_link(st, &item)?;
+        let item = PostBoxItem::new(msg, owners);
+        let (cid, bytes) = item
+            .serialize_with_cid()
+            .map_err(|_| anyhow!("cannot serialize postbox item"))?;
         self.postbox.update(st, |postbox| {
-            let key = BytesKey::from(cid.cid().to_bytes());
-            postbox.set(key, ())?;
+            let key = BytesKey::from(cid.to_bytes());
+            postbox.set(key, bytes)?;
             Ok(())
         })
     }
@@ -522,25 +523,43 @@ impl State {
         cid: Cid,
     ) -> anyhow::Result<PostBoxItem> {
         let postbox = self.postbox.load(st)?;
-        let contains_key = postbox.contains_key(&BytesKey::from(cid.to_bytes()))?;
-        if !contains_key {
+        let optional = postbox.get(&BytesKey::from(cid.to_bytes()))?;
+        if optional.is_none() {
             return Err(anyhow!("cid not found in postbox"));
         }
 
-        let tcid = TCid::<TLink<PostBoxItem>>::from(cid);
-        if let Some(i) = tcid.maybe_load(st).map_err(|e| {
-            e.downcast_default(ExitCode::USR_ILLEGAL_STATE, "message does not exist")
-        })? {
-            Ok(PostBoxItem::new(
-                i.gas.clone(),
-                i.cross_msg.clone(),
-                i.owners.clone(),
-            ))
-        } else {
-            Err(anyhow!("cid does not exist in postbox"))
-        }
+        let raw_bytes = optional.unwrap();
+        PostBoxItem::deserialize(raw_bytes.to_vec())
+            .map_err(|_| anyhow!("cannot parse postbox item"))
     }
 
+    pub(crate) fn swap_postbox_item<BS: Blockstore>(
+        &mut self,
+        st: &BS,
+        cid: Cid,
+        item: PostBoxItem,
+    ) -> anyhow::Result<()> {
+        self.postbox.modify(st, |postbox| {
+            let previous = postbox.delete(&BytesKey::from(cid.to_bytes()))?;
+            if previous.is_none() {
+                return Err(anyhow!("cid not found in postbox"));
+            }
+            let (cid, bytes) = item
+                .serialize_with_cid()
+                .map_err(|_| anyhow!("cannot serialize postbox item"))?;
+            let key = BytesKey::from(cid.to_bytes());
+            postbox.set(key, bytes)?;
+
+            Ok(())
+        })?;
+
+        Ok(())
+    }
+
+    /// Removes the cid for postbox.
+    ///
+    /// Note that caller should have checked the msg caller has the permissions to perform the
+    /// deletion, this method does not check.
     pub(crate) fn remove_from_postbox<BS: Blockstore>(
         &mut self,
         st: &BS,

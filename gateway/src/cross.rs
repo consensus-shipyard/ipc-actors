@@ -46,7 +46,6 @@ pub struct CrossMsg {
 
 #[derive(PartialEq, Eq)]
 pub enum IPCMsgType {
-    Unknown = 0,
     BottomUp,
     TopDown,
 }

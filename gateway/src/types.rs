@@ -1,12 +1,13 @@
 use cid::multihash::Code;
-use cid::Cid;
-use fil_actors_runtime::Array;
+use cid::{multihash, Cid};
+use fil_actors_runtime::{cbor, ActorError, Array};
 use fvm_ipld_encoding::tuple::{Deserialize_tuple, Serialize_tuple};
-use fvm_ipld_encoding::Cbor;
+use fvm_ipld_encoding::{Cbor, RawBytes, DAG_CBOR};
 use fvm_shared::address::Address;
 use fvm_shared::clock::ChainEpoch;
 use fvm_shared::econ::TokenAmount;
 use ipc_sdk::subnet_id::SubnetID;
+use multihash::MultihashDigest;
 use primitives::CodeType;
 use serde::{Deserialize, Serialize};
 
@@ -50,15 +51,21 @@ pub struct ApplyMsgParams {
 
 #[derive(Serialize_tuple, Deserialize_tuple, Clone)]
 pub struct PropagateParams {
-    pub gas: TokenAmount,
     /// The postbox message cid
     pub postbox_cid: Cid,
+}
+
+#[derive(Serialize_tuple, Deserialize_tuple, Clone)]
+pub struct WhitelistPropagatorParams {
+    /// The postbox message cid
+    pub postbox_cid: Cid,
+    /// The owners to add
+    pub to_add: Vec<Address>,
 }
 
 /// The item to store in the `State::postbox`
 #[derive(Serialize_tuple, Deserialize_tuple, PartialEq, Eq, Clone)]
 pub struct PostBoxItem {
-    pub gas: TokenAmount,
     pub cross_msg: CrossMsg,
     pub owners: Option<Vec<Address>>,
 }
@@ -72,13 +79,21 @@ impl CodeType for PostBoxItem {
     }
 }
 
+const POSTBOX_ITEM_DESCRIPTION: &str = "postbox";
+
 impl PostBoxItem {
-    pub fn new(gas: TokenAmount, cross_msg: CrossMsg, owners: Option<Vec<Address>>) -> Self {
-        Self {
-            gas,
-            cross_msg,
-            owners,
-        }
+    pub fn new(cross_msg: CrossMsg, owners: Option<Vec<Address>>) -> Self {
+        Self { cross_msg, owners }
+    }
+
+    pub fn serialize_with_cid(&self) -> Result<(Cid, Vec<u8>), ActorError> {
+        let bytes = cbor::serialize(&self, POSTBOX_ITEM_DESCRIPTION)?;
+        let cid = Cid::new_v1(DAG_CBOR, Code::Blake2b256.digest(bytes.bytes()));
+        Ok((cid, bytes.to_vec()))
+    }
+
+    pub fn deserialize(bytes: Vec<u8>) -> Result<PostBoxItem, ActorError> {
+        cbor::deserialize(&RawBytes::from(bytes), POSTBOX_ITEM_DESCRIPTION)
     }
 }
 
