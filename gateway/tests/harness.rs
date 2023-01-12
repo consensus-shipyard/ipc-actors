@@ -31,10 +31,11 @@ use ipc_gateway::{
 };
 use lazy_static::lazy_static;
 use primitives::{TCid, TCidContent};
+use std::str::FromStr;
 
 lazy_static! {
     pub static ref ROOTNET_ID: SubnetID =
-        SubnetID::new_from_string(String::from("/root"), Address::new_id(0));
+        SubnetID::new(&SubnetID::from_str("/root").unwrap(), Address::new_id(0));
     pub static ref SUBNET_ONE: Address = Address::new_id(101);
     pub static ref SUBNET_TWO: Address = Address::new_id(102);
     pub static ref TEST_BLS: Address =

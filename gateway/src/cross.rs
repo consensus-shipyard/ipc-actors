@@ -38,20 +38,7 @@ pub struct StorableMsg {
 }
 impl Cbor for StorableMsg {}
 
-impl Default for StorableMsg {
-    fn default() -> Self {
-        Self {
-            from: IPCAddress::new_id(0),
-            to: IPCAddress::new_id(0),
-            method: 0,
-            params: RawBytes::default(),
-            value: TokenAmount::default(),
-            nonce: 0,
-        }
-    }
-}
-
-#[derive(PartialEq, Eq, Clone, Debug, Default, Serialize, Deserialize)]
+#[derive(PartialEq, Eq, Clone, Debug, Serialize, Deserialize)]
 pub struct CrossMsg {
     pub msg: StorableMsg,
     pub wrapped: bool,
@@ -125,8 +112,9 @@ impl StorableMsg {
             from,
             to,
             method: METHOD_SEND,
+            params: RawBytes::default(),
             value,
-            ..Default::default()
+            nonce: 0,
         })
     }
 
