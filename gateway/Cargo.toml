@@ -14,8 +14,10 @@ keywords = ["filecoin", "web3", "wasm", "ipc"]
 crate-type = ["cdylib", "lib"]
 
 [dependencies]
-fil_actors_runtime = { git = "https://github.com/consensus-shipyard/fvm-utils", features = ["fil-actor"] }
-primitives = { git = "https://github.com/consensus-shipyard/fvm-utils" }
+#fil_actors_runtime = { git = "https://github.com/consensus-shipyard/fvm-utils", features = ["fil-actor"] }
+#primitives = { git = "https://github.com/consensus-shipyard/fvm-utils" }
+fil_actors_runtime = { path = "../../fvm-utils/runtime", features = ["fil-actor"] }
+primitives = { path = "../../fvm-utils/primitives" }
 fvm_shared = { version = "=3.0.0-alpha.5", default-features = false }
 ipc-sdk = { path = "../sdk" }
 fvm_ipld_hamt = "0.5.1"
@@ -36,8 +38,10 @@ unsigned-varint = "0.7.1"
 
 [dev-dependencies]
 # enable test_utils feature only in dev env
-fil_actors_runtime = { git = "https://github.com/consensus-shipyard/fvm-utils", features = ["fil-actor", "test_utils"] }
+# fil_actors_runtime = { git = "https://github.com/consensus-shipyard/fvm-utils", branch = "main", features = ["fil-actor", "test_utils"] }
+fil_actors_runtime = { path = "../../fvm-utils/runtime", features = ["fil-actor", "test_utils"] }
 base64 = "0.13.1"
+env_logger = "0.10.0"
 
 [build-dependencies]
 wasm-builder = "3.0.1"

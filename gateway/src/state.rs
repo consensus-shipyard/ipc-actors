@@ -73,7 +73,9 @@ impl State {
             nonce: Default::default(),
             bottomup_nonce: Default::default(),
             bottomup_msg_meta: TCid::new_amt(store)?,
-            applied_bottomup_nonce: MAX_NONCE,
+            // TODO: why MAX_NONCE here?
+            // applied_bottomup_nonce: MAX_NONCE,
+            applied_bottomup_nonce: Default::default(),
             applied_topdown_nonce: Default::default(),
         })
     }
@@ -500,12 +502,12 @@ impl State {
     ///              anyone can propagate this message. Allows multiple owners.
     /// * `gas` - The gas needed to propagate this message
     /// * `msg` - The actual cross msg to store in `postbox`
-    pub(crate) fn insert_postbox<BS: Blockstore>(
+    pub fn insert_postbox<BS: Blockstore>(
         &mut self,
         st: &BS,
         owners: Option<Vec<Address>>,
         msg: CrossMsg,
-    ) -> anyhow::Result<()> {
+    ) -> anyhow::Result<Cid> {
         let item = PostBoxItem::new(msg, owners);
         let (cid, bytes) = item
             .serialize_with_cid()
@@ -514,11 +516,12 @@ impl State {
             let key = BytesKey::from(cid.to_bytes());
             postbox.set(key, bytes)?;
             Ok(())
-        })
+        })?;
+        Ok(cid)
     }
 
-    pub(crate) fn load_from_postbox<BS: Blockstore>(
-        &mut self,
+    pub fn load_from_postbox<BS: Blockstore>(
+        &self,
         st: &BS,
         cid: Cid,
     ) -> anyhow::Result<PostBoxItem> {
@@ -533,7 +536,7 @@ impl State {
             .map_err(|_| anyhow!("cannot parse postbox item"))
     }
 
-    pub(crate) fn swap_postbox_item<BS: Blockstore>(
+    pub fn swap_postbox_item<BS: Blockstore>(
         &mut self,
         st: &BS,
         cid: Cid,
@@ -560,7 +563,7 @@ impl State {
     ///
     /// Note that caller should have checked the msg caller has the permissions to perform the
     /// deletion, this method does not check.
-    pub(crate) fn remove_from_postbox<BS: Blockstore>(
+    pub fn remove_from_postbox<BS: Blockstore>(
         &mut self,
         st: &BS,
         cid: Cid,

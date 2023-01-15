@@ -6,12 +6,9 @@ use fil_actors_runtime::builtin::HAMT_BIT_WIDTH;
 use fil_actors_runtime::runtime::Runtime;
 use fil_actors_runtime::test_utils::expect_abort;
 use fil_actors_runtime::test_utils::{
-    MockRuntime, ACCOUNT_ACTOR_CODE_ID, SUBNET_ACTOR_CODE_ID, SYSTEM_ACTOR_CODE_ID,
+    MockRuntime, ACCOUNT_ACTOR_CODE_ID, MULTISIG_ACTOR_CODE_ID, SUBNET_ACTOR_CODE_ID, SYSTEM_ACTOR_CODE_ID,
 };
-use fil_actors_runtime::{
-    make_map_with_root_and_bitwidth, ActorError, Map, BURNT_FUNDS_ACTOR_ADDR, REWARD_ACTOR_ADDR,
-    STORAGE_POWER_ACTOR_ADDR, SYSTEM_ACTOR_ADDR,
-};
+use fil_actors_runtime::{make_map_with_root_and_bitwidth, ActorError, Map, BURNT_FUNDS_ACTOR_ADDR, REWARD_ACTOR_ADDR, STORAGE_POWER_ACTOR_ADDR, SYSTEM_ACTOR_ADDR};
 use fil_actors_runtime::{Array, INIT_ACTOR_ADDR};
 use fvm_ipld_blockstore::Blockstore;
 use fvm_ipld_encoding::RawBytes;
@@ -35,12 +32,13 @@ use std::str::FromStr;
 
 lazy_static! {
     pub static ref ROOTNET_ID: SubnetID =
-        SubnetID::new(&SubnetID::from_str("/root").unwrap(), Address::new_id(0));
+        SubnetID::new_from_parent(&SubnetID::from_str("/root").unwrap(), Address::new_id(0));
     pub static ref SUBNET_ONE: Address = Address::new_id(101);
     pub static ref SUBNET_TWO: Address = Address::new_id(102);
     pub static ref TEST_BLS: Address =
         Address::new_bls(&[1; fvm_shared::address::BLS_PUB_LEN]).unwrap();
     pub static ref ACTOR: Address = Address::new_actor("actor".as_bytes());
+    pub static ref TYPES: Vec<Cid> = vec![*ACCOUNT_ACTOR_CODE_ID, *MULTISIG_ACTOR_CODE_ID];
 }
 
 pub fn new_runtime() -> MockRuntime {
@@ -127,7 +125,7 @@ impl Harness {
             return Ok(());
         }
 
-        let register_ret = SubnetID::new(&self.net_name, *subnet_addr);
+        let register_ret = SubnetID::new_from_parent(&self.net_name, *subnet_addr);
         let ret = rt
             .call::<Actor>(Method::Register as MethodNum, &RawBytes::default())
             .unwrap();
@@ -296,7 +294,7 @@ impl Harness {
         expected_circ_sup: &TokenAmount,
     ) -> Result<(), ActorError> {
         rt.set_caller(*ACCOUNT_ACTOR_CODE_ID, *funder);
-        rt.expect_validate_caller_any();
+        rt.expect_validate_caller_type(TYPES.clone());
 
         rt.set_value(value.clone());
         if code != ExitCode::OK {
@@ -353,7 +351,7 @@ impl Harness {
         prev_meta: &Cid,
     ) -> Result<Cid, ActorError> {
         rt.set_caller(*ACCOUNT_ACTOR_CODE_ID, *releaser);
-        rt.expect_validate_caller_any();
+        rt.expect_validate_caller_type(TYPES.clone());
 
         rt.set_value(value.clone());
         if code != ExitCode::OK {
@@ -429,8 +427,8 @@ impl Harness {
         nonce: u64,
         expected_circ_sup: &TokenAmount,
     ) -> Result<(), ActorError> {
-        rt.set_caller(*ACCOUNT_ACTOR_CODE_ID, *from);
-        rt.expect_validate_caller_any();
+        rt.set_caller(*SYSTEM_ACTOR_CODE_ID, *SYSTEM_ACTOR_ADDR);
+        rt.expect_validate_caller_not_type(TYPES.clone());
 
         rt.set_value(value.clone());
 
@@ -463,15 +461,6 @@ impl Harness {
             return Ok(());
         }
 
-        rt.expect_send(
-            *from,
-            ext::account::PUBKEY_ADDRESS_METHOD,
-            RawBytes::default(),
-            TokenAmount::zero(),
-            RawBytes::serialize(*TEST_BLS).unwrap(),
-            ExitCode::OK,
-        );
-
         let is_bu = is_bottomup(&self.net_name, &dest);
         if is_bu {
             rt.expect_send(
@@ -492,7 +481,7 @@ impl Harness {
 
         let st: State = rt.get_state();
         if is_bu {
-            let from = IPCAddress::new(&self.net_name, &TEST_BLS).unwrap();
+            let from = IPCAddress::new(&self.net_name, &SYSTEM_ACTOR_ADDR).unwrap();
             let to = IPCAddress::new(&dest, &to).unwrap();
             rt.set_epoch(0);
             let ch = st.get_window_checkpoint(rt.store(), 0).unwrap();
@@ -519,7 +508,7 @@ impl Harness {
             let msg = get_topdown_msg(&crossmsgs, nonce - 1).unwrap().unwrap();
             assert_eq!(&sub.circ_supply, expected_circ_sup);
             assert_eq!(sub.nonce, nonce);
-            let from = IPCAddress::new(&self.net_name, &TEST_BLS).unwrap();
+            let from = IPCAddress::new(&self.net_name, &SYSTEM_ACTOR_ADDR).unwrap();
             let to = IPCAddress::new(&dest, &to).unwrap();
             assert_eq!(msg.from, from);
             assert_eq!(msg.to, to);
@@ -556,6 +545,7 @@ impl Harness {
 
         let st: State = rt.get_state();
         let sto = params.to.subnet().unwrap();
+        let to_network = sto.parent().unwrap_or(ROOTNET_ID.clone());
         let rto = to.raw_addr().unwrap();
 
         // if expected code is not ok
@@ -578,7 +568,7 @@ impl Harness {
         }
 
         if params.apply_type(&st.network_name).unwrap() == IPCMsgType::BottomUp {
-            if sto == st.network_name {
+            if to_network == st.network_name {
                 rt.expect_send(
                     rto,
                     METHOD_SEND,
@@ -615,7 +605,7 @@ impl Harness {
                 RawBytes::default(),
                 ExitCode::OK,
             );
-            if sto == st.network_name {
+            if to_network == st.network_name {
                 rt.expect_send(
                     rto,
                     METHOD_SEND,
@@ -625,7 +615,7 @@ impl Harness {
                     ExitCode::OK,
                 );
             }
-            rt.call::<Actor>(
+            let cid = rt.call::<Actor>(
                 Method::ApplyMessage as MethodNum,
                 &RawBytes::serialize(ApplyMsgParams {
                     cross_msg: CrossMsg {
@@ -637,18 +627,25 @@ impl Harness {
             )?;
             rt.verify();
             let st: State = rt.get_state();
-            assert_eq!(st.applied_topdown_nonce, msg_nonce + 1);
 
-            if sto != st.network_name {
+            if to_network != st.network_name {
                 let sub = self
                     .get_subnet(rt, &sto.down(&self.net_name).unwrap())
                     .unwrap();
+                assert_eq!(sub.nonce, td_nonce);
                 let crossmsgs = sub.top_down_msgs.load(rt.store()).unwrap();
-                let msg = get_topdown_msg(&crossmsgs, td_nonce).unwrap().unwrap();
-                assert_eq!(&msg.from, from);
+                let msg = get_topdown_msg(&crossmsgs, td_nonce).unwrap();
+                assert_eq!(msg.is_none(), true);
+
+                let cid_ref = cid.to_vec();
+                let item = st.load_from_postbox(rt.store(), Cid::try_from(cid_ref.as_slice()).unwrap()).unwrap();
+                assert_eq!(item.owners, Some(vec![from.clone().raw_addr().unwrap()]));
+                let msg = item.cross_msg.msg;
                 assert_eq!(&msg.to, to);
-                assert_eq!(msg.nonce, td_nonce);
+                assert_eq!(msg.nonce, msg_nonce);
                 assert_eq!(msg.value, value);
+            } else {
+                assert_eq!(st.applied_topdown_nonce, msg_nonce + 1);
             }
         }
 

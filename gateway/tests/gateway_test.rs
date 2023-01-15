@@ -35,7 +35,7 @@ fn register_subnet() {
 
     let st: State = rt.get_state();
     assert_eq!(st.total_subnets, 1);
-    let shid = SubnetID::new(&h.net_name, *SUBNET_ONE);
+    let shid = SubnetID::new_from_parent(&h.net_name, *SUBNET_ONE);
     let subnet = h.get_subnet(&rt, &shid).unwrap();
     assert_eq!(subnet.id, shid);
     assert_eq!(subnet.stake, value);
@@ -65,7 +65,7 @@ fn register_subnet() {
 
     let st: State = rt.get_state();
     assert_eq!(st.total_subnets, 2);
-    let shid = SubnetID::new(&h.net_name, *SUBNET_TWO);
+    let shid = SubnetID::new_from_parent(&h.net_name, *SUBNET_TWO);
     let subnet = h.get_subnet(&rt, &shid).unwrap();
     assert_eq!(subnet.id, shid);
     assert_eq!(subnet.stake, value);
@@ -85,7 +85,7 @@ fn add_stake() {
 
     let st: State = rt.get_state();
     assert_eq!(st.total_subnets, 1);
-    let shid = SubnetID::new(&h.net_name, *SUBNET_ONE);
+    let shid = SubnetID::new_from_parent(&h.net_name, *SUBNET_ONE);
     let subnet = h.get_subnet(&rt, &shid).unwrap();
     assert_eq!(subnet.id, shid);
     assert_eq!(subnet.stake, value);
@@ -101,7 +101,7 @@ fn add_stake() {
     // Add to unregistered subnet
     h.add_stake(
         &mut rt,
-        &SubnetID::new(&h.net_name, *SUBNET_TWO),
+        &SubnetID::new_from_parent(&h.net_name, *SUBNET_TWO),
         &value,
         ExitCode::USR_ILLEGAL_ARGUMENT,
     )
@@ -133,7 +133,7 @@ fn release_stake() {
 
     let st: State = rt.get_state();
     assert_eq!(st.total_subnets, 1);
-    let shid = SubnetID::new(&h.net_name, *SUBNET_ONE);
+    let shid = SubnetID::new_from_parent(&h.net_name, *SUBNET_ONE);
     let subnet = h.get_subnet(&rt, &shid).unwrap();
     assert_eq!(subnet.id, shid);
     assert_eq!(subnet.stake, value);
@@ -156,7 +156,7 @@ fn release_stake() {
     // Release from unregistered subnet
     h.release_stake(
         &mut rt,
-        &SubnetID::new(&h.net_name, *SUBNET_TWO),
+        &SubnetID::new_from_parent(&h.net_name, *SUBNET_TWO),
         &value,
         ExitCode::USR_ILLEGAL_ARGUMENT,
     )
@@ -211,7 +211,7 @@ fn test_kill() {
 
     let st: State = rt.get_state();
     assert_eq!(st.total_subnets, 1);
-    let shid = SubnetID::new(&h.net_name, *SUBNET_ONE);
+    let shid = SubnetID::new_from_parent(&h.net_name, *SUBNET_ONE);
     let subnet = h.get_subnet(&rt, &shid).unwrap();
     assert_eq!(subnet.id, shid);
     assert_eq!(subnet.stake, value);
@@ -237,7 +237,7 @@ fn checkpoint_commit() {
 
     let st: State = rt.get_state();
     assert_eq!(st.total_subnets, 1);
-    let shid = SubnetID::new(&h.net_name, *SUBNET_ONE);
+    let shid = SubnetID::new_from_parent(&h.net_name, *SUBNET_ONE);
     let subnet = h.get_subnet(&rt, &shid).unwrap();
     assert_eq!(subnet.id, shid);
     assert_eq!(subnet.stake, value);
@@ -288,7 +288,7 @@ fn checkpoint_commit() {
 
     let st: State = rt.get_state();
     assert_eq!(st.total_subnets, 2);
-    let shid_two = SubnetID::new(&h.net_name, *SUBNET_TWO);
+    let shid_two = SubnetID::new_from_parent(&h.net_name, *SUBNET_TWO);
     let subnet = h.get_subnet(&rt, &shid_two).unwrap();
     assert_eq!(subnet.id, shid_two);
     h.check_state();
@@ -330,7 +330,7 @@ fn checkpoint_crossmsgs() {
 
     let st: State = rt.get_state();
     assert_eq!(st.total_subnets, 1);
-    let shid = SubnetID::new(&h.net_name, *SUBNET_ONE);
+    let shid = SubnetID::new_from_parent(&h.net_name, *SUBNET_ONE);
     let subnet = h.get_subnet(&rt, &shid).unwrap();
     assert_eq!(subnet.id, shid);
     assert_eq!(subnet.stake, value);
@@ -383,7 +383,7 @@ fn checkpoint_crossmsgs() {
     add_msg_meta(
         &mut ch,
         &shid,
-        &SubnetID::new(&h.net_name, Address::new_id(100)),
+        &SubnetID::new_from_parent(&h.net_name, Address::new_id(100)),
         "rand1".as_bytes().to_vec(),
         TokenAmount::zero(),
     );
@@ -482,7 +482,7 @@ fn test_fund() {
 
     let st: State = rt.get_state();
     assert_eq!(st.total_subnets, 1);
-    let shid = SubnetID::new(&h.net_name, *SUBNET_ONE);
+    let shid = SubnetID::new_from_parent(&h.net_name, *SUBNET_ONE);
     let subnet = h.get_subnet(&rt, &shid).unwrap();
     assert_eq!(subnet.id, shid);
     assert_eq!(subnet.stake, value);
@@ -541,7 +541,7 @@ fn test_fund() {
     h.fund(
         &mut rt,
         &funder,
-        &SubnetID::new(&h.net_name, *SUBNET_TWO),
+        &SubnetID::new_from_parent(&h.net_name, *SUBNET_TWO),
         ExitCode::USR_ILLEGAL_ARGUMENT,
         TokenAmount::zero(),
         3,
@@ -552,7 +552,7 @@ fn test_fund() {
 
 #[test]
 fn test_release() {
-    let shid = SubnetID::new(&ROOTNET_ID, *SUBNET_ONE);
+    let shid = SubnetID::new_from_parent(&ROOTNET_ID, *SUBNET_ONE);
     let (h, mut rt) = setup(shid.clone());
 
     let releaser = Address::new_id(1001);
@@ -575,7 +575,7 @@ fn test_release() {
 
 #[test]
 fn test_send_cross() {
-    let shid = SubnetID::new(&ROOTNET_ID, *SUBNET_ONE);
+    let shid = SubnetID::new_from_parent(&ROOTNET_ID, *SUBNET_ONE);
     let (h, mut rt) = setup(shid.clone());
 
     let from = Address::new_id(1001);
@@ -677,14 +677,17 @@ fn test_send_cross() {
 
 #[test]
 fn test_apply_routing() {
-    let shid = SubnetID::new(&ROOTNET_ID, *SUBNET_ONE);
+    env_logger::init();
+
+    // let shid = SubnetID::new_from_parent(&ROOTNET_ID, *SUBNET_ONE);
+    let shid = ROOTNET_ID.clone();
     let (h, mut rt) = setup(shid.clone());
 
     let from = Address::new_bls(&[3; fvm_shared::address::BLS_PUB_LEN]).unwrap();
     let to = Address::new_bls(&[4; fvm_shared::address::BLS_PUB_LEN]).unwrap();
 
-    let sub1 = SubnetID::new(&shid, *SUBNET_ONE);
-    let sub2 = SubnetID::new(&shid, *SUBNET_TWO);
+    let sub1 = SubnetID::new_from_parent(&shid, *SUBNET_ONE);
+    let sub2 = SubnetID::new_from_parent(&shid, *SUBNET_TWO);
 
     // register subnets
     let reg_value = TokenAmount::from_atto(10_u64.pow(18));
@@ -723,9 +726,12 @@ fn test_apply_routing() {
     let tt = IPCAddress::new(&sub1, &to).unwrap();
     h.apply_cross_msg(&mut rt, &ff, &tt, value.clone(), 0, 1, ExitCode::OK, false)
         .unwrap();
+
     let tt = IPCAddress::new(&sub2, &to).unwrap();
     h.apply_cross_msg(&mut rt, &ff, &tt, value.clone(), 1, 1, ExitCode::OK, false)
         .unwrap();
+
+    // bottom-up
     let ff = IPCAddress::new(&SubnetID::from_str("/root/f01/f012").unwrap(), &from).unwrap();
     let tt = IPCAddress::new(&sub1, &to).unwrap();
     h.apply_cross_msg(&mut rt, &ff, &tt, value.clone(), 2, 2, ExitCode::OK, false)
@@ -735,7 +741,6 @@ fn test_apply_routing() {
     h.apply_cross_msg(&mut rt, &ff, &tt, value.clone(), 3, 0, ExitCode::OK, false)
         .unwrap();
 
-    // bottom-up
     let ff = IPCAddress::new(&sub1, &from).unwrap();
     let tt = IPCAddress::new(&SubnetID::from_str("/root/f0101/f0102/f011").unwrap(), &to).unwrap();
     h.apply_cross_msg(&mut rt, &ff, &tt, value.clone(), 0, 2, ExitCode::OK, false)
@@ -756,14 +761,14 @@ fn test_apply_routing() {
 }
 
 #[test]
-fn test_apply_msg() {
+fn test_apply_msg_match_target_subnet() {
     let (h, mut rt) = setup_root();
 
     // Register a subnet with 1FIL collateral
     let value = TokenAmount::from_atto(10_u64.pow(18));
     h.register(&mut rt, &SUBNET_ONE, &value, ExitCode::OK)
         .unwrap();
-    let shid = SubnetID::new(&h.net_name, *SUBNET_ONE);
+    let shid = SubnetID::new_from_parent(&h.net_name, *SUBNET_ONE);
 
     // inject some funds
     let funder_id = Address::new_id(1001);

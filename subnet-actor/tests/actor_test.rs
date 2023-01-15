@@ -488,7 +488,7 @@ mod test {
 
         // Generate the check point
         let root_subnet = SubnetID::from_str("/root").unwrap();
-        let subnet = SubnetID::new(&root_subnet, test_actor_address);
+        let subnet = SubnetID::new_from_parent(&root_subnet, test_actor_address);
         let epoch = 10;
         let mut checkpoint_0 = Checkpoint::new(subnet.clone(), epoch);
         checkpoint_0.set_signature(

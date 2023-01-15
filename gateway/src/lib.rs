@@ -24,6 +24,7 @@ pub use self::state::*;
 pub use self::subnet::*;
 pub use self::types::*;
 pub use ipc_sdk::address::IPCAddress;
+use ipc_sdk::subnet_id::ROOTNET_ID;
 pub use ipc_sdk::subnet_id::SubnetID;
 
 #[cfg(feature = "fil-actor")]
@@ -97,7 +98,7 @@ impl Actor {
         let subnet_addr = rt.message().caller();
         let mut shid = SubnetID::default();
         rt.transaction(|st: &mut State, rt| {
-            shid = SubnetID::new(&st.network_name, subnet_addr);
+            shid = SubnetID::new_from_parent(&st.network_name, subnet_addr);
             let sub = st.get_subnet(rt.store(), &shid).map_err(|e| {
                 e.downcast_default(ExitCode::USR_ILLEGAL_STATE, "failed to load subnet")
             })?;
@@ -141,7 +142,7 @@ impl Actor {
         }
 
         rt.transaction(|st: &mut State, rt| {
-            let shid = SubnetID::new(&st.network_name, subnet_addr);
+            let shid = SubnetID::new_from_parent(&st.network_name, subnet_addr);
             let sub = st.get_subnet(rt.store(), &shid).map_err(|e| {
                 e.downcast_default(ExitCode::USR_ILLEGAL_STATE, "failed to load subnet")
             })?;
@@ -189,7 +190,7 @@ impl Actor {
         }
 
         rt.transaction(|st: &mut State, rt| {
-            let shid = SubnetID::new(&st.network_name, subnet_addr);
+            let shid = SubnetID::new_from_parent(&st.network_name, subnet_addr);
             let sub = st.get_subnet(rt.store(), &shid).map_err(|e| {
                 e.downcast_default(ExitCode::USR_ILLEGAL_STATE, "failed to load subnet")
             })?;
@@ -249,7 +250,7 @@ impl Actor {
         let mut send_val = TokenAmount::zero();
 
         rt.transaction(|st: &mut State, rt| {
-            let shid = SubnetID::new(&st.network_name, subnet_addr);
+            let shid = SubnetID::new_from_parent(&st.network_name, subnet_addr);
             let sub = st.get_subnet(rt.store(), &shid).map_err(|e| {
                 e.downcast_default(ExitCode::USR_ILLEGAL_STATE, "failed to load subnet")
             })?;
@@ -317,7 +318,7 @@ impl Actor {
 
         let mut burn_value = TokenAmount::zero();
         rt.transaction(|st: &mut State, rt| {
-            let shid = SubnetID::new(&st.network_name, subnet_addr);
+            let shid = SubnetID::new_from_parent(&st.network_name, subnet_addr);
             let sub = st.get_subnet(rt.store(), &shid).map_err(|e| {
                 e.downcast_default(ExitCode::USR_ILLEGAL_STATE, "failed to load subnet")
             })?;
@@ -456,6 +457,9 @@ impl Actor {
                 })?,
                 wrapped: false,
             };
+
+            log::debug!("fund cross msg is: {:?}", f_msg);
+
             // Commit top-down message.
             st.commit_topdown_msg(rt.store(), &mut f_msg).map_err(|e| {
                 e.downcast_default(
@@ -653,10 +657,23 @@ impl Actor {
         };
 
         let st: State = rt.state()?;
+        // TODO: this is actually incorrect, because `subnet_network` is the gateway, not
+        // TODO: the parent. We should have a way to tell the network from `SubnetId`.
+        let subnet_network = if let Some(p) = sto.parent() {
+            p
+        } else {
+            ROOTNET_ID.clone()
+        };
+
+        log::debug!("sto: {:?}, network: {:?}", subnet_network, st.network_name);
+
         match cross_msg.msg.apply_type(&st.network_name) {
             Ok(IPCMsgType::BottomUp) => {
                 // if directed to current network, execute message.
-                if sto == st.network_name {
+                // TODO: this is incorrect, `st.network_name` is the gateway network
+                // TODO: sto is the subnet under the gateway.
+                // if sto == st.network_name {
+                if subnet_network == st.network_name {
                     rt.transaction(|st: &mut State, _| {
                         st.bottomup_state_transition(&cross_msg.msg).map_err(|e| {
                             e.downcast_default(
@@ -682,14 +699,25 @@ impl Actor {
                     TokenAmount::zero(),
                 )?;
 
-                if st.applied_topdown_nonce != cross_msg.msg.nonce {
+                if st.applied_topdown_nonce > cross_msg.msg.nonce {
+                    // TODO: consider remove from txn pool
+                    return Err(actor_error!(
+                        illegal_state,
+                        "the top-down message being applied nonce expired"
+                    ));
+                } else if st.applied_topdown_nonce < cross_msg.msg.nonce {
+                    // TODO: this way will still block the txn in among all the subnets under a gateway
+                    // TODO: maybe consider nonce for each network?
                     return Err(actor_error!(
                         illegal_state,
                         "the top-down message being applied doesn't hold the subsequent nonce"
                     ));
                 }
 
-                if sto == st.network_name {
+                // TODO: this is incorrect, `st.network_name` is the gateway network
+                // TODO: sto is the subnet under the gateway.
+                // if sto == st.network_name {
+                if subnet_network == st.network_name {
                     rt.transaction(|st: &mut State, _| {
                         st.applied_topdown_nonce += 1;
                         Ok(())
@@ -707,20 +735,24 @@ impl Actor {
             }
         };
 
+        let mut cid = None;
         rt.transaction(|st: &mut State, rt| {
             let owner = cross_msg
                 .msg
                 .from
                 .raw_addr()
                 .map_err(|_| actor_error!(illegal_argument, "invalid address"))?;
-            st.insert_postbox(rt.store(), Some(vec![owner]), cross_msg)
+            let r = st.insert_postbox(rt.store(), Some(vec![owner]), cross_msg)
                 .map_err(|e| {
                     e.downcast_default(ExitCode::USR_ILLEGAL_STATE, "error save topdown messages")
                 })?;
+            cid = Some(r);
             Ok(())
         })?;
 
-        Ok(RawBytes::default())
+
+        // it is safe to just unwrap. If `transaction` fails, cid is None and wont reach here.
+        Ok(RawBytes::new(cid.unwrap().to_bytes()))
     }
 
     /// Whitelist a series of addresses as propagator of a cross net message.
@@ -918,8 +950,7 @@ impl ActorCode for Actor {
                 Ok(RawBytes::default())
             }
             Some(Method::ApplyMessage) => {
-                Self::apply_msg(rt, cbor::deserialize_params(params)?)?;
-                Ok(RawBytes::default())
+                Self::apply_msg(rt, cbor::deserialize_params(params)?)
             }
             Some(Method::Propagate) => {
                 Self::propagate(rt, cbor::deserialize_params(params)?)?;

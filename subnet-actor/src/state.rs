@@ -308,7 +308,7 @@ impl State {
         }
 
         // check the source is correct
-        if *ch.source() != SubnetID::new(&self.parent_id, rt.message().receiver()) {
+        if *ch.source() != SubnetID::new_from_parent(&self.parent_id, rt.message().receiver()) {
             return Err(anyhow!("submitting checkpoint with the wrong source"));
         }
 
