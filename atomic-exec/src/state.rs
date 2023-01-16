@@ -78,3 +78,56 @@ impl State {
         RegistryKey::from(h.finalize())
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use fvm_ipld_blockstore::MemoryBlockstore;
+    use ipc_gateway::{IPCAddress, SubnetID};
+    use ipc_sdk::subnet_id::ROOTNET_ID;
+
+    #[test]
+    fn state_works() {
+        let store = MemoryBlockstore::new();
+        let mut state = State::new(
+            &store,
+            ConstructorParams {
+                ipc_gateway_address: *ipc_gateway::SCA_ACTOR_ADDR,
+            },
+        )
+        .unwrap();
+
+        let exec_id = AtomicExecID::from(Vec::from("exec_id"));
+        let actors = vec![
+            IPCAddress::new(
+                &SubnetID::new(&*ROOTNET_ID, Address::new_id('A' as u64)),
+                &Address::new_id(1),
+            )
+            .unwrap(),
+            IPCAddress::new(
+                &SubnetID::new(&*ROOTNET_ID, Address::new_id('B' as u64)),
+                &Address::new_id(1),
+            )
+            .unwrap(),
+        ];
+        state
+            .modify_atomic_exec(&store, &exec_id, &actors, |entry| {
+                entry.insert(actors[0].to_string().unwrap(), 2);
+                entry.insert(actors[1].to_string().unwrap(), 3);
+                Ok(())
+            })
+            .unwrap();
+
+        let entry = state
+            .modify_atomic_exec(&store, &exec_id, &actors, |entry| Ok(entry.clone()))
+            .unwrap();
+        assert_eq!(entry[&actors[0].to_string().unwrap()], 2);
+        assert_eq!(entry[&actors[1].to_string().unwrap()], 3);
+
+        state.rm_atomic_exec(&store, &exec_id, &actors).unwrap();
+        let entry = state
+            .modify_atomic_exec(&store, &exec_id, &actors, |entry| Ok(entry.clone()))
+            .unwrap();
+        assert_eq!(entry.keys().len(), 0);
+    }
+}
