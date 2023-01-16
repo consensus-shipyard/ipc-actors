@@ -24,6 +24,8 @@ use crate::error::Error;
 /// pub struct SubnetId {
 ///     inner: Option<SubnetInner>
 /// }
+///
+/// ROOT = SubnetId { inner: None };
 /// ```
 /// ```
 /// // TODO: The problem with proposal 1, also this is another confusion from existing design is,
@@ -39,6 +41,7 @@ use crate::error::Error;
 ///     actor: Address,
 /// }
 ///
+/// #[derive(Clone)]
 /// pub enum SubnetId {
 ///     Gateway { parent: String, actor: Address },
 ///     Subnet (Option<SubnetInner>),
@@ -49,15 +52,23 @@ use crate::error::Error;
 /// }
 ///
 /// impl SubnetId {
-///     fn parent() -> SubnetId { todo!() }
+///     fn parent(&self) -> Option<SubnetId> { todo!() }
 ///
-///     fn gateway() -> Option<SubnetId> { todo!() }
+///     fn gateway(&self) -> Option<SubnetId> {
+///         match self {
+///             Gateway { .. } => Some(self.clone()),
+///             Subnet(s) => match s {
+///                 None => None,
+///                 Some(SubnetInner { parent, gateway, .. }) => Some(Self::Gateway { parent, actor: gateway })
+///             }
+///         }
+///     }
 ///
 ///     fn to_string(&self) -> String {
 ///         match self {
 ///             Gateway { parent, actor } => {
 ///                 format!("{}/g:{}", parent, actor.to_string())
-///             },
+///             }
 ///             Subnet(s) => match s {
 ///                 None => String::from("/root"),
 ///                 Some(SubnetInner { parent, gateway, actor }) => {
@@ -76,8 +87,13 @@ pub struct SubnetID {
     /// TODO: maybe change this to Option<Address> since ROOTNET_ID should have no actor address
     actor: Address,
 }
-
+//                                                  network_name: /root/subnet_actor1 => SubnetId{ "/root", actor: "subnet_actor1" }
+//      gateway -> subnet_actor1            ->             gateway  ->  subnet_actor3  = SubnetId { parent: "/root/subnet_actor1", actor: "subnet_actor3" }
+//              -> subnet_actor2
+// subnet
+// network: vec![subnet]
 impl Cbor for SubnetID {}
+
 
 lazy_static! {
     pub static ref ROOTNET_ID: SubnetID = SubnetID {
