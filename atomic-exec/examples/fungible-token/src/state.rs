@@ -51,7 +51,7 @@ impl State {
         for (a, b) in balances {
             total += &b;
             let k = BytesKey::from(a.encode_var_vec());
-            if !balance_map.set_if_absent(k, b)? {
+            if !balance_map.set_if_absent(k, AccountState::new(b))? {
                 anyhow::bail!("duplicate balance for {}", a)
             }
         }
