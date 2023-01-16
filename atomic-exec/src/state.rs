@@ -10,7 +10,7 @@ use fvm_shared::MethodNum;
 use ipc_gateway::IPCAddress;
 use primitives::{TCid, THamt};
 use serde::{Deserialize, Serialize};
-use std::collections::{HashMap, HashSet};
+use std::collections::HashMap;
 
 use crate::types::AtomicExecID;
 use crate::ConstructorParams;
@@ -24,7 +24,8 @@ impl Cbor for State {}
 
 type RegistryCid = TCid<THamt<RegistryKey, RegistryEntry>>;
 type RegistryKey = BytesKey;
-type RegistryEntry = HashMap<IPCAddress, MethodNum>;
+type RegistryEntry = HashMap<IPCAddrString, MethodNum>;
+type IPCAddrString = String;
 
 impl State {
     pub fn new<BS: Blockstore>(store: &BS, params: ConstructorParams) -> anyhow::Result<State> {
@@ -39,12 +40,12 @@ impl State {
     pub fn modify_atomic_exec<BS: Blockstore, R>(
         &mut self,
         store: &BS,
-        exec_id: AtomicExecID,
-        actors: HashSet<IPCAddress>,
-        f: impl FnOnce(&mut HashMap<IPCAddress, MethodNum>) -> anyhow::Result<R>,
+        exec_id: &AtomicExecID,
+        actors: &Vec<IPCAddress>,
+        f: impl FnOnce(&mut RegistryEntry) -> anyhow::Result<R>,
     ) -> anyhow::Result<R> {
+        let k = Self::registry_key(exec_id, actors);
         self.registry.modify(store, |registry| {
-            let k = Self::registry_key(&exec_id, actors);
             let mut entry = registry
                 .get(&k)?
                 .map_or_else(HashMap::new, |e| e.to_owned());
@@ -59,10 +60,10 @@ impl State {
     pub fn rm_atomic_exec<BS: Blockstore>(
         &mut self,
         store: &BS,
-        exec_id: AtomicExecID,
-        actors: HashSet<IPCAddress>,
+        exec_id: &AtomicExecID,
+        actors: &Vec<IPCAddress>,
     ) -> anyhow::Result<()> {
-        let k = Self::registry_key(&exec_id, actors);
+        let k = Self::registry_key(exec_id, actors);
         self.registry.update(store, |registry| {
             registry.delete(&k)?;
             Ok(())
@@ -70,7 +71,7 @@ impl State {
         Ok(())
     }
 
-    fn registry_key(exec_id: &AtomicExecID, actors: HashSet<IPCAddress>) -> RegistryKey {
+    fn registry_key(exec_id: &AtomicExecID, actors: &Vec<IPCAddress>) -> RegistryKey {
         let mut h = Blake2b256::default();
         h.update(exec_id);
         h.update(&RawBytes::serialize(actors).unwrap());

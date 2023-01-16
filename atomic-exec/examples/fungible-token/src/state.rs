@@ -11,7 +11,6 @@ use ipc_atomic_execution_primitives::{
 use ipc_gateway::IPCAddress;
 use serde::{Deserialize, Serialize};
 use serde_tuple::{Deserialize_tuple, Serialize_tuple};
-use std::collections::HashMap;
 
 pub type AccountState = AtomicInputState<TokenAmount>;
 
@@ -181,10 +180,17 @@ impl State {
     pub fn prep_atomic_transfer(
         &mut self,
         bs: &impl Blockstore,
-        input_ids: &HashMap<IPCAddress, AtomicInputID>,
+        input_ids: &[(IPCAddress, AtomicInputID)],
     ) -> anyhow::Result<(IPCAddress, AtomicExecID)> {
+        let own_addr = self.ipc_address();
         let own_input_id = input_ids
-            .get(self.ipc_address())
+            .iter()
+            .find_map(|(a, i)| {
+                if a == own_addr {
+                    return Some(i);
+                };
+                None
+            })
             .ok_or_else(|| anyhow::anyhow!("missing own input ID"))?;
 
         // Get the parameters of the atomic transfer.

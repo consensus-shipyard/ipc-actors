@@ -19,7 +19,8 @@ use num_derive::FromPrimitive;
 use num_traits::FromPrimitive;
 use serde_tuple::{Deserialize_tuple, Serialize_tuple};
 use state::State;
-use std::collections::{HashMap, HashSet};
+use std::collections::HashMap;
+use std::str::FromStr;
 
 mod state;
 
@@ -78,6 +79,9 @@ pub enum Method {
 
 struct Actor;
 
+// Address representation as a string.
+pub type AddrString = String;
+
 /// Parameters of [Method::Constructor].
 #[derive(Clone, Debug, Serialize_tuple, Deserialize_tuple)]
 pub struct ConstructorParams {
@@ -90,7 +94,7 @@ pub struct ConstructorParams {
     /// Token ticker symbol.
     pub symbol: String,
     /// Initial balance table.
-    pub balances: HashMap<Address, TokenAmount>,
+    pub balances: HashMap<AddrString, TokenAmount>,
 }
 
 /// Parameters of [Method::Transfer].
@@ -124,16 +128,18 @@ pub struct InitAtomicTransferParams {
 #[derive(Clone, Debug, Serialize_tuple, Deserialize_tuple)]
 pub struct PrepareAtomicTransferParams {
     /// Atomic input IDs from all executing actors participating in
-    /// the atomic execution.
-    pub input_ids: HashMap<IPCAddress, AtomicInputID>,
+    /// the atomic execution. Corresponding invocations must agree on the
+    /// order of elements in the vector.
+    pub input_ids: Vec<(IPCAddress, AtomicInputID)>,
 }
 
 /// Parameters of [Method::AbortAtomicTransfer].
 #[derive(Clone, Debug, Serialize_tuple, Deserialize_tuple)]
 pub struct AbortAtomicTransferParams {
     /// IPC addresses of all execution actors participating in the
-    /// atomic execution.
-    pub actors: HashSet<IPCAddress>,
+    /// atomic execution. Corresponding invocations must agree on the
+    /// order of elements in the vector.
+    pub actors: Vec<IPCAddress>,
     /// Atomic execution ID.
     pub exec_id: AtomicExecID,
 }
@@ -162,7 +168,9 @@ impl Actor {
         // addresses.
         let balances = balances.into_iter().try_fold(HashMap::new(), |mut m, (a, b)| -> Result<_, ActorError> {
             let id = rt
-                .resolve_address(&a)
+                .resolve_address(&Address::from_str(&a).map_err(|e| actor_error!(
+                    illegal_argument; "cannot parse address in initial balance table: {}", e))?
+                )
                 .ok_or(actor_error!(illegal_argument; "cannot resolve address in initial balance table"))?
                 .id()
                 .unwrap();
@@ -344,7 +352,7 @@ impl Actor {
                 to: coordinator,
                 method: ipc_atomic_execution::Method::PreCommit as MethodNum,
                 params: RawBytes::serialize(ipc_atomic_execution::PreCommitParams {
-                    actors: input_ids.keys().cloned().collect(),
+                    actors: input_ids.iter().map(|(a, _)| a.clone()).collect(),
                     exec_id: exec_id.clone(),
                     commit: Method::CommitAtomicTransfer as MethodNum,
                 })?,

@@ -3,7 +3,6 @@ use cid::multihash::{Code, Hasher};
 use fvm_ipld_hamt::BytesKey;
 use ipc_gateway::IPCAddress;
 use std::cell::Cell;
-use std::collections::HashMap;
 use std::ops::Deref;
 
 use cid::Cid;
@@ -375,7 +374,7 @@ impl AtomicExecRegistry {
         &mut self,
         bs: &impl Blockstore,
         own_input_id: &AtomicInputID,
-        input_ids: &HashMap<IPCAddress, AtomicInputID>,
+        input_ids: &[(IPCAddress, AtomicInputID)],
         state: impl IntoIterator<Item = &'a mut S>,
         output: O,
     ) -> anyhow::Result<AtomicExecID>
@@ -488,7 +487,7 @@ impl AtomicExecRegistry {
         Vec::from(h.finalize()).into()
     }
 
-    fn compute_exec_id(input_ids: &HashMap<IPCAddress, AtomicInputID>) -> AtomicExecID {
+    pub fn compute_exec_id(input_ids: &[(IPCAddress, AtomicInputID)]) -> AtomicExecID {
         let mut h = Blake2b256::default();
         h.update(&RawBytes::serialize(input_ids).unwrap());
         Vec::from(h.finalize()).into()
