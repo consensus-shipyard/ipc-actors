@@ -267,7 +267,7 @@ impl AtomicExecRegistry {
                     input,
                 },
             )?;
-            assert!(v.is_some(), "input ID collision");
+            assert!(v.is_none(), "input ID collision");
             Ok(())
         })?;
 
