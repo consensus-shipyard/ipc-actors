@@ -152,13 +152,21 @@ impl State {
     pub fn cancel_atomic_transfer(
         &mut self,
         bs: &impl Blockstore,
+        from: ActorID,
         input_id: AtomicInputID,
     ) -> anyhow::Result<()> {
         // Get the parameters of the atomic transfer.
         let atomic_registry = &mut self.atomic_registry;
-        let AtomicTransfer { from, .. } = atomic_registry
+        let AtomicTransfer {
+            from: orig_from, ..
+        } = atomic_registry
             .atomic_input(bs, &input_id)?
             .ok_or_else(|| anyhow::anyhow!("unexpected own input ID"))?;
+
+        // Check if the sender matches
+        if from != orig_from {
+            anyhow::bail!("unexpected sender address");
+        }
 
         // Get sender's account state.
         let from_key = Self::account_key(from);

@@ -313,9 +313,12 @@ impl Actor {
         BS: Blockstore + Clone,
         RT: Runtime<BS>,
     {
-        // Modify the state to cancel the atomic transfer.
+        // Resolve sender's address to ID addresses.
+        let from_id = rt.message().caller().id().unwrap();
+
+        // Attempt to modify the state to cancel the atomic transfer.
         rt.transaction(|st: &mut State, rt| {
-            st.cancel_atomic_transfer(rt.store(), input_id)
+            st.cancel_atomic_transfer(rt.store(), from_id, input_id)
                 .map_err(|e| {
                     e.downcast_default(ExitCode::USR_UNSPECIFIED, "cannot cancel atomic transfer")
                 })
