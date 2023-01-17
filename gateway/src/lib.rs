@@ -436,7 +436,7 @@ impl Actor {
         // funds can only be moved between subnets by signable addresses
         rt.validate_immediate_caller_type(CALLER_TYPES_SIGNABLE.iter())?;
 
-        let value = rt.message().value_received();
+        let mut value = rt.message().value_received();
         if value <= TokenAmount::zero() {
             return Err(actor_error!(
                 illegal_argument,
@@ -447,6 +447,7 @@ impl Actor {
         let sig_addr = resolve_secp_bls(rt, rt.message().caller())?;
 
         rt.transaction(|st: &mut State, rt| {
+            st.collect_cross_fee(&mut value, &*MIN_CROSS_MSG_GAS)?;
             // Create fund message
             let mut f_msg = CrossMsg {
                 msg: StorableMsg::new_fund_msg(&params, &sig_addr, value).map_err(|e| {
@@ -489,7 +490,7 @@ impl Actor {
         // FIXME: Only supporting cross-messages initiated by signable addresses for
         // now. Consider supporting also send-cross messages initiated by actors.
 
-        let value = rt.message().value_received();
+        let mut value = rt.message().value_received();
         if value <= TokenAmount::zero() {
             return Err(actor_error!(
                 illegal_argument,
@@ -499,24 +500,24 @@ impl Actor {
 
         let sig_addr = resolve_secp_bls(rt, rt.message().caller())?;
 
-        // burn funds that are being released
-        rt.send(
-            *BURNT_FUNDS_ACTOR_ADDR,
-            METHOD_SEND,
-            RawBytes::default(),
-            value.clone(),
-        )?;
+        let out_val = rt.transaction(|st: &mut State, rt| -> Result<TokenAmount, ActorError> {
+            // collect fees
+            st.collect_cross_fee(&mut value, &*MIN_CROSS_MSG_GAS)?;
 
-        rt.transaction(|st: &mut State, rt| {
             // Create release message
             let r_msg = CrossMsg {
-                msg: StorableMsg::new_release_msg(&st.network_name, &sig_addr, value, st.nonce)
-                    .map_err(|e| {
-                        e.downcast_default(
-                            ExitCode::USR_ILLEGAL_STATE,
-                            "error creating release cross-message",
-                        )
-                    })?,
+                msg: StorableMsg::new_release_msg(
+                    &st.network_name,
+                    &sig_addr,
+                    value.clone(),
+                    st.nonce,
+                )
+                .map_err(|e| {
+                    e.downcast_default(
+                        ExitCode::USR_ILLEGAL_STATE,
+                        "error creating release cross-message",
+                    )
+                })?,
                 wrapped: false,
             };
 
@@ -528,8 +529,16 @@ impl Actor {
                         "error committing top-down message",
                     )
                 })?;
-            Ok(())
+            Ok(value)
         })?;
+
+        // burn funds that are being released
+        rt.send(
+            *BURNT_FUNDS_ACTOR_ADDR,
+            METHOD_SEND,
+            RawBytes::default(),
+            out_val,
+        )?;
 
         Ok(())
     }
@@ -797,6 +806,7 @@ impl Actor {
 
         let PropagateParams { postbox_cid } = params;
         let owner = rt.message().caller();
+        let mut value = rt.message().value_received();
 
         rt.transaction(|st: &mut State, rt| {
             let postbox_item = st.load_from_postbox(rt.store(), postbox_cid).map_err(|e| {
@@ -808,14 +818,16 @@ impl Actor {
                 return Err(actor_error!(illegal_state, "owner not match"));
             }
 
-            if rt.message().value_received() < *MIN_CROSS_MSG_GAS {
-                return Err(actor_error!(illegal_state, "not enough gas"));
-            }
+            // collect cross-fee
+            st.collect_cross_fee(&mut value, &*MIN_CROSS_MSG_GAS)?;
 
             let PostBoxItem { cross_msg, .. } = postbox_item;
             Self::commit_cross_message(rt, st, cross_msg)?;
             st.remove_from_postbox(rt.store(), postbox_cid)
         })?;
+
+        // send the remainder of the fee to the owner
+        rt.send(owner, METHOD_SEND, RawBytes::default(), value.clone())?;
 
         Ok(RawBytes::default())
     }

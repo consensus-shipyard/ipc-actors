@@ -341,7 +341,8 @@ impl Harness {
         assert_eq!(msg.from, from);
         assert_eq!(msg.to, to);
         assert_eq!(msg.nonce, expected_nonce - 1);
-        assert_eq!(msg.value, value);
+        // TODO: Make the cross-msg fee configurable in tests.
+        assert_eq!(msg.value, value - &*MIN_CROSS_MSG_GAS);
 
         Ok(())
     }

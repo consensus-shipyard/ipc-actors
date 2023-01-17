@@ -48,6 +48,9 @@ pub struct State {
     pub bottomup_msg_meta: TCid<TAmt<CrossMsgMeta, CROSSMSG_AMT_BITWIDTH>>,
     pub applied_bottomup_nonce: u64,
     pub applied_topdown_nonce: u64,
+    /// governance account handling all the fees collected for cross-net
+    /// messages handled by the gateway.
+    pub gov_acc: TokenAmount,
 }
 
 lazy_static! {
@@ -77,6 +80,7 @@ impl State {
             // Because we first increase to the subsequent and then execute
             applied_bottomup_nonce: MAX_NONCE,
             applied_topdown_nonce: Default::default(),
+            gov_acc: TokenAmount::zero(),
         })
     }
 
@@ -579,6 +583,41 @@ impl State {
                 actor_error!(unhandled_message, "cannot delete from postbox")
             })?;
         Ok(())
+    }
+
+    /// Collects cross-fee and reduces the corresponding
+    /// balances from which the fee is collected.
+    pub fn collect_cross_fee(
+        &mut self,
+        balance: &mut TokenAmount,
+        fee: &TokenAmount,
+    ) -> Result<(), ActorError> {
+        // check if the message can pay for the fees
+        if balance < &mut fee.clone() {
+            return Err(actor_error!(
+                illegal_state,
+                "not enough gas to pay cross-message"
+            ));
+        }
+        // assign fee to balance account and reduce
+        // used balance.
+        self.gov_acc += fee;
+        *balance -= fee;
+        Ok(())
+    }
+
+    pub fn distribute_cross_fees<BS: Blockstore>(
+        &mut self,
+        amount: TokenAmount,
+    ) -> anyhow::Result<()> {
+        // TODO: Distribution of cross fees among validators.
+        // This may not be straightforward, it may require
+        // sending the funds from the government account up
+        // (where the information of the validator set exists),
+        // and then distribute it there with the commitment of the
+        // checkpoint.
+        panic!("not implemented")
+        // Ok(())
     }
 }
 
