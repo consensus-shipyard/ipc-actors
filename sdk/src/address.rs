@@ -8,14 +8,6 @@ use std::str::FromStr;
 
 const IPC_SEPARATOR_ADDR: &str = ":";
 
-// TODO: We should specify the definition of `IPCAddress` with more detailed definition.
-// TODO: For example, IPCAddress, does it include the Gateways' addresses? Or just the subnet
-// TODO: addresses?
-// TODO: Are all the subnets under one Gateway would have the same parent gateway? Also the same
-// TODO: parent subnet?
-// TODO: Also, we need to distinguish between `IPCAddress` and `SubnetID`, what are there differences?
-// TODO: In the Constructor, there is a `network_name`, what is `network_name` to be exact?
-// TODO: Does the ROOTNET have a gateway?
 #[derive(Clone, PartialEq, Eq, Debug, Hash, Serialize, Deserialize)]
 pub struct IPCAddress {
     subnet_id: SubnetID,
