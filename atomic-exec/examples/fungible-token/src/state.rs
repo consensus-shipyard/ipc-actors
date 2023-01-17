@@ -236,12 +236,12 @@ impl State {
         &self,
         bs: &impl Blockstore,
         exec_id: &AtomicExecID,
-    ) -> anyhow::Result<IPCAddress> {
+    ) -> anyhow::Result<AtomicTransfer> {
         let output: AtomicTransfer = self
             .atomic_registry
             .atomic_output(bs, exec_id)?
             .ok_or_else(|| anyhow::anyhow!("unexpected exec ID"))?;
-        Ok(output.coordinator)
+        Ok(output)
     }
 
     /// Commits the atomic transfer.
@@ -356,10 +356,10 @@ impl State {
     }
 }
 
-#[derive(Serialize_tuple, Deserialize_tuple)]
-struct AtomicTransfer {
-    coordinator: IPCAddress,
-    from: ActorID,
-    to: ActorID,
-    amount: TokenAmount,
+#[derive(Debug, Clone, PartialEq, Eq, Serialize_tuple, Deserialize_tuple)]
+pub struct AtomicTransfer {
+    pub coordinator: IPCAddress,
+    pub from: ActorID,
+    pub to: ActorID,
+    pub amount: TokenAmount,
 }

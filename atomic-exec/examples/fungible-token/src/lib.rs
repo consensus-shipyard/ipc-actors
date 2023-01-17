@@ -18,7 +18,7 @@ use ipc_gateway::{ApplyMsgParams, CrossMsg, IPCAddress, StorableMsg, SubnetID};
 use num_derive::FromPrimitive;
 use num_traits::FromPrimitive;
 use serde_tuple::{Deserialize_tuple, Serialize_tuple};
-use state::State;
+use state::{AtomicTransfer, State};
 use std::collections::HashMap;
 use std::str::FromStr;
 
@@ -414,10 +414,17 @@ impl Actor {
     {
         let AbortAtomicTransferParams { actors, exec_id } = params;
 
+        // Resolve sender's address to ID addresses.
+        let from_id = rt.message().caller().id().unwrap();
+
         // Retrieve the IPC address of the coordinator actor
         // associates with this atomic transfer.
         let st: State = rt.state()?;
-        let coordinator = st
+        let AtomicTransfer {
+            coordinator,
+            from: orig_from,
+            ..
+        } = st
             .atomic_transfer_coordinator(rt.store(), &exec_id)
             .map_err(|e| {
                 e.downcast_default(
@@ -425,6 +432,11 @@ impl Actor {
                     "cannot retrieve coordinator actor address",
                 )
             })?;
+
+        // Check if the sender matches
+        if from_id != orig_from {
+            return Err(actor_error!(forbidden; "unexpected sender address"));
+        }
 
         // Send a cross-message to the coordinator actor, revoking
         // actor's pre-committment to the atomic transfer.
