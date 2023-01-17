@@ -10,7 +10,7 @@ use fvm_shared::error::ExitCode;
 use fvm_shared::METHOD_SEND;
 use ipc_gateway::Status::{Active, Inactive};
 use ipc_gateway::{
-    ext, get_bottomup_msg, get_topdown_msg, Checkpoint, IPCAddress, State, StorableMsg,
+    ext, get_bottomup_msg, get_topdown_msg, Checkpoint, CrossMsg, IPCAddress, State, StorableMsg,
     DEFAULT_CHECKPOINT_PERIOD, SCA_ACTOR_ADDR,
 };
 use ipc_sdk::subnet_id::SubnetID;
@@ -684,9 +684,6 @@ fn test_send_cross() {
 /// the gateway. It would directly commit the message and will not save in postbox.
 #[test]
 fn test_apply_msg_bu_target_subnet() {
-    // test can be complex, enable debug by default
-    env_logger::init_from_env(env_logger::Env::new().default_filter_or("debug"));
-
     // ============== Register subnet ==============
     let shid = SubnetID::new_from_parent(&ROOTNET_ID, *SUBNET_ONE);
     let (h, mut rt) = setup(ROOTNET_ID.clone());
@@ -739,9 +736,6 @@ fn test_apply_msg_bu_target_subnet() {
 /// the gateway. It would save in postbox.
 #[test]
 fn test_apply_msg_bu_not_target_subnet() {
-    // test can be complex, enable debug by default
-    env_logger::init_from_env(env_logger::Env::new().default_filter_or("debug"));
-
     // ============== Register subnet ==============
     let shid = SubnetID::new_from_parent(&ROOTNET_ID, *SUBNET_ONE);
     let (h, mut rt) = setup(shid.clone());
@@ -801,13 +795,100 @@ fn test_apply_msg_bu_not_target_subnet() {
     assert_eq!(err.to_string(), "cid not found in postbox");
 }
 
+/// This test covers the case where a bottom up cross_msg's target subnet is NOT the same as that of
+/// the gateway. It would save in postbox. Also, the gateway is the nearest parent, a switch to
+/// top down cross msg should occur.
+#[test]
+fn test_apply_msg_bu_switch_td() {
+    env_logger::init();
+    // ============== Register subnet ==============
+    let parent_sub = SubnetID::new_from_parent(&ROOTNET_ID, *SUBNET_ONE);
+    let (h, mut rt) = setup(parent_sub.clone());
+
+    let from = Address::new_bls(&[3; fvm_shared::address::BLS_PUB_LEN]).unwrap();
+    let to = Address::new_bls(&[4; fvm_shared::address::BLS_PUB_LEN]).unwrap();
+
+    // ================ Setup ===============
+    let value = TokenAmount::from_atto(10_u64.pow(17));
+
+    // ================= Bottom-Up ===============
+    let reg_value = TokenAmount::from_atto(10_u64.pow(18));
+    // ff: /root/f101/f102
+    // to: /root/f101/f103
+    // we are executing the message from, harness or the gateway is at: /root/f101
+    let ff_sub = SubnetID::new_from_parent(&parent_sub, *SUBNET_TWO);
+    let tt_sub = SubnetID::new_from_parent(&parent_sub, *SUBNET_THR);
+    h.register(&mut rt, &SUBNET_TWO, &reg_value, ExitCode::OK)
+        .unwrap();
+    h.register(&mut rt, &SUBNET_THR, &reg_value, ExitCode::OK)
+        .unwrap();
+
+    let ff = IPCAddress::new(&ff_sub, &to).unwrap();
+    let tt = IPCAddress::new(&tt_sub, &from).unwrap();
+    let msg_nonce = 0;
+
+    // Only system code is allowed to this method
+    let params = StorableMsg {
+        to: tt.clone(),
+        from: ff.clone(),
+        method: METHOD_SEND,
+        value: value.clone(),
+        params: RawBytes::default(),
+        nonce: msg_nonce,
+    };
+
+    let caller = ff.clone().raw_addr().unwrap();
+
+    // we directly insert message into postbox as we dont really care how it's got stored in queue
+    let mut cid = Cid::default();
+    rt.transaction(|st: &mut State, r| {
+        cid = st
+            .insert_postbox(
+                r.store(),
+                Some(vec![caller.clone()]),
+                CrossMsg {
+                    wrapped: false,
+                    msg: params,
+                },
+            )
+            .unwrap();
+        Ok(())
+    })
+    .unwrap();
+
+    let starting_nonce = get_subnet(&rt, &tt.subnet().unwrap().down(&h.net_name).unwrap())
+        .unwrap()
+        .nonce;
+
+    // now we propagate
+    h.propagate(&mut rt, caller, cid.clone()).unwrap();
+
+    // state should be updated, load again to perform the checks!
+    let st: State = rt.get_state();
+
+    // cid should be removed from postbox
+    let r = st.load_from_postbox(rt.store(), cid.clone());
+    assert_eq!(r.is_err(), true);
+    let err = r.unwrap_err();
+    assert_eq!(err.to_string(), "cid not found in postbox");
+
+    // the cross msg should have been committed to the next subnet, check this!
+    let sub = get_subnet(&rt, &tt.subnet().unwrap().down(&h.net_name).unwrap()).unwrap();
+    assert_eq!(sub.nonce, starting_nonce + 1);
+    let crossmsgs = sub.top_down_msgs.load(rt.store()).unwrap();
+    let msg = get_topdown_msg(&crossmsgs, starting_nonce).unwrap();
+    assert_eq!(msg.is_some(), true);
+    let msg = msg.unwrap();
+    assert_eq!(msg.to, tt);
+    // the nonce should not have changed at all
+    assert_eq!(msg.nonce, starting_nonce);
+    assert_eq!(msg.value, value);
+}
+
 /// This test covers the case where the cross_msg's target subnet is the SAME as that of
 /// the gateway. It would directly commit the message and will not save in postbox.
 #[test]
 fn test_apply_msg_tp_target_subnet() {
-    // test can be complex, enable debug by default
-    env_logger::init_from_env(env_logger::Env::new().default_filter_or("debug"));
-
     // ============== Register subnet ==============
     let shid = SubnetID::new_from_parent(&ROOTNET_ID, *SUBNET_ONE);
     let (h, mut rt) = setup(shid.clone());
@@ -873,9 +954,6 @@ fn test_apply_msg_tp_target_subnet() {
 /// the gateway.
 #[test]
 fn test_apply_msg_tp_not_target_subnet() {
-    // test can be complex, enable debug by default
-    env_logger::init_from_env(env_logger::Env::new().default_filter_or("debug"));
-
     // ============== Define Parameters ==============
     // gateway: /root/sub1
     let shid = SubnetID::new_from_parent(&ROOTNET_ID, *SUBNET_ONE);

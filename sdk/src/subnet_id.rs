@@ -15,7 +15,6 @@ pub struct SubnetID {
 }
 impl Cbor for SubnetID {}
 
-
 lazy_static! {
     pub static ref ROOTNET_ID: SubnetID = SubnetID {
         parent: String::from("/root"),

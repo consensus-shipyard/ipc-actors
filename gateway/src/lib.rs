@@ -16,7 +16,6 @@ use fvm_shared::{MethodNum, METHOD_CONSTRUCTOR};
 use lazy_static::lazy_static;
 use num_derive::FromPrimitive;
 use num_traits::FromPrimitive;
-use std::cmp::Ordering;
 use std::collections::HashMap;
 
 pub use self::checkpoint::{Checkpoint, CrossMsgMeta};
@@ -43,7 +42,6 @@ mod types;
 lazy_static! {
     pub static ref SCA_ACTOR_ADDR: Address = Address::new_id(100);
     pub static ref MIN_CROSS_MSG_GAS: TokenAmount = TokenAmount::from_atto(1);
-    pub static ref SYSTEM_ACTORS: [&'static Address; 1] = [&SYSTEM_ACTOR_ADDR];
 }
 
 /// SCA actor methods available
@@ -635,7 +633,7 @@ impl Actor {
         BS: Blockstore,
         RT: Runtime<BS>,
     {
-        rt.validate_immediate_caller_is(*SYSTEM_ACTORS)?;
+        rt.validate_immediate_caller_is([&SYSTEM_ACTOR_ADDR as &Address])?;
 
         let ApplyMsgParams { cross_msg } = params;
 
@@ -691,21 +689,11 @@ impl Actor {
                     TokenAmount::zero(),
                 )?;
 
-                match st.applied_topdown_nonce.cmp(&cross_msg.msg.nonce) {
-                    Ordering::Less => {
-                        return Err(actor_error!(
-                            illegal_state,
-                            "the top-down message being applied doesn't hold the subsequent nonce"
-                        ));
-                    }
-                    Ordering::Equal => {
-                        // TODO: consider remove `cross_msg.msg` from txn pool if persisted before
-                        return Err(actor_error!(
-                            illegal_state,
-                            "the top-down message being applied nonce too old"
-                        ));
-                    }
-                    Ordering::Greater => {}
+                if st.applied_topdown_nonce != cross_msg.msg.nonce {
+                    return Err(actor_error!(
+                        illegal_state,
+                        "the top-down message being applied doesn't hold the subsequent nonce"
+                    ));
                 }
 
                 if sto == st.network_name {
@@ -860,13 +848,30 @@ impl Actor {
             )
         })? {
             IPCMsgType::BottomUp => {
-                st.commit_bottomup_msg(rt.store(), &cross_msg, rt.curr_epoch())
-                    .map_err(|e| {
-                        e.downcast_default(
-                            ExitCode::USR_ILLEGAL_STATE,
-                            "error committing topdown messages",
-                        )
+                let sfrom =
+                    cross_msg.msg.from.subnet().map_err(|_| {
+                        actor_error!(illegal_argument, "error getting subnet from msg")
                     })?;
+                let nearest_common_parent = sto.common_parent(&sfrom).unwrap().1;
+
+                log::debug!(
+                    "nearest common parent: {:?}, current network: {:?}",
+                    nearest_common_parent,
+                    st.network_name
+                );
+
+                let r = if nearest_common_parent == st.network_name {
+                    st.commit_topdown_msg(rt.store(), &mut cross_msg)
+                } else {
+                    st.commit_bottomup_msg(rt.store(), &cross_msg, rt.curr_epoch())
+                };
+
+                r.map_err(|e| {
+                    e.downcast_default(
+                        ExitCode::USR_ILLEGAL_STATE,
+                        "error committing topdown messages",
+                    )
+                })?;
 
                 Ok(())
             }
