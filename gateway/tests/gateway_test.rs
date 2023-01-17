@@ -800,7 +800,6 @@ fn test_apply_msg_bu_not_target_subnet() {
 /// top down cross msg should occur.
 #[test]
 fn test_apply_msg_bu_switch_td() {
-    env_logger::init();
     // ============== Register subnet ==============
     let parent_sub = SubnetID::new_from_parent(&ROOTNET_ID, *SUBNET_ONE);
     let (h, mut rt) = setup(parent_sub.clone());
