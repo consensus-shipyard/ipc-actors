@@ -8,96 +8,17 @@ use std::str::FromStr;
 
 use crate::error::Error;
 
-/// ```
-/// // TODO: Consider new proposal, maybe? This would address the kind of awkward representation
-/// // TODO: of `ROOTNET_ID`.
-/// // TODO: Another limitation of current representation is all subnets must live under one FVM network,
-/// // TODO: do we want to scale this?
-/// //
-/// // =============== PROPOSAL 1 ===============
-/// use fvm_shared::address::Address;
-///
-/// struct SubnetInner {
-///     parent: String,
-///     actor: Address
-/// }
-/// pub struct SubnetId {
-///     inner: Option<SubnetInner>
-/// }
-///
-/// ROOT = SubnetId { inner: None };
-/// ```
-/// ```
-/// // TODO: The problem with proposal 1, also this is another confusion from existing design is,
-/// // TODO: there is no way to tell which gateway a subnet belongs to.
-/// //
-/// // =============== PROPOSAL 2 ===============
-/// use fvm_shared::address::Address;
-/// use lazy_static::lazy_static;
-///
-/// struct SubnetInner {
-///     parent: String,
-///     gateway: Address,
-///     actor: Address,
-/// }
-///
-/// #[derive(Clone)]
-/// pub enum SubnetId {
-///     Gateway { parent: String, actor: Address },
-///     Subnet (Option<SubnetInner>),
-/// }
-///
-/// lazy_static! {
-///     pub static ref ROOTNET_ID: SubnetId = SubnetId::Subnet(None);
-/// }
-///
-/// impl SubnetId {
-///     fn parent(&self) -> Option<SubnetId> { todo!() }
-///
-///     fn gateway(&self) -> Option<SubnetId> {
-///         match self {
-///             Gateway { .. } => Some(self.clone()),
-///             Subnet(s) => match s {
-///                 None => None,
-///                 Some(SubnetInner { parent, gateway, .. }) => Some(Self::Gateway { parent, actor: gateway })
-///             }
-///         }
-///     }
-///
-///     fn to_string(&self) -> String {
-///         match self {
-///             Gateway { parent, actor } => {
-///                 format!("{}/g:{}", parent, actor.to_string())
-///             }
-///             Subnet(s) => match s {
-///                 None => String::from("/root"),
-///                 Some(SubnetInner { parent, gateway, actor }) => {
-///                     format!("{}/g:{}/s:{}", parent, gateway.to_string(), actor.to_string())
-///                 }
-///             }
-///         }
-///     }
-/// }
-/// ```
 #[derive(PartialEq, Eq, Hash, Clone, Debug, Serialize, Deserialize)]
 pub struct SubnetID {
-    // TODO: The current naming seems a bit confusing. It really should be called like `subnet_path`
-    // TODO: instead of `parent`.
     parent: String,
-    /// TODO: maybe change this to Option<Address> since ROOTNET_ID should have no actor address
     actor: Address,
 }
-//                                                  network_name: /root/subnet_actor1 => SubnetId{ "/root", actor: "subnet_actor1" }
-//      gateway -> subnet_actor1            ->             gateway  ->  subnet_actor3  = SubnetId { parent: "/root/subnet_actor1", actor: "subnet_actor3" }
-//              -> subnet_actor2
-// subnet
-// network: vec![subnet]
 impl Cbor for SubnetID {}
 
 
 lazy_static! {
     pub static ref ROOTNET_ID: SubnetID = SubnetID {
-        parent: String::from("/root"), // TODO: /root is not the parent, it's the name
+        parent: String::from("/root"),
         actor: Address::new_id(0)
     };
     pub static ref UNDEF: SubnetID = SubnetID {

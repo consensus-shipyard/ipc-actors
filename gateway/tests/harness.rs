@@ -6,9 +6,13 @@ use fil_actors_runtime::builtin::HAMT_BIT_WIDTH;
 use fil_actors_runtime::runtime::Runtime;
 use fil_actors_runtime::test_utils::expect_abort;
 use fil_actors_runtime::test_utils::{
-    MockRuntime, ACCOUNT_ACTOR_CODE_ID, MULTISIG_ACTOR_CODE_ID, SUBNET_ACTOR_CODE_ID, SYSTEM_ACTOR_CODE_ID,
+    MockRuntime, ACCOUNT_ACTOR_CODE_ID, MULTISIG_ACTOR_CODE_ID, SUBNET_ACTOR_CODE_ID,
+    SYSTEM_ACTOR_CODE_ID,
 };
-use fil_actors_runtime::{make_map_with_root_and_bitwidth, ActorError, Map, BURNT_FUNDS_ACTOR_ADDR, REWARD_ACTOR_ADDR, STORAGE_POWER_ACTOR_ADDR, SYSTEM_ACTOR_ADDR};
+use fil_actors_runtime::{
+    make_map_with_root_and_bitwidth, ActorError, Map, BURNT_FUNDS_ACTOR_ADDR, REWARD_ACTOR_ADDR,
+    STORAGE_POWER_ACTOR_ADDR, SYSTEM_ACTOR_ADDR,
+};
 use fil_actors_runtime::{Array, INIT_ACTOR_ADDR};
 use fvm_ipld_blockstore::Blockstore;
 use fvm_ipld_encoding::RawBytes;
@@ -23,8 +27,8 @@ use ipc_gateway::checkpoint::ChildCheck;
 use ipc_gateway::{
     ext, get_topdown_msg, is_bottomup, Actor, ApplyMsgParams, Checkpoint, ConstructorParams,
     CrossMsg, CrossMsgMeta, CrossMsgParams, CrossMsgs, FundParams, IPCAddress, IPCMsgType, Method,
-    State, StorableMsg, Subnet, SubnetID, CROSSMSG_AMT_BITWIDTH, DEFAULT_CHECKPOINT_PERIOD,
-    MAX_NONCE, MIN_COLLATERAL_AMOUNT, SCA_ACTOR_ADDR,
+    PropagateParams, State, StorableMsg, Subnet, SubnetID, CROSSMSG_AMT_BITWIDTH,
+    DEFAULT_CHECKPOINT_PERIOD, MAX_NONCE, MIN_COLLATERAL_AMOUNT, MIN_CROSS_MSG_GAS, SCA_ACTOR_ADDR,
 };
 use lazy_static::lazy_static;
 use primitives::{TCid, TCidContent};
@@ -519,6 +523,58 @@ impl Harness {
         Ok(())
     }
 
+    pub fn apply_cross_execute_only(
+        &self,
+        rt: &mut MockRuntime,
+        balance: TokenAmount,
+        params: StorableMsg,
+        append_expected_send: Option<Box<dyn Fn(&mut MockRuntime)>>,
+    ) -> Result<Option<Cid>, ActorError> {
+        rt.set_caller(*SYSTEM_ACTOR_CODE_ID, *SYSTEM_ACTOR_ADDR);
+        rt.expect_validate_caller_addr(vec![SYSTEM_ACTOR_ADDR.clone()]);
+        rt.set_balance(balance);
+
+        if let Some(f) = append_expected_send {
+            f(rt)
+        }
+        let cid = rt.call::<Actor>(
+            Method::ApplyMessage as MethodNum,
+            &RawBytes::serialize(ApplyMsgParams {
+                cross_msg: CrossMsg {
+                    msg: params.clone(),
+                    wrapped: false,
+                },
+            })?,
+        )?;
+        rt.verify();
+
+        if cid.is_empty() {
+            Ok(None)
+        } else {
+            Ok(Some(Cid::try_from(cid.to_vec().as_slice()).unwrap()))
+        }
+    }
+
+    pub fn propagate(
+        &self,
+        rt: &mut MockRuntime,
+        owner: Address,
+        cid: Cid,
+    ) -> Result<(), ActorError> {
+        rt.set_caller(Default::default(), owner);
+        rt.expect_validate_caller_any();
+        rt.set_balance(MIN_CROSS_MSG_GAS.clone());
+        rt.set_received(MIN_CROSS_MSG_GAS.clone());
+
+        rt.call::<Actor>(
+            Method::Propagate as MethodNum,
+            &RawBytes::serialize(PropagateParams { postbox_cid: cid })?,
+        )?;
+        rt.verify();
+
+        Ok(())
+    }
+
     pub fn apply_cross_msg(
         &self,
         rt: &mut MockRuntime,
@@ -531,7 +587,7 @@ impl Harness {
         noop: bool,
     ) -> Result<(), ActorError> {
         rt.set_caller(*SYSTEM_ACTOR_CODE_ID, *SYSTEM_ACTOR_ADDR);
-        rt.expect_validate_caller_any();
+        rt.expect_validate_caller_addr(vec![SYSTEM_ACTOR_ADDR.clone()]);
 
         rt.set_balance(value.clone());
         let params = StorableMsg {
@@ -545,7 +601,6 @@ impl Harness {
 
         let st: State = rt.get_state();
         let sto = params.to.subnet().unwrap();
-        let to_network = sto.parent().unwrap_or(ROOTNET_ID.clone());
         let rto = to.raw_addr().unwrap();
 
         // if expected code is not ok
@@ -568,7 +623,7 @@ impl Harness {
         }
 
         if params.apply_type(&st.network_name).unwrap() == IPCMsgType::BottomUp {
-            if to_network == st.network_name {
+            if sto == st.network_name {
                 rt.expect_send(
                     rto,
                     METHOD_SEND,
@@ -605,7 +660,7 @@ impl Harness {
                 RawBytes::default(),
                 ExitCode::OK,
             );
-            if to_network == st.network_name {
+            if sto == st.network_name {
                 rt.expect_send(
                     rto,
                     METHOD_SEND,
@@ -628,7 +683,7 @@ impl Harness {
             rt.verify();
             let st: State = rt.get_state();
 
-            if to_network != st.network_name {
+            if sto != st.network_name {
                 let sub = self
                     .get_subnet(rt, &sto.down(&self.net_name).unwrap())
                     .unwrap();
@@ -638,7 +693,9 @@ impl Harness {
                 assert_eq!(msg.is_none(), true);
 
                 let cid_ref = cid.to_vec();
-                let item = st.load_from_postbox(rt.store(), Cid::try_from(cid_ref.as_slice()).unwrap()).unwrap();
+                let item = st
+                    .load_from_postbox(rt.store(), Cid::try_from(cid_ref.as_slice()).unwrap())
+                    .unwrap();
                 assert_eq!(item.owners, Some(vec![from.clone().raw_addr().unwrap()]));
                 let msg = item.cross_msg.msg;
                 assert_eq!(&msg.to, to);
@@ -660,10 +717,14 @@ impl Harness {
     }
 
     pub fn get_subnet(&self, rt: &MockRuntime, id: &SubnetID) -> Option<Subnet> {
-        let st: State = rt.get_state();
-        let subnets = st.subnets.load(rt.store()).unwrap();
-        subnets.get(&id.to_bytes()).unwrap().cloned()
+        get_subnet(rt, id)
     }
+}
+
+pub fn get_subnet(rt: &MockRuntime, id: &SubnetID) -> Option<Subnet> {
+    let st: State = rt.get_state();
+    let subnets = st.subnets.load(rt.store()).unwrap();
+    subnets.get(&id.to_bytes()).unwrap().cloned()
 }
 
 pub fn verify_empty_map(rt: &MockRuntime, key: Cid) {
@@ -706,7 +767,7 @@ pub fn add_msg_meta(
     ch.append_msgmeta(meta).unwrap();
 }
 
-fn get_cross_msgs<'m, BS: Blockstore>(
+pub fn get_cross_msgs<'m, BS: Blockstore>(
     registry: &'m Map<BS, CrossMsgs>,
     cid: &Cid,
 ) -> anyhow::Result<Option<&'m CrossMsgs>> {

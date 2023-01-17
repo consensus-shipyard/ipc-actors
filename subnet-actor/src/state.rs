@@ -30,6 +30,8 @@ lazy_static! {
 #[derive(Serialize, Deserialize, Clone, Debug)]
 pub struct State {
     pub name: String,
+    /// The parent id of the subnet actor, it should be the same as the
+    /// actor's gateway's state.network_name
     pub parent_id: SubnetID,
     pub ipc_gateway_addr: Address,
     pub consensus: ConsensusType,

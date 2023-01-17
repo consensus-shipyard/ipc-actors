@@ -3,7 +3,7 @@
 use fil_actors_runtime::runtime::{ActorCode, Runtime};
 use fil_actors_runtime::{
     actor_error, cbor, ActorDowncast, ActorError, BURNT_FUNDS_ACTOR_ADDR, CALLER_TYPES_SIGNABLE,
-    INIT_ACTOR_ADDR, REWARD_ACTOR_ADDR,
+    INIT_ACTOR_ADDR, REWARD_ACTOR_ADDR, SYSTEM_ACTOR_ADDR,
 };
 use fvm_ipld_blockstore::Blockstore;
 use fvm_ipld_encoding::RawBytes;
@@ -16,6 +16,7 @@ use fvm_shared::{MethodNum, METHOD_CONSTRUCTOR};
 use lazy_static::lazy_static;
 use num_derive::FromPrimitive;
 use num_traits::FromPrimitive;
+use std::cmp::Ordering;
 use std::collections::HashMap;
 
 pub use self::checkpoint::{Checkpoint, CrossMsgMeta};
@@ -24,7 +25,6 @@ pub use self::state::*;
 pub use self::subnet::*;
 pub use self::types::*;
 pub use ipc_sdk::address::IPCAddress;
-use ipc_sdk::subnet_id::ROOTNET_ID;
 pub use ipc_sdk::subnet_id::SubnetID;
 
 #[cfg(feature = "fil-actor")]
@@ -43,6 +43,7 @@ mod types;
 lazy_static! {
     pub static ref SCA_ACTOR_ADDR: Address = Address::new_id(100);
     pub static ref MIN_CROSS_MSG_GAS: TokenAmount = TokenAmount::from_atto(1);
+    pub static ref SYSTEM_ACTORS: [&'static Address; 1] = [&SYSTEM_ACTOR_ADDR];
 }
 
 /// SCA actor methods available
@@ -123,6 +124,7 @@ impl Actor {
             Ok(())
         })?;
 
+        log::debug!("registered new subnet: {:?}", shid);
         Ok(shid)
     }
 
@@ -633,7 +635,7 @@ impl Actor {
         BS: Blockstore,
         RT: Runtime<BS>,
     {
-        rt.validate_immediate_caller_accept_any()?;
+        rt.validate_immediate_caller_is(*SYSTEM_ACTORS)?;
 
         let ApplyMsgParams { cross_msg } = params;
 
@@ -657,23 +659,13 @@ impl Actor {
         };
 
         let st: State = rt.state()?;
-        // TODO: this is actually incorrect, because `subnet_network` is the gateway, not
-        // TODO: the parent. We should have a way to tell the network from `SubnetId`.
-        let subnet_network = if let Some(p) = sto.parent() {
-            p
-        } else {
-            ROOTNET_ID.clone()
-        };
 
-        log::debug!("sto: {:?}, network: {:?}", subnet_network, st.network_name);
+        log::debug!("sto: {:?}, network: {:?}", sto, st.network_name);
 
         match cross_msg.msg.apply_type(&st.network_name) {
             Ok(IPCMsgType::BottomUp) => {
                 // if directed to current network, execute message.
-                // TODO: this is incorrect, `st.network_name` is the gateway network
-                // TODO: sto is the subnet under the gateway.
-                // if sto == st.network_name {
-                if subnet_network == st.network_name {
+                if sto == st.network_name {
                     rt.transaction(|st: &mut State, _| {
                         st.bottomup_state_transition(&cross_msg.msg).map_err(|e| {
                             e.downcast_default(
@@ -699,25 +691,24 @@ impl Actor {
                     TokenAmount::zero(),
                 )?;
 
-                if st.applied_topdown_nonce > cross_msg.msg.nonce {
-                    // TODO: consider remove from txn pool
-                    return Err(actor_error!(
-                        illegal_state,
-                        "the top-down message being applied nonce expired"
-                    ));
-                } else if st.applied_topdown_nonce < cross_msg.msg.nonce {
-                    // TODO: this way will still block the txn in among all the subnets under a gateway
-                    // TODO: maybe consider nonce for each network?
-                    return Err(actor_error!(
-                        illegal_state,
-                        "the top-down message being applied doesn't hold the subsequent nonce"
-                    ));
+                match st.applied_topdown_nonce.cmp(&cross_msg.msg.nonce) {
+                    Ordering::Less => {
+                        return Err(actor_error!(
+                            illegal_state,
+                            "the top-down message being applied doesn't hold the subsequent nonce"
+                        ));
+                    }
+                    Ordering::Equal => {
+                        // TODO: consider remove `cross_msg.msg` from txn pool if persisted before
+                        return Err(actor_error!(
+                            illegal_state,
+                            "the top-down message being applied nonce too old"
+                        ));
+                    }
+                    Ordering::Greater => {}
                 }
 
-                // TODO: this is incorrect, `st.network_name` is the gateway network
-                // TODO: sto is the subnet under the gateway.
-                // if sto == st.network_name {
-                if subnet_network == st.network_name {
+                if sto == st.network_name {
                     rt.transaction(|st: &mut State, _| {
                         st.applied_topdown_nonce += 1;
                         Ok(())
@@ -742,14 +733,14 @@ impl Actor {
                 .from
                 .raw_addr()
                 .map_err(|_| actor_error!(illegal_argument, "invalid address"))?;
-            let r = st.insert_postbox(rt.store(), Some(vec![owner]), cross_msg)
+            let r = st
+                .insert_postbox(rt.store(), Some(vec![owner]), cross_msg)
                 .map_err(|e| {
                     e.downcast_default(ExitCode::USR_ILLEGAL_STATE, "error save topdown messages")
                 })?;
             cid = Some(r);
             Ok(())
         })?;
-
 
         // it is safe to just unwrap. If `transaction` fails, cid is None and wont reach here.
         Ok(RawBytes::new(cid.unwrap().to_bytes()))
@@ -813,7 +804,7 @@ impl Actor {
         BS: Blockstore,
         RT: Runtime<BS>,
     {
-        // TODO: update this to EOA
+        // does not really need check as we are checking against the PostboxItem.owners
         rt.validate_immediate_caller_accept_any()?;
 
         let PropagateParams { postbox_cid } = params;
@@ -869,21 +860,13 @@ impl Actor {
             )
         })? {
             IPCMsgType::BottomUp => {
-                st.bottomup_state_transition(&cross_msg.msg).map_err(|e| {
-                    e.downcast_default(
-                        ExitCode::USR_ILLEGAL_STATE,
-                        "failed applying bottomup message",
-                    )
-                })?;
-                if sto != st.network_name {
-                    st.commit_topdown_msg(rt.store(), &mut cross_msg)
-                        .map_err(|e| {
-                            e.downcast_default(
-                                ExitCode::USR_ILLEGAL_STATE,
-                                "error committing topdown messages",
-                            )
-                        })?;
-                }
+                st.commit_bottomup_msg(rt.store(), &cross_msg, rt.curr_epoch())
+                    .map_err(|e| {
+                        e.downcast_default(
+                            ExitCode::USR_ILLEGAL_STATE,
+                            "error committing topdown messages",
+                        )
+                    })?;
 
                 Ok(())
             }
@@ -949,9 +932,7 @@ impl ActorCode for Actor {
                 Self::send_cross(rt, cbor::deserialize_params(params)?)?;
                 Ok(RawBytes::default())
             }
-            Some(Method::ApplyMessage) => {
-                Self::apply_msg(rt, cbor::deserialize_params(params)?)
-            }
+            Some(Method::ApplyMessage) => Self::apply_msg(rt, cbor::deserialize_params(params)?),
             Some(Method::Propagate) => {
                 Self::propagate(rt, cbor::deserialize_params(params)?)?;
                 Ok(RawBytes::default())

@@ -64,7 +64,7 @@ pub struct WhitelistPropagatorParams {
 }
 
 /// The item to store in the `State::postbox`
-#[derive(Serialize_tuple, Deserialize_tuple, PartialEq, Eq, Clone)]
+#[derive(Serialize_tuple, Deserialize_tuple, PartialEq, Eq, Clone, Debug)]
 pub struct PostBoxItem {
     pub cross_msg: CrossMsg,
     pub owners: Option<Vec<Address>>,

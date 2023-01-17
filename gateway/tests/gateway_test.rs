@@ -1,13 +1,18 @@
 use cid::Cid;
 use fil_actors_runtime::runtime::Runtime;
-use fil_actors_runtime::BURNT_FUNDS_ACTOR_ADDR;
+use fil_actors_runtime::{BURNT_FUNDS_ACTOR_ADDR, REWARD_ACTOR_ADDR};
+use fvm_ipld_encoding::RawBytes;
 use fvm_shared::address::Address;
 use fvm_shared::bigint::Zero;
 use fvm_shared::clock::ChainEpoch;
 use fvm_shared::econ::TokenAmount;
 use fvm_shared::error::ExitCode;
+use fvm_shared::METHOD_SEND;
 use ipc_gateway::Status::{Active, Inactive};
-use ipc_gateway::{get_bottomup_msg, Checkpoint, IPCAddress, State, DEFAULT_CHECKPOINT_PERIOD};
+use ipc_gateway::{
+    ext, get_bottomup_msg, get_topdown_msg, Checkpoint, IPCAddress, State, StorableMsg,
+    DEFAULT_CHECKPOINT_PERIOD, SCA_ACTOR_ADDR,
+};
 use ipc_sdk::subnet_id::SubnetID;
 use primitives::TCid;
 use std::ops::Mul;
@@ -675,43 +680,223 @@ fn test_send_cross() {
     .unwrap();
 }
 
+/// This test covers the case where a bottom up cross_msg's target subnet is the SAME as that of
+/// the gateway. It would directly commit the message and will not save in postbox.
 #[test]
-fn test_apply_routing() {
-    env_logger::init();
+fn test_apply_msg_bu_target_subnet() {
+    // test can be complex, enable debug by default
+    env_logger::init_from_env(env_logger::Env::new().default_filter_or("debug"));
 
-    // let shid = SubnetID::new_from_parent(&ROOTNET_ID, *SUBNET_ONE);
-    let shid = ROOTNET_ID.clone();
+    // ============== Register subnet ==============
+    let shid = SubnetID::new_from_parent(&ROOTNET_ID, *SUBNET_ONE);
+    let (h, mut rt) = setup(ROOTNET_ID.clone());
+
+    let from = Address::new_bls(&[3; fvm_shared::address::BLS_PUB_LEN]).unwrap();
+    let to = Address::new_bls(&[4; fvm_shared::address::BLS_PUB_LEN]).unwrap();
+
+    let sub = shid.clone();
+
+    // ================ Setup ===============
+    let value = TokenAmount::from_atto(10_u64.pow(17));
+
+    // ================= Bottom-Up ===============
+    let ff = IPCAddress::new(&sub, &to).unwrap();
+    let tt = IPCAddress::new(&ROOTNET_ID, &from).unwrap();
+    let msg_nonce = 0;
+
+    // Only system code is allowed to this method
+    let params = StorableMsg {
+        to: tt.clone(),
+        from: ff.clone(),
+        method: METHOD_SEND,
+        value: value.clone(),
+        params: RawBytes::default(),
+        nonce: msg_nonce,
+    };
+    let sto = tt.raw_addr().unwrap();
+
+    let cid = h
+        .apply_cross_execute_only(
+            &mut rt,
+            value.clone(),
+            params,
+            Some(Box::new(move |rt| {
+                rt.expect_send(
+                    sto.clone(),
+                    METHOD_SEND,
+                    RawBytes::default(),
+                    value.clone(),
+                    RawBytes::default(),
+                    ExitCode::OK,
+                );
+            })),
+        )
+        .unwrap();
+    assert_eq!(cid.is_none(), true);
+}
+
+/// This test covers the case where a bottom up cross_msg's target subnet is NOT the same as that of
+/// the gateway. It would save in postbox.
+#[test]
+fn test_apply_msg_bu_not_target_subnet() {
+    // test can be complex, enable debug by default
+    env_logger::init_from_env(env_logger::Env::new().default_filter_or("debug"));
+
+    // ============== Register subnet ==============
+    let shid = SubnetID::new_from_parent(&ROOTNET_ID, *SUBNET_ONE);
     let (h, mut rt) = setup(shid.clone());
 
     let from = Address::new_bls(&[3; fvm_shared::address::BLS_PUB_LEN]).unwrap();
     let to = Address::new_bls(&[4; fvm_shared::address::BLS_PUB_LEN]).unwrap();
 
-    let sub1 = SubnetID::new_from_parent(&shid, *SUBNET_ONE);
-    let sub2 = SubnetID::new_from_parent(&shid, *SUBNET_TWO);
+    let sub = shid.clone();
 
-    // register subnets
+    // ================ Setup ===============
+    let value = TokenAmount::from_atto(10_u64.pow(17));
+
+    // ================= Bottom-Up ===============
+    let ff = IPCAddress::new(&sub, &to).unwrap();
+    let tt = IPCAddress::new(&ROOTNET_ID, &from).unwrap();
+    let msg_nonce = 0;
+
+    // Only system code is allowed to this method
+    let params = StorableMsg {
+        to: tt.clone(),
+        from: ff.clone(),
+        method: METHOD_SEND,
+        value: value.clone(),
+        params: RawBytes::default(),
+        nonce: msg_nonce,
+    };
+    let cid = h
+        .apply_cross_execute_only(&mut rt, value.clone(), params, None)
+        .unwrap()
+        .unwrap();
+
+    // Part 1: test the message is stored in postbox
+    let st: State = rt.get_state();
+    assert_ne!(tt.subnet().unwrap(), st.network_name);
+
+    // Check 1: `tt` is in `sub1`, which is not in that of `runtime` of gateway, will store in postbox
+    let item = st.load_from_postbox(rt.store(), cid.clone()).unwrap();
+    assert_eq!(item.owners, Some(vec![ff.clone().raw_addr().unwrap()]));
+    let msg = item.cross_msg.msg;
+    assert_eq!(msg.to, tt);
+    // the nonce should not have changed at all
+    assert_eq!(msg.nonce, msg_nonce);
+    assert_eq!(msg.value, value);
+
+    // Part 2: Now we propagate from postbox
+    // get the original subnet nonce first
+    let caller = ff.clone().raw_addr().unwrap();
+    h.propagate(&mut rt, caller, cid.clone()).unwrap();
+
+    // state should be updated, load again
+    let st: State = rt.get_state();
+
+    // cid should be removed from postbox
+    let r = st.load_from_postbox(rt.store(), cid.clone());
+    assert_eq!(r.is_err(), true);
+    let err = r.unwrap_err();
+    assert_eq!(err.to_string(), "cid not found in postbox");
+}
+
+/// This test covers the case where the cross_msg's target subnet is the SAME as that of
+/// the gateway. It would directly commit the message and will not save in postbox.
+#[test]
+fn test_apply_msg_tp_target_subnet() {
+    // test can be complex, enable debug by default
+    env_logger::init_from_env(env_logger::Env::new().default_filter_or("debug"));
+
+    // ============== Register subnet ==============
+    let shid = SubnetID::new_from_parent(&ROOTNET_ID, *SUBNET_ONE);
+    let (h, mut rt) = setup(shid.clone());
+
+    let from = Address::new_bls(&[3; fvm_shared::address::BLS_PUB_LEN]).unwrap();
+    let to = Address::new_bls(&[4; fvm_shared::address::BLS_PUB_LEN]).unwrap();
+
+    let sub = shid.clone();
+
+    // ================ Setup ===============
+    let value = TokenAmount::from_atto(10_u64.pow(17));
+
+    // ================= Top-Down ===============
+    let ff = IPCAddress::new(&ROOTNET_ID, &from).unwrap();
+    let tt = IPCAddress::new(&sub, &to).unwrap();
+    let msg_nonce = 0;
+
+    // Only system code is allowed to this method
+    let params = StorableMsg {
+        to: tt.clone(),
+        from: ff.clone(),
+        method: METHOD_SEND,
+        value: value.clone(),
+        params: RawBytes::default(),
+        nonce: msg_nonce,
+    };
+    let sto = tt.raw_addr().unwrap();
+    let v = value.clone();
+    let cid = h
+        .apply_cross_execute_only(
+            &mut rt,
+            value.clone(),
+            params,
+            Some(Box::new(move |rt| {
+                // expect to send reward message
+                rt.expect_send(
+                    *REWARD_ACTOR_ADDR,
+                    ext::reward::EXTERNAL_FUNDING_METHOD,
+                    RawBytes::serialize(ext::reward::FundingParams {
+                        addr: *SCA_ACTOR_ADDR,
+                        value: v.clone(),
+                    })
+                    .unwrap(),
+                    TokenAmount::zero(),
+                    RawBytes::default(),
+                    ExitCode::OK,
+                );
+                rt.expect_send(
+                    sto.clone(),
+                    METHOD_SEND,
+                    RawBytes::default(),
+                    v.clone(),
+                    RawBytes::default(),
+                    ExitCode::OK,
+                );
+            })),
+        )
+        .unwrap();
+    assert_eq!(cid.is_none(), true);
+}
+
+/// This test covers the case where the cross_msg's target subnet is not the same as that of
+/// the gateway.
+#[test]
+fn test_apply_msg_tp_not_target_subnet() {
+    // test can be complex, enable debug by default
+    env_logger::init_from_env(env_logger::Env::new().default_filter_or("debug"));
+
+    // ============== Define Parameters ==============
+    // gateway: /root/sub1
+    let shid = SubnetID::new_from_parent(&ROOTNET_ID, *SUBNET_ONE);
+
+    let from = Address::new_bls(&[3; fvm_shared::address::BLS_PUB_LEN]).unwrap();
+    let to = Address::new_bls(&[4; fvm_shared::address::BLS_PUB_LEN]).unwrap();
+
+    // /root/sub1/sub1
+    let sub = SubnetID::new_from_parent(&shid, *SUBNET_ONE);
+
+    // ================ Setup ===============
     let reg_value = TokenAmount::from_atto(10_u64.pow(18));
+    let (h, mut rt) = setup(shid.clone());
     h.register(&mut rt, &SUBNET_ONE, &reg_value, ExitCode::OK)
         .unwrap();
-    h.register(&mut rt, &SUBNET_TWO, &reg_value, ExitCode::OK)
-        .unwrap();
-
     // add some circulating supply to subnets
     let funder = Address::new_id(1002);
     h.fund(
         &mut rt,
         &funder,
-        &sub1,
-        ExitCode::OK,
-        reg_value.clone(),
-        1,
-        &reg_value,
-    )
-    .unwrap();
-    h.fund(
-        &mut rt,
-        &funder,
-        &sub2,
+        &sub,
         ExitCode::OK,
         reg_value.clone(),
         1,
@@ -721,43 +906,87 @@ fn test_apply_routing() {
 
     let value = TokenAmount::from_atto(10_u64.pow(17));
 
-    //top-down
+    // ================= Top-Down ===============
     let ff = IPCAddress::new(&ROOTNET_ID, &from).unwrap();
-    let tt = IPCAddress::new(&sub1, &to).unwrap();
-    h.apply_cross_msg(&mut rt, &ff, &tt, value.clone(), 0, 1, ExitCode::OK, false)
+    let tt = IPCAddress::new(&sub, &to).unwrap();
+    let msg_nonce = 0;
+
+    // Only system code is allowed to this method
+    let params = StorableMsg {
+        to: tt.clone(),
+        from: ff.clone(),
+        method: METHOD_SEND,
+        value: value.clone(),
+        params: RawBytes::default(),
+        nonce: msg_nonce,
+    };
+    let v = value.clone();
+    // cid is expected, should not be None
+    let cid = h
+        .apply_cross_execute_only(
+            &mut rt,
+            value.clone(),
+            params,
+            Some(Box::new(move |rt| {
+                // expect to send reward message
+                rt.expect_send(
+                    *REWARD_ACTOR_ADDR,
+                    ext::reward::EXTERNAL_FUNDING_METHOD,
+                    RawBytes::serialize(ext::reward::FundingParams {
+                        addr: *SCA_ACTOR_ADDR,
+                        value: v.clone(),
+                    })
+                    .unwrap(),
+                    TokenAmount::zero(),
+                    RawBytes::default(),
+                    ExitCode::OK,
+                );
+            })),
+        )
+        .unwrap()
         .unwrap();
 
-    // let tt = IPCAddress::new(&sub2, &to).unwrap();
-    // h.apply_cross_msg(&mut rt, &ff, &tt, value.clone(), 1, 1, ExitCode::OK, false)
-    //     .unwrap();
-    //
-    // // bottom-up
-    // let ff = IPCAddress::new(&SubnetID::from_str("/root/f01/f012").unwrap(), &from).unwrap();
-    // let tt = IPCAddress::new(&sub1, &to).unwrap();
-    // h.apply_cross_msg(&mut rt, &ff, &tt, value.clone(), 2, 2, ExitCode::OK, false)
-    //     .unwrap();
-    // // directed to current network
-    // let tt = IPCAddress::new(&shid, &to).unwrap();
-    // h.apply_cross_msg(&mut rt, &ff, &tt, value.clone(), 3, 0, ExitCode::OK, false)
-    //     .unwrap();
-    //
-    // let ff = IPCAddress::new(&sub1, &from).unwrap();
-    // let tt = IPCAddress::new(&SubnetID::from_str("/root/f0101/f0102/f011").unwrap(), &to).unwrap();
-    // h.apply_cross_msg(&mut rt, &ff, &tt, value.clone(), 0, 2, ExitCode::OK, false)
-    //     .unwrap();
-    // let ff = IPCAddress::new(&sub2, &from).unwrap();
-    // let tt = IPCAddress::new(&SubnetID::from_str("/root/f0101/f0101/f011").unwrap(), &to).unwrap();
-    // h.apply_cross_msg(&mut rt, &ff, &tt, value.clone(), 1, 3, ExitCode::OK, false)
-    //     .unwrap();
-    // // directed to current network
-    // let ff = IPCAddress::new(
-    //     &SubnetID::from_str("/root/f0101/f0102/f011").unwrap(),
-    //     &from,
-    // )
-    // .unwrap();
-    // let tt = IPCAddress::new(&shid, &to).unwrap();
-    // h.apply_cross_msg(&mut rt, &ff, &tt, value.clone(), 1, 0, ExitCode::OK, false)
-    //     .unwrap();
+    // Part 1: test the message is stored in postbox
+    let st: State = rt.get_state();
+    assert_ne!(tt.subnet().unwrap(), st.network_name);
+
+    // Check 1: `tt` is in `sub1`, which is not in that of `runtime` of gateway, will store in postbox
+    let item = st.load_from_postbox(rt.store(), cid.clone()).unwrap();
+    assert_eq!(item.owners, Some(vec![ff.clone().raw_addr().unwrap()]));
+    let msg = item.cross_msg.msg;
+    assert_eq!(msg.to, tt);
+    // the nonce should not have changed at all
+    assert_eq!(msg.nonce, msg_nonce);
+    assert_eq!(msg.value, value);
+
+    // Part 2: Now we propagate from postbox
+    // get the original subnet nonce first
+    let starting_nonce = get_subnet(&rt, &tt.subnet().unwrap().down(&h.net_name).unwrap())
+        .unwrap()
+        .nonce;
+    let caller = ff.clone().raw_addr().unwrap();
+    h.propagate(&mut rt, caller, cid.clone()).unwrap();
+
+    // state should be updated, load again
+    let st: State = rt.get_state();
+
+    // cid should be removed from postbox
+    let r = st.load_from_postbox(rt.store(), cid.clone());
+    assert_eq!(r.is_err(), true);
+    let err = r.unwrap_err();
+    assert_eq!(err.to_string(), "cid not found in postbox");
+
+    // the cross msg should have been committed to the next subnet, check this!
+    let sub = get_subnet(&rt, &tt.subnet().unwrap().down(&h.net_name).unwrap()).unwrap();
+    assert_eq!(sub.nonce, starting_nonce + 1);
+    let crossmsgs = sub.top_down_msgs.load(rt.store()).unwrap();
+    let msg = get_topdown_msg(&crossmsgs, starting_nonce).unwrap();
+    assert_eq!(msg.is_some(), true);
+    let msg = msg.unwrap();
+    assert_eq!(msg.to, tt);
+    // the nonce should not have changed at all
+    assert_eq!(msg.nonce, starting_nonce);
+    assert_eq!(msg.value, value);
 }
 
 #[test]
