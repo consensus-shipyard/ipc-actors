@@ -500,7 +500,7 @@ impl Actor {
 
         let sig_addr = resolve_secp_bls(rt, rt.message().caller())?;
 
-        let out_val = rt.transaction(|st: &mut State, rt| -> Result<TokenAmount, ActorError> {
+        rt.transaction(|st: &mut State, rt| {
             // collect fees
             st.collect_cross_fee(&mut value, &*MIN_CROSS_MSG_GAS)?;
 
@@ -529,7 +529,7 @@ impl Actor {
                         "error committing top-down message",
                     )
                 })?;
-            Ok(value)
+            Ok(())
         })?;
 
         // burn funds that are being released
@@ -537,7 +537,7 @@ impl Actor {
             *BURNT_FUNDS_ACTOR_ADDR,
             METHOD_SEND,
             RawBytes::default(),
-            out_val,
+            value,
         )?;
 
         Ok(())
