@@ -841,19 +841,20 @@ fn test_apply_msg_bu_switch_td() {
     let caller = ff.clone().raw_addr().unwrap();
 
     // we directly insert message into postbox as we dont really care how it's got stored in queue
-    let cid = rt.transaction(|st: &mut State, r| {
-        Ok(st
-            .insert_postbox(
-                r.store(),
-                Some(vec![caller.clone()]),
-                CrossMsg {
-                    wrapped: false,
-                    msg: params,
-                },
-            )
-            .unwrap())
-    })
-    .unwrap();
+    let cid = rt
+        .transaction(|st: &mut State, r| {
+            Ok(st
+                .insert_postbox(
+                    r.store(),
+                    Some(vec![caller.clone()]),
+                    CrossMsg {
+                        wrapped: false,
+                        msg: params,
+                    },
+                )
+                .unwrap())
+        })
+        .unwrap();
 
     let starting_nonce = get_subnet(&rt, &tt.subnet().unwrap().down(&h.net_name).unwrap())
         .unwrap()
