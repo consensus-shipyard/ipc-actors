@@ -647,8 +647,8 @@ impl Harness {
                 .unwrap(),
             )?;
             rt.verify();
-            // let st: State = rt.get_state();
-            // assert_eq!(st.applied_bottomup_nonce, msg_nonce);
+            let st: State = rt.get_state();
+            assert_eq!(st.applied_bottomup_nonce, msg_nonce);
         } else {
             let rew_params = ext::reward::FundingParams {
                 addr: *SCA_ACTOR_ADDR,

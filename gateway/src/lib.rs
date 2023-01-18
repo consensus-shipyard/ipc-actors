@@ -723,8 +723,7 @@ impl Actor {
             }
         };
 
-        let mut cid = None;
-        rt.transaction(|st: &mut State, rt| {
+        let cid = rt.transaction(|st: &mut State, rt| {
             let owner = cross_msg
                 .msg
                 .from
@@ -735,12 +734,11 @@ impl Actor {
                 .map_err(|e| {
                     e.downcast_default(ExitCode::USR_ILLEGAL_STATE, "error save topdown messages")
                 })?;
-            cid = Some(r);
-            Ok(())
+            Ok(r)
         })?;
 
         // it is safe to just unwrap. If `transaction` fails, cid is None and wont reach here.
-        Ok(RawBytes::new(cid.unwrap().to_bytes()))
+        Ok(RawBytes::new(cid.to_bytes()))
     }
 
     /// Whitelist a series of addresses as propagator of a cross net message.
@@ -872,6 +870,8 @@ impl Actor {
                     st.network_name
                 );
 
+                // if the message is a bottom-up message and it reached the common-parent
+                // then we need to start propagating it down to the destination.
                 let r = if nearest_common_parent == st.network_name {
                     st.commit_topdown_msg(rt.store(), &mut cross_msg)
                 } else {
@@ -881,7 +881,7 @@ impl Actor {
                 r.map_err(|e| {
                     e.downcast_default(
                         ExitCode::USR_ILLEGAL_STATE,
-                        "error committing topdown messages",
+                        "error committing bottom-up messages",
                     )
                 })?;
 
