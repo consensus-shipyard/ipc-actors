@@ -11,7 +11,7 @@ use fvm_shared::METHOD_SEND;
 use ipc_gateway::Status::{Active, Inactive};
 use ipc_gateway::{
     ext, get_bottomup_msg, get_topdown_msg, Checkpoint, CrossMsg, IPCAddress, State, StorableMsg,
-    DEFAULT_CHECKPOINT_PERIOD,
+    CROSS_MSG_FEE, DEFAULT_CHECKPOINT_PERIOD,
 };
 use ipc_sdk::subnet_id::SubnetID;
 use primitives::TCid;
@@ -553,6 +553,9 @@ fn test_fund() {
         &exp_cs,
     )
     .unwrap();
+    let st: State = rt.get_state();
+    // check that fees are collected successfully
+    assert_eq!(st.gov_acc, 3 * &*CROSS_MSG_FEE);
 }
 
 #[test]
@@ -576,6 +579,10 @@ fn test_release() {
         .unwrap();
     h.release(&mut rt, &releaser, ExitCode::OK, r_amount, 1, &prev_cid)
         .unwrap();
+
+    let st: State = rt.get_state();
+    // check that fees are collected successfully
+    assert_eq!(st.gov_acc, 2 * &*CROSS_MSG_FEE);
 }
 
 #[test]
