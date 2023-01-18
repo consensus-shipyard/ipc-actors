@@ -11,7 +11,7 @@ use fil_actors_runtime::test_utils::{
 };
 use fil_actors_runtime::{
     make_map_with_root_and_bitwidth, ActorError, Map, BURNT_FUNDS_ACTOR_ADDR, REWARD_ACTOR_ADDR,
-    STORAGE_POWER_ACTOR_ADDR, SYSTEM_ACTOR_ADDR,
+    SYSTEM_ACTOR_ADDR,
 };
 use fil_actors_runtime::{Array, INIT_ACTOR_ADDR};
 use fvm_ipld_blockstore::Blockstore;
@@ -27,8 +27,8 @@ use ipc_gateway::checkpoint::ChildCheck;
 use ipc_gateway::{
     ext, get_topdown_msg, is_bottomup, Actor, ApplyMsgParams, Checkpoint, ConstructorParams,
     CrossMsg, CrossMsgMeta, CrossMsgParams, CrossMsgs, FundParams, IPCAddress, IPCMsgType, Method,
-    PropagateParams, State, StorableMsg, Subnet, SubnetID, CROSSMSG_AMT_BITWIDTH,
-    DEFAULT_CHECKPOINT_PERIOD, MAX_NONCE, MIN_COLLATERAL_AMOUNT, MIN_CROSS_MSG_GAS, SCA_ACTOR_ADDR,
+    PropagateParams, State, StorableMsg, Subnet, SubnetID, CROSSMSG_AMT_BITWIDTH, CROSS_MSG_FEE,
+    DEFAULT_CHECKPOINT_PERIOD, MAX_NONCE, MIN_COLLATERAL_AMOUNT,
 };
 use lazy_static::lazy_static;
 use primitives::{TCid, TCidContent};
@@ -43,12 +43,12 @@ lazy_static! {
     pub static ref TEST_BLS: Address =
         Address::new_bls(&[1; fvm_shared::address::BLS_PUB_LEN]).unwrap();
     pub static ref ACTOR: Address = Address::new_actor("actor".as_bytes());
-    pub static ref TYPES: Vec<Cid> = vec![*ACCOUNT_ACTOR_CODE_ID, *MULTISIG_ACTOR_CODE_ID];
+    pub static ref SIG_TYPES: Vec<Cid> = vec![*ACCOUNT_ACTOR_CODE_ID, *MULTISIG_ACTOR_CODE_ID];
 }
 
 pub fn new_runtime() -> MockRuntime {
     MockRuntime {
-        receiver: *STORAGE_POWER_ACTOR_ADDR,
+        receiver: *ACTOR,
         caller: *SYSTEM_ACTOR_ADDR,
         caller_type: *SYSTEM_ACTOR_CODE_ID,
         ..Default::default()
@@ -299,9 +299,11 @@ impl Harness {
         expected_circ_sup: &TokenAmount,
     ) -> Result<(), ActorError> {
         rt.set_caller(*ACCOUNT_ACTOR_CODE_ID, *funder);
-        rt.expect_validate_caller_type(TYPES.clone());
+        rt.expect_validate_caller_type(SIG_TYPES.clone());
 
-        rt.set_value(value.clone());
+        // set value and include the cross_msg_fee
+        set_rt_value_with_cross_fee(rt, &value);
+
         if code != ExitCode::OK {
             expect_abort(
                 code,
@@ -341,8 +343,7 @@ impl Harness {
         assert_eq!(msg.from, from);
         assert_eq!(msg.to, to);
         assert_eq!(msg.nonce, expected_nonce - 1);
-        // TODO: Make the cross-msg fee configurable in tests.
-        assert_eq!(msg.value, value - &*MIN_CROSS_MSG_GAS);
+        assert_eq!(msg.value, value);
 
         Ok(())
     }
@@ -357,9 +358,10 @@ impl Harness {
         prev_meta: &Cid,
     ) -> Result<Cid, ActorError> {
         rt.set_caller(*ACCOUNT_ACTOR_CODE_ID, *releaser);
-        rt.expect_validate_caller_type(TYPES.clone());
+        rt.expect_validate_caller_type(SIG_TYPES.clone());
+        // set value and include the cross_msg_fee
+        set_rt_value_with_cross_fee(rt, &value);
 
-        rt.set_value(value.clone());
         if code != ExitCode::OK {
             expect_abort(
                 code,
@@ -434,7 +436,7 @@ impl Harness {
         expected_circ_sup: &TokenAmount,
     ) -> Result<(), ActorError> {
         rt.set_caller(*SYSTEM_ACTOR_CODE_ID, *SYSTEM_ACTOR_ADDR);
-        rt.expect_validate_caller_not_type(TYPES.clone());
+        rt.expect_validate_caller_not_type(SIG_TYPES.clone());
 
         rt.set_value(value.clone());
 
@@ -565,8 +567,8 @@ impl Harness {
     ) -> Result<(), ActorError> {
         rt.set_caller(Default::default(), owner);
         rt.expect_validate_caller_any();
-        rt.set_balance(MIN_CROSS_MSG_GAS.clone());
-        rt.set_received(MIN_CROSS_MSG_GAS.clone());
+        rt.set_balance(CROSS_MSG_FEE.clone());
+        rt.set_received(CROSS_MSG_FEE.clone());
 
         rt.call::<Actor>(
             Method::Propagate as MethodNum,
@@ -651,7 +653,7 @@ impl Harness {
             assert_eq!(st.applied_bottomup_nonce, msg_nonce);
         } else {
             let rew_params = ext::reward::FundingParams {
-                addr: *SCA_ACTOR_ADDR,
+                addr: *ACTOR,
                 value: params.value.clone(),
             };
             rt.expect_send(
@@ -776,4 +778,12 @@ pub fn get_cross_msgs<'m, BS: Blockstore>(
     registry
         .get(&cid.to_bytes())
         .map_err(|e| anyhow!("error getting fross messages: {:?}", e))
+}
+
+fn set_rt_value_with_cross_fee(rt: &mut MockRuntime, value: &TokenAmount) {
+    rt.set_value(if value.clone() != TokenAmount::zero() {
+        value.clone() + &*CROSS_MSG_FEE
+    } else {
+        value.clone()
+    });
 }

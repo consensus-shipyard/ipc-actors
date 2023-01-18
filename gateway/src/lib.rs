@@ -40,11 +40,10 @@ mod types;
 
 // TODO: make this into constructor!
 lazy_static! {
-    pub static ref SCA_ACTOR_ADDR: Address = Address::new_id(100);
-    pub static ref MIN_CROSS_MSG_GAS: TokenAmount = TokenAmount::from_atto(1);
+    pub static ref CROSS_MSG_FEE: TokenAmount = TokenAmount::from_nano(100);
 }
 
-/// SCA actor methods available
+/// Gateway actor methods available
 #[derive(FromPrimitive)]
 #[repr(u64)]
 pub enum Method {
@@ -63,7 +62,7 @@ pub enum Method {
     WhitelistPropagator = 12,
 }
 
-/// Subnet Coordinator Actor
+/// Gateway Actor
 pub struct Actor;
 
 impl Actor {
@@ -447,7 +446,7 @@ impl Actor {
         let sig_addr = resolve_secp_bls(rt, rt.message().caller())?;
 
         rt.transaction(|st: &mut State, rt| {
-            st.collect_cross_fee(&mut value, &*MIN_CROSS_MSG_GAS)?;
+            st.collect_cross_fee(&mut value, &*CROSS_MSG_FEE)?;
             // Create fund message
             let mut f_msg = CrossMsg {
                 msg: StorableMsg::new_fund_msg(&params, &sig_addr, value).map_err(|e| {
@@ -502,7 +501,7 @@ impl Actor {
 
         rt.transaction(|st: &mut State, rt| {
             // collect fees
-            st.collect_cross_fee(&mut value, &*MIN_CROSS_MSG_GAS)?;
+            st.collect_cross_fee(&mut value, &*CROSS_MSG_FEE)?;
 
             // Create release message
             let r_msg = CrossMsg {
@@ -686,9 +685,10 @@ impl Actor {
                 }
             }
             Ok(IPCMsgType::TopDown) => {
-                // Mint funds for SCA so it can direct them accordingly as part of the message.
+                // Mint funds for the gateway so it can direct them accordingly as part of the message.
                 let params = ext::reward::FundingParams {
-                    addr: *SCA_ACTOR_ADDR,
+                    // curr gateway address
+                    addr: rt.message().receiver(),
                     value: cross_msg.msg.value.clone(),
                 };
                 rt.send(
@@ -817,7 +817,7 @@ impl Actor {
             }
 
             // collect cross-fee
-            st.collect_cross_fee(&mut value, &*MIN_CROSS_MSG_GAS)?;
+            st.collect_cross_fee(&mut value, &*CROSS_MSG_FEE)?;
 
             let PostBoxItem { cross_msg, .. } = postbox_item;
             Self::commit_cross_message(rt, st, cross_msg)?;
@@ -825,7 +825,9 @@ impl Actor {
         })?;
 
         // send the remainder of the fee to the owner
-        rt.send(owner, METHOD_SEND, RawBytes::default(), value.clone())?;
+        if value > TokenAmount::zero() {
+            rt.send(owner, METHOD_SEND, RawBytes::default(), value.clone())?;
+        }
 
         Ok(RawBytes::default())
     }

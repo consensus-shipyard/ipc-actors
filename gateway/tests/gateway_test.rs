@@ -11,7 +11,7 @@ use fvm_shared::METHOD_SEND;
 use ipc_gateway::Status::{Active, Inactive};
 use ipc_gateway::{
     ext, get_bottomup_msg, get_topdown_msg, Checkpoint, CrossMsg, IPCAddress, State, StorableMsg,
-    DEFAULT_CHECKPOINT_PERIOD, MIN_CROSS_MSG_GAS, SCA_ACTOR_ADDR,
+    DEFAULT_CHECKPOINT_PERIOD,
 };
 use ipc_sdk::subnet_id::SubnetID;
 use primitives::TCid;
@@ -502,8 +502,7 @@ fn test_fund() {
         &funder,
         &shid,
         ExitCode::OK,
-        // TODO: Make the fee an argument
-        amount.clone() + &*MIN_CROSS_MSG_GAS,
+        amount.clone(),
         1,
         &amount,
     )
@@ -515,7 +514,7 @@ fn test_fund() {
         &funder,
         &shid,
         ExitCode::OK,
-        amount.clone() + &*MIN_CROSS_MSG_GAS,
+        amount.clone(),
         2,
         &exp_cs,
     )
@@ -526,7 +525,7 @@ fn test_fund() {
         &funder,
         &shid,
         ExitCode::OK,
-        amount.clone() + &*MIN_CROSS_MSG_GAS,
+        amount.clone(),
         3,
         &exp_cs,
     )
@@ -929,7 +928,7 @@ fn test_apply_msg_tp_target_subnet() {
                     *REWARD_ACTOR_ADDR,
                     ext::reward::EXTERNAL_FUNDING_METHOD,
                     RawBytes::serialize(ext::reward::FundingParams {
-                        addr: *SCA_ACTOR_ADDR,
+                        addr: *ACTOR,
                         value: v.clone(),
                     })
                     .unwrap(),
@@ -1012,7 +1011,7 @@ fn test_apply_msg_tp_not_target_subnet() {
                     *REWARD_ACTOR_ADDR,
                     ext::reward::EXTERNAL_FUNDING_METHOD,
                     RawBytes::serialize(ext::reward::FundingParams {
-                        addr: *SCA_ACTOR_ADDR,
+                        addr: *ACTOR,
                         value: v.clone(),
                     })
                     .unwrap(),
