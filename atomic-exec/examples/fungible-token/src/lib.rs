@@ -391,11 +391,15 @@ impl Actor {
         let ApplyMsgParams {
             cross_msg:
                 CrossMsg {
-                    msg: StorableMsg { from, params, .. },
+                    msg:
+                        StorableMsg {
+                            from,
+                            params: exec_id,
+                            ..
+                        },
                     ..
                 },
         } = params;
-        let exec_id = cbor::deserialize_params(&params)?;
 
         // Modify the state to commit the atomic transfer.
         rt.transaction(|st: &mut State, rt| {
@@ -484,11 +488,15 @@ impl Actor {
         let ApplyMsgParams {
             cross_msg:
                 CrossMsg {
-                    msg: StorableMsg { from, params, .. },
+                    msg:
+                        StorableMsg {
+                            from,
+                            params: exec_id,
+                            ..
+                        },
                     ..
                 },
         } = params;
-        let exec_id = cbor::deserialize_params(&params)?;
 
         // Modify the state to roll back the atomic transfer.
         rt.transaction(|st: &mut State, rt| {
