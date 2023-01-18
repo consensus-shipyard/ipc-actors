@@ -783,16 +783,18 @@ fn test_apply_msg_bu_not_target_subnet() {
     // Part 2: Now we propagate from postbox
     // get the original subnet nonce first
     let caller = ff.clone().raw_addr().unwrap();
+    let old_state: State = rt.get_state();
     h.propagate(&mut rt, caller, cid.clone()).unwrap();
 
     // state should be updated, load again
-    let st: State = rt.get_state();
+    let new_state: State = rt.get_state();
 
     // cid should be removed from postbox
-    let r = st.load_from_postbox(rt.store(), cid.clone());
+    let r = new_state.load_from_postbox(rt.store(), cid.clone());
     assert_eq!(r.is_err(), true);
     let err = r.unwrap_err();
     assert_eq!(err.to_string(), "cid not found in postbox");
+    assert_eq!(new_state.nonce, old_state.nonce + 1);
 }
 
 /// This test covers the case where a bottom up cross_msg's target subnet is NOT the same as that of
@@ -839,9 +841,8 @@ fn test_apply_msg_bu_switch_td() {
     let caller = ff.clone().raw_addr().unwrap();
 
     // we directly insert message into postbox as we dont really care how it's got stored in queue
-    let mut cid = Cid::default();
-    rt.transaction(|st: &mut State, r| {
-        cid = st
+    let cid = rt.transaction(|st: &mut State, r| {
+        Ok(st
             .insert_postbox(
                 r.store(),
                 Some(vec![caller.clone()]),
@@ -850,8 +851,7 @@ fn test_apply_msg_bu_switch_td() {
                     msg: params,
                 },
             )
-            .unwrap();
-        Ok(())
+            .unwrap())
     })
     .unwrap();
 

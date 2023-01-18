@@ -729,7 +729,7 @@ impl Actor {
         })?;
 
         // it is safe to just unwrap. If `transaction` fails, cid is None and wont reach here.
-        Ok(RawBytes::new(cid.unwrap().to_bytes()))
+        Ok(RawBytes::new(cid.to_bytes()))
     }
 
     /// Whitelist a series of addresses as propagator of a cross net message.
