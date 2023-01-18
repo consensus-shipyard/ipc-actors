@@ -871,7 +871,7 @@ impl Actor {
                 r.map_err(|e| {
                     e.downcast_default(
                         ExitCode::USR_ILLEGAL_STATE,
-                        "error committing topdown messages",
+                        "error committing bottom-up messages",
                     )
                 })?;
 
