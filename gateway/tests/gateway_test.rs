@@ -681,7 +681,7 @@ fn test_send_cross() {
 }
 
 /// This test covers the case where a bottom up cross_msg's target subnet is the SAME as that of
-/// the gateway. It would directly commit the message and will not save in postbox.
+/// the gateway. It should directly commit the message and will not save in postbox.
 #[test]
 fn test_apply_msg_bu_target_subnet() {
     // ============== Register subnet ==============
@@ -733,7 +733,7 @@ fn test_apply_msg_bu_target_subnet() {
 }
 
 /// This test covers the case where a bottom up cross_msg's target subnet is NOT the same as that of
-/// the gateway. It would save in postbox.
+/// the gateway. It will save it in the postbox.
 #[test]
 fn test_apply_msg_bu_not_target_subnet() {
     // ============== Register subnet ==============
