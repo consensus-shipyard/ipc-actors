@@ -685,27 +685,31 @@ impl Actor {
                 }
             }
             Ok(IPCMsgType::TopDown) => {
-                // Mint funds for the gateway so it can direct them accordingly as part of the message.
+                // Mint funds for the gateway, as any topdown message
+                // including tokens traversing the subnet will provide
+                // the gateway with additional balance (circ_supply).
                 let params = ext::reward::FundingParams {
                     // curr gateway address
                     addr: rt.message().receiver(),
                     value: cross_msg.msg.value.clone(),
                 };
-                rt.send(
-                    *REWARD_ACTOR_ADDR,
-                    ext::reward::EXTERNAL_FUNDING_METHOD,
-                    RawBytes::serialize(params)?,
-                    TokenAmount::zero(),
-                )?;
-
-                if st.applied_topdown_nonce != cross_msg.msg.nonce {
-                    return Err(actor_error!(
-                        illegal_state,
-                        "the top-down message being applied doesn't hold the subsequent nonce"
-                    ));
+                if cross_msg.msg.value > TokenAmount::zero() {
+                    rt.send(
+                        *REWARD_ACTOR_ADDR,
+                        ext::reward::EXTERNAL_FUNDING_METHOD,
+                        RawBytes::serialize(params)?,
+                        TokenAmount::zero(),
+                    )?;
                 }
 
                 if sto == st.network_name {
+                    if st.applied_topdown_nonce != cross_msg.msg.nonce {
+                        return Err(actor_error!(
+                            illegal_state,
+                            "the top-down message being applied doesn't hold the subsequent nonce"
+                        ));
+                    }
+
                     rt.transaction(|st: &mut State, _| {
                         st.applied_topdown_nonce += 1;
                         Ok(())

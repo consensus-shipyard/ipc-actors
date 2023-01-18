@@ -1240,8 +1240,3 @@ fn test_apply_msg_match_target_subnet() {
 
     // TODO: Trying to release over circulating supply
 }
-
-#[test]
-fn test_noop() {
-    // TODO: Implement tests of what happens if the application
-}
