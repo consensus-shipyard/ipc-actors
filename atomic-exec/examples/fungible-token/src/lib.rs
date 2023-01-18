@@ -336,12 +336,15 @@ impl Actor {
     {
         let PrepareAtomicTransferParams { input_ids } = params;
 
+        // Resolve sender's address to ID addresses.
+        let from_id = rt.message().caller().id().unwrap();
+
         // Attempt to modify the state to prepare the atomic transfer.
         // This returns the IPC address of the coordinator actor and
         // the atomic exec ID.
         let st: State = rt.state()?;
         let (coordinator, exec_id) = rt.transaction(|st: &mut State, rt| {
-            st.prep_atomic_transfer(rt.store(), &input_ids)
+            st.prep_atomic_transfer(rt.store(), from_id, &input_ids)
                 .map_err(|e| {
                     e.downcast_default(ExitCode::USR_UNSPECIFIED, "cannot prepare atomic transfer")
                 })

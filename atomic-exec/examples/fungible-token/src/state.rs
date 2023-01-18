@@ -188,6 +188,7 @@ impl State {
     pub fn prep_atomic_transfer(
         &mut self,
         bs: &impl Blockstore,
+        from: ActorID,
         input_ids: &[(IPCAddress, AtomicInputID)],
     ) -> anyhow::Result<(IPCAddress, AtomicExecID)> {
         let own_addr = self.ipc_address();
@@ -206,8 +207,13 @@ impl State {
         let input: AtomicTransfer = atomic_registry
             .atomic_input(bs, own_input_id)?
             .ok_or_else(|| anyhow::anyhow!("unexpected own input ID"))?;
-        let from = input.from;
+        let orig_from = input.from;
         let coordinator = input.coordinator.clone();
+
+        // Check if the sender matches
+        if from != orig_from {
+            anyhow::bail!("unexpected sender address");
+        }
 
         // Get sender's account state.
         let from_key = Self::account_key(from);
