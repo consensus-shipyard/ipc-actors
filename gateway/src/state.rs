@@ -73,7 +73,7 @@ impl State {
             nonce: Default::default(),
             bottomup_nonce: Default::default(),
             bottomup_msg_meta: TCid::new_amt(store)?,
-            // Because this way we ensure that the next one to execute is 0, if not it would expect 1 and fail for the first nonce
+            // This way we ensure that the first message to execute has nonce= 0, if not it would expect 1 and fail for the first nonce
             // Because we first increase to the subsequent and then execute
             applied_bottomup_nonce: MAX_NONCE,
             applied_topdown_nonce: Default::default(),
