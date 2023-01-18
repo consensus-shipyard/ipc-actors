@@ -714,8 +714,7 @@ impl Actor {
             }
         };
 
-        let mut cid = None;
-        rt.transaction(|st: &mut State, rt| {
+        let cid = rt.transaction(|st: &mut State, rt| {
             let owner = cross_msg
                 .msg
                 .from
@@ -726,8 +725,7 @@ impl Actor {
                 .map_err(|e| {
                     e.downcast_default(ExitCode::USR_ILLEGAL_STATE, "error save topdown messages")
                 })?;
-            cid = Some(r);
-            Ok(())
+            Ok(r)
         })?;
 
         // it is safe to just unwrap. If `transaction` fails, cid is None and wont reach here.
