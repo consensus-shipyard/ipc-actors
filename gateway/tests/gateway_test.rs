@@ -784,7 +784,77 @@ fn test_apply_msg_bu_not_target_subnet() {
     // get the original subnet nonce first
     let caller = ff.clone().raw_addr().unwrap();
     let old_state: State = rt.get_state();
-    h.propagate(&mut rt, caller, cid.clone()).unwrap();
+    h.propagate(&mut rt, caller, cid.clone(), TokenAmount::zero())
+        .unwrap();
+
+    // state should be updated, load again
+    let new_state: State = rt.get_state();
+
+    // cid should be removed from postbox
+    let r = new_state.load_from_postbox(rt.store(), cid.clone());
+    assert_eq!(r.is_err(), true);
+    let err = r.unwrap_err();
+    assert_eq!(err.to_string(), "cid not found in postbox");
+    assert_eq!(new_state.nonce, old_state.nonce + 1);
+}
+
+/// This test covers the case where the amount send in the propagate
+/// message exceeds the required fee and the remainder is returned
+/// to the caller.
+#[test]
+fn test_propagate_with_remainder() {
+    // ============== Register subnet ==============
+    let shid = SubnetID::new_from_parent(&ROOTNET_ID, *SUBNET_ONE);
+    let (h, mut rt) = setup(shid.clone());
+
+    let from = Address::new_bls(&[3; fvm_shared::address::BLS_PUB_LEN]).unwrap();
+    let to = Address::new_bls(&[4; fvm_shared::address::BLS_PUB_LEN]).unwrap();
+
+    let sub = shid.clone();
+
+    // ================ Setup ===============
+    let value = TokenAmount::from_atto(10_u64.pow(17));
+
+    // ================= Bottom-Up ===============
+    let ff = IPCAddress::new(&sub, &to).unwrap();
+    let tt = IPCAddress::new(&ROOTNET_ID, &from).unwrap();
+    let msg_nonce = 0;
+
+    // Only system code is allowed to this method
+    let params = StorableMsg {
+        to: tt.clone(),
+        from: ff.clone(),
+        method: METHOD_SEND,
+        value: value.clone(),
+        params: RawBytes::default(),
+        nonce: msg_nonce,
+    };
+    let cid = h
+        .apply_cross_execute_only(&mut rt, value.clone(), params, None)
+        .unwrap()
+        .unwrap();
+
+    // Part 1: test the message is stored in postbox
+    let st: State = rt.get_state();
+    assert_ne!(tt.subnet().unwrap(), st.network_name);
+
+    // Check 1: `tt` is in `sub1`, which is not in that of `runtime` of gateway, will store in postbox
+    let item = st.load_from_postbox(rt.store(), cid.clone()).unwrap();
+    assert_eq!(item.owners, Some(vec![ff.clone().raw_addr().unwrap()]));
+    let msg = item.cross_msg.msg;
+    assert_eq!(msg.to, tt);
+    // the nonce should not have changed at all
+    assert_eq!(msg.nonce, msg_nonce);
+    assert_eq!(msg.value, value);
+
+    // Part 2: Now we propagate from postbox
+    // get the original subnet nonce first with an
+    // excess to check that there is a remainder
+    // to be returned
+    let caller = ff.clone().raw_addr().unwrap();
+    let old_state: State = rt.get_state();
+    h.propagate(&mut rt, caller, cid.clone(), value.clone())
+        .unwrap();
 
     // state should be updated, load again
     let new_state: State = rt.get_state();
@@ -861,7 +931,8 @@ fn test_apply_msg_bu_switch_td() {
         .nonce;
 
     // now we propagate
-    h.propagate(&mut rt, caller, cid.clone()).unwrap();
+    h.propagate(&mut rt, caller, cid.clone(), TokenAmount::zero())
+        .unwrap();
 
     // state should be updated, load again to perform the checks!
     let st: State = rt.get_state();
@@ -1043,7 +1114,8 @@ fn test_apply_msg_tp_not_target_subnet() {
         .unwrap()
         .nonce;
     let caller = ff.clone().raw_addr().unwrap();
-    h.propagate(&mut rt, caller, cid.clone()).unwrap();
+    h.propagate(&mut rt, caller, cid.clone(), TokenAmount::zero())
+        .unwrap();
 
     // state should be updated, load again
     let st: State = rt.get_state();

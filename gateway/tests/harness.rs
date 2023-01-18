@@ -564,11 +564,23 @@ impl Harness {
         rt: &mut MockRuntime,
         owner: Address,
         cid: Cid,
+        excess: TokenAmount,
     ) -> Result<(), ActorError> {
         rt.set_caller(Default::default(), owner);
         rt.expect_validate_caller_any();
-        rt.set_balance(CROSS_MSG_FEE.clone());
-        rt.set_received(CROSS_MSG_FEE.clone());
+        rt.set_balance(CROSS_MSG_FEE.clone() + excess.clone());
+        rt.set_received(CROSS_MSG_FEE.clone() + excess.clone());
+
+        if excess > TokenAmount::zero() {
+            rt.expect_send(
+                owner,
+                METHOD_SEND,
+                RawBytes::default(),
+                excess.clone(),
+                RawBytes::default(),
+                ExitCode::OK,
+            );
+        }
 
         rt.call::<Actor>(
             Method::Propagate as MethodNum,
