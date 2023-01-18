@@ -860,6 +860,8 @@ impl Actor {
                     st.network_name
                 );
 
+                // if the message is a bottom-up message and it reached the common-parent
+                // then we need to start propagating it down to the destination.
                 let r = if nearest_common_parent == st.network_name {
                     st.commit_topdown_msg(rt.store(), &mut cross_msg)
                 } else {
