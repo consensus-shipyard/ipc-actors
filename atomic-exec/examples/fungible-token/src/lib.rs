@@ -24,6 +24,9 @@ use std::str::FromStr;
 
 mod state;
 
+#[cfg(test)]
+mod tests;
+
 fvm_actors_runtime::wasm_trampoline!(Actor);
 
 lazy_static::lazy_static! {
