@@ -776,3 +776,17 @@ fn set_rt_value_with_cross_fee(rt: &mut MockRuntime, value: &TokenAmount) {
         value.clone()
     });
 }
+
+pub fn set_msg_meta(ch: &mut Checkpoint, rand: Vec<u8>, value: TokenAmount) {
+    let mh_code = Code::Blake2b256;
+    let c = TCid::from(Cid::new_v1(
+        fvm_ipld_encoding::DAG_CBOR,
+        mh_code.digest(&rand),
+    ));
+    let meta = CrossMsgMeta {
+        msgs_cid: c,
+        nonce: 0,
+        value,
+    };
+    ch.data.cross_msgs = meta;
+}

@@ -10,8 +10,8 @@ use fvm_shared::error::ExitCode;
 use fvm_shared::METHOD_SEND;
 use ipc_gateway::Status::{Active, Inactive};
 use ipc_gateway::{
-    ext, get_bottomup_msg, get_topdown_msg, Checkpoint, CrossMsg, IPCAddress, State, StorableMsg,
-    CROSS_MSG_FEE, DEFAULT_CHECKPOINT_PERIOD,
+    ext, get_topdown_msg, Checkpoint, CrossMsg, IPCAddress, State, StorableMsg, CROSS_MSG_FEE,
+    DEFAULT_CHECKPOINT_PERIOD,
 };
 use ipc_sdk::subnet_id::SubnetID;
 use primitives::TCid;
@@ -324,7 +324,6 @@ fn checkpoint_commit() {
     assert_eq!(has_cid(&child_check.checks, &ch.cid()), true);
 }
 
-/* TODO: Uncomment test and fix when implementation is done
 #[test]
 fn checkpoint_crossmsgs() {
     let (h, mut rt) = setup_root();
@@ -349,9 +348,7 @@ fn checkpoint_crossmsgs() {
     rt.set_epoch(epoch);
     let mut ch = Checkpoint::new(shid.clone(), epoch + 9);
     // And to this subnet
-    add_msg_meta(&mut ch, "rand1".as_bytes().to_vec(), TokenAmount::zero());
-    add_msg_meta(&mut ch, "rand2".as_bytes().to_vec(), TokenAmount::zero());
-    add_msg_meta(&mut ch, "rand3".as_bytes().to_vec(), TokenAmount::zero());
+    set_msg_meta(&mut ch, "rand1".as_bytes().to_vec(), TokenAmount::zero());
 
     h.commit_child_check(&mut rt, &shid, &ch, ExitCode::OK, TokenAmount::zero())
         .unwrap();
@@ -363,79 +360,8 @@ fn checkpoint_crossmsgs() {
     let prev_cid = ch.cid();
     assert_eq!(has_cid(&child_check.checks, &prev_cid), true);
 
-    let crossmsgs = st.bottomup_msg_meta.load(rt.store()).unwrap();
-    for item in 0..=2 {
-        get_bottomup_msg(&crossmsgs, item).unwrap().unwrap();
-    }
-    // Check that the ones directed to other subnets are aggregated in message-meta
-    for to in vec![
-        SubnetID::from_str("/root/f0102/f0101").unwrap(),
-        SubnetID::from_str("/root/f0102/f0102").unwrap(),
-    ] {
-        commit.crossmsg_meta(&h.net_name, &to).unwrap();
-    }
-
-    // funding subnet so it has some funds
-    let funder = Address::new_id(1001);
-    let amount = TokenAmount::from_atto(10_u64.pow(18));
-    h.fund(
-        &mut rt,
-        &funder,
-        &shid,
-        ExitCode::OK,
-        amount.clone(),
-        1,
-        &amount,
-    )
-    .unwrap();
-
-    let mut ch = Checkpoint::new(shid.clone(), epoch + 9);
-    ch.data.prev_check = TCid::from(prev_cid);
-    add_msg_meta(
-        &mut ch,
-        &shid,
-        &SubnetID::from_str("/root/f0102/f0101").unwrap(),
-        "rand1".as_bytes().to_vec(),
-        TokenAmount::from_atto(5_u64.pow(18)),
-    );
-    add_msg_meta(
-        &mut ch,
-        &shid,
-        &SubnetID::from_str("/root/f0102/f0102").unwrap(),
-        "rand2".as_bytes().to_vec(),
-        TokenAmount::from_atto(5_u64.pow(18)),
-    );
-    h.commit_child_check(
-        &mut rt,
-        &shid,
-        &ch,
-        ExitCode::OK,
-        2 * TokenAmount::from_atto(5_u64.pow(18)),
-    )
-    .unwrap();
-    let st: State = rt.get_state();
-    let commit = st.get_window_checkpoint(rt.store(), epoch).unwrap();
-    assert_eq!(commit.epoch(), DEFAULT_CHECKPOINT_PERIOD);
-    let child_check = has_childcheck_source(&commit.data.children, &shid).unwrap();
-    assert_eq!(&child_check.checks.len(), &2);
-    assert_eq!(has_cid(&child_check.checks, &ch.cid()), true);
-
-    let crossmsgs = &st.bottomup_msg_meta.load(rt.store()).unwrap();
-    for item in 0..=2 {
-        get_bottomup_msg(&crossmsgs, item).unwrap().unwrap();
-    }
-    for to in vec![
-        SubnetID::from_str("/root/f0102/f0101").unwrap(),
-        SubnetID::from_str("/root/f0102/f0102").unwrap(),
-    ] {
-        // verify that some value has been included in metas.
-        let meta = commit.crossmsg_meta(&h.net_name, &to).unwrap();
-        assert_eq!(true, meta.value > TokenAmount::zero());
-    }
-
     // TODO: More extensive tests?
 }
-*/
 
 #[test]
 fn test_fund() {

@@ -271,7 +271,6 @@ impl State {
     ) -> anyhow::Result<()> {
         let msg = &cross_msg.msg;
         let sto = msg.to.subnet()?;
-        // let sfrom = msg.from.subnet()?;
 
         let sub = self
             .get_subnet(
@@ -470,20 +469,6 @@ impl State {
         self.gov_acc += fee;
         *balance -= fee;
         Ok(())
-    }
-
-    pub fn distribute_cross_fees<BS: Blockstore>(
-        &mut self,
-        amount: TokenAmount,
-    ) -> anyhow::Result<()> {
-        // TODO: Distribution of cross fees among validators.
-        // This may not be straightforward, it may require
-        // sending the funds from the government account up
-        // (where the information of the validator set exists),
-        // and then distribute it there with the commitment of the
-        // checkpoint.
-        panic!("not implemented")
-        // Ok(())
     }
 }
 
