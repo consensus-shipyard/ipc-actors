@@ -65,13 +65,18 @@ impl Checkpoint {
     }
 
     /// return cross_msg included in the checkpoint.
-    pub fn cross_msgs(&self) -> &CrossMsgMeta {
-        &self.data.cross_msgs
+    pub fn cross_msgs(&self) -> Option<&CrossMsgMeta> {
+        self.data.cross_msgs.as_ref()
+    }
+
+    /// set cross_msg included in the checkpoint.
+    pub fn set_cross_msgs(&mut self, cm: CrossMsgMeta) {
+        self.data.cross_msgs = Some(cm)
     }
 
     /// return cross_msg included in the checkpoint as mutable reference
-    pub fn cross_msgs_mut(&mut self) -> &mut CrossMsgMeta {
-        &mut self.data.cross_msgs
+    pub fn cross_msgs_mut(&mut self) -> Option<&mut CrossMsgMeta> {
+        self.data.cross_msgs.as_mut()
     }
 
     /// Add the cid of a checkpoint from a child subnet for further propagation
@@ -116,7 +121,7 @@ pub struct CheckData {
     pub epoch: ChainEpoch,
     pub prev_check: TCid<TLink<Checkpoint>>,
     pub children: Vec<ChildCheck>,
-    pub cross_msgs: CrossMsgMeta,
+    pub cross_msgs: Option<CrossMsgMeta>,
 }
 impl CheckData {
     pub fn new(id: SubnetID, epoch: ChainEpoch) -> Self {
@@ -126,7 +131,7 @@ impl CheckData {
             epoch,
             prev_check: TCid::default(),
             children: Vec::new(),
-            cross_msgs: CrossMsgMeta::default(),
+            cross_msgs: None,
         }
     }
 }

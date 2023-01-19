@@ -195,24 +195,26 @@ impl State {
         curr_epoch: ChainEpoch,
     ) -> anyhow::Result<()> {
         let mut ch = self.get_window_checkpoint(store, curr_epoch)?;
-        let msgmeta = ch.cross_msgs_mut();
 
-        let m_cid;
-        if msgmeta == &CrossMsgMeta::default() {
-            m_cid = self.check_msg_registry.modify(store, |cross_reg| {
+        match ch.cross_msgs_mut() {
+            Some(msgmeta) => {
+                let prev_cid = &msgmeta.msgs_cid;
+                let m_cid = self.append_msg_to_meta(store, prev_cid, cross_msg)?;
+                msgmeta.msgs_cid = m_cid;
+                msgmeta.value += &cross_msg.msg.value;
+            }
+            None => self.check_msg_registry.modify(store, |cross_reg| {
+                let mut msgmeta = CrossMsgMeta::default();
                 let mut crossmsgs = CrossMsgs::new();
                 let _ = crossmsgs.add_msg(cross_msg)?;
-                let put_cid = put_msgmeta(cross_reg, crossmsgs)?;
-                Ok(put_cid)
-            })?;
-        } else {
-            let prev_cid = &msgmeta.msgs_cid;
-            m_cid = self.append_msg_to_meta(store, prev_cid, cross_msg)?;
-        }
+                let m_cid = put_msgmeta(cross_reg, crossmsgs)?;
+                msgmeta.msgs_cid = m_cid;
+                msgmeta.value += &cross_msg.msg.value;
+                ch.set_cross_msgs(msgmeta);
+                Ok(())
+            })?,
+        };
 
-        // update msgmeta info
-        msgmeta.msgs_cid = m_cid;
-        msgmeta.value += &cross_msg.msg.value;
         // flush checkpoint
         self.flush_checkpoint(store, &ch).map_err(|e| {
             e.downcast_default(ExitCode::USR_ILLEGAL_STATE, "error flushing checkpoint")

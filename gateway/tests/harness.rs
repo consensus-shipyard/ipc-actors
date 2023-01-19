@@ -401,7 +401,7 @@ impl Harness {
         let chmeta = ch.cross_msgs();
 
         let cross_reg = st.check_msg_registry.load(rt.store()).unwrap();
-        let meta = get_cross_msgs(&cross_reg, &chmeta.msgs_cid.cid())
+        let meta = get_cross_msgs(&cross_reg, &chmeta.unwrap().msgs_cid.cid())
             .unwrap()
             .unwrap();
         let msg = meta.msgs[expected_nonce as usize].clone();
@@ -419,7 +419,7 @@ impl Harness {
             }
         }
 
-        Ok(chmeta.msgs_cid.cid())
+        Ok(chmeta.unwrap().msgs_cid.cid())
     }
 
     pub fn send_cross(
@@ -495,7 +495,7 @@ impl Harness {
             let chmeta = ch.cross_msgs();
 
             let cross_reg = st.check_msg_registry.load(rt.store()).unwrap();
-            let meta = get_cross_msgs(&cross_reg, &chmeta.msgs_cid.cid())
+            let meta = get_cross_msgs(&cross_reg, &chmeta.unwrap().msgs_cid.cid())
                 .unwrap()
                 .unwrap();
             let msg = meta.msgs[nonce as usize].clone();
@@ -788,5 +788,5 @@ pub fn set_msg_meta(ch: &mut Checkpoint, rand: Vec<u8>, value: TokenAmount) {
         nonce: 0,
         value,
     };
-    ch.data.cross_msgs = meta;
+    ch.set_cross_msgs(meta);
 }

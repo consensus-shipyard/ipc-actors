@@ -356,23 +356,26 @@ impl Actor {
                     }
 
                     // commit cross-message in checkpoint to either execute them or
-                    // queue them for propagation
-                    st.store_bottomup_msg(rt.store(), commit.cross_msgs())
-                        .map_err(|e| {
-                            e.downcast_default(
-                                ExitCode::USR_ILLEGAL_STATE,
-                                "error storing bottom_up messages from checkpoint",
-                            )
-                        })?;
+                    // queue them for propagation if there are cross-msgs availble.
+                    match commit.cross_msgs() {
+                        Some(cross_msg) => {
+                            st.store_bottomup_msg(rt.store(), cross_msg).map_err(|e| {
+                                e.downcast_default(
+                                    ExitCode::USR_ILLEGAL_STATE,
+                                    "error storing bottom_up messages from checkpoint",
+                                )
+                            })?;
 
-                    // release circulating supply
-                    sub.release_supply(&commit.cross_msgs().value)
-                        .map_err(|e| {
-                            e.downcast_default(
-                                ExitCode::USR_ILLEGAL_STATE,
-                                "error releasing circulating supply",
-                            )
-                        })?;
+                            // release circulating supply
+                            sub.release_supply(&cross_msg.value).map_err(|e| {
+                                e.downcast_default(
+                                    ExitCode::USR_ILLEGAL_STATE,
+                                    "error releasing circulating supply",
+                                )
+                            })?;
+                        }
+                        None => {}
+                    }
 
                     // append new checkpoint to the list of childs
                     ch.add_child_check(&commit).map_err(|e| {
