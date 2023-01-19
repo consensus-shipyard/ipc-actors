@@ -398,8 +398,7 @@ impl Harness {
         let to = IPCAddress::new(&parent, &TEST_BLS).unwrap();
         rt.set_epoch(0);
         let ch = st.get_window_checkpoint(rt.store(), 0).unwrap();
-        let chmeta_ind = ch.crossmsg_meta_index(&self.net_name, &parent).unwrap();
-        let chmeta = &ch.data.cross_msgs[chmeta_ind];
+        let chmeta = ch.cross_msgs();
 
         let cross_reg = st.check_msg_registry.load(rt.store()).unwrap();
         let meta = get_cross_msgs(&cross_reg, &chmeta.msgs_cid.cid())
@@ -493,8 +492,7 @@ impl Harness {
             let to = IPCAddress::new(&dest, &to).unwrap();
             rt.set_epoch(0);
             let ch = st.get_window_checkpoint(rt.store(), 0).unwrap();
-            let chmeta_ind = ch.crossmsg_meta_index(&self.net_name, &dest).unwrap();
-            let chmeta = &ch.data.cross_msgs[chmeta_ind];
+            let chmeta = ch.cross_msgs();
 
             let cross_reg = st.check_msg_registry.load(rt.store()).unwrap();
             let meta = get_cross_msgs(&cross_reg, &chmeta.msgs_cid.cid())
@@ -564,11 +562,12 @@ impl Harness {
         rt: &mut MockRuntime,
         owner: Address,
         cid: Cid,
+        msg_value: &TokenAmount,
         excess: TokenAmount,
     ) -> Result<(), ActorError> {
         rt.set_caller(Default::default(), owner);
         rt.expect_validate_caller_any();
-        rt.set_balance(CROSS_MSG_FEE.clone() + excess.clone());
+        rt.set_balance(msg_value.clone() + CROSS_MSG_FEE.clone() + excess.clone());
         rt.set_received(CROSS_MSG_FEE.clone() + excess.clone());
 
         if excess > TokenAmount::zero() {
@@ -759,28 +758,6 @@ pub fn has_childcheck_source<'a>(
 
 pub fn has_cid<'a, T: TCidContent>(children: &'a Vec<TCid<T>>, cid: &Cid) -> bool {
     children.iter().any(|c| c.cid() == *cid)
-}
-
-pub fn add_msg_meta(
-    ch: &mut Checkpoint,
-    from: &SubnetID,
-    to: &SubnetID,
-    rand: Vec<u8>,
-    value: TokenAmount,
-) {
-    let mh_code = Code::Blake2b256;
-    let c = TCid::from(Cid::new_v1(
-        fvm_ipld_encoding::DAG_CBOR,
-        mh_code.digest(&rand),
-    ));
-    let meta = CrossMsgMeta {
-        from: from.clone(),
-        to: to.clone(),
-        msgs_cid: c,
-        nonce: 0,
-        value,
-    };
-    ch.append_msgmeta(meta).unwrap();
 }
 
 pub fn get_cross_msgs<'m, BS: Blockstore>(

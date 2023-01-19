@@ -1,5 +1,10 @@
 #![feature(let_chains)] // For some simpler syntax for if let Some conditions
 
+pub use self::checkpoint::{Checkpoint, CrossMsgMeta};
+pub use self::cross::{is_bottomup, CrossMsg, CrossMsgs, IPCMsgType, StorableMsg};
+pub use self::state::*;
+pub use self::subnet::*;
+pub use self::types::*;
 use fil_actors_runtime::runtime::{ActorCode, Runtime};
 use fil_actors_runtime::{
     actor_error, cbor, ActorDowncast, ActorError, BURNT_FUNDS_ACTOR_ADDR, CALLER_TYPES_SIGNABLE,
@@ -13,18 +18,11 @@ use fvm_shared::econ::TokenAmount;
 use fvm_shared::error::ExitCode;
 use fvm_shared::METHOD_SEND;
 use fvm_shared::{MethodNum, METHOD_CONSTRUCTOR};
+pub use ipc_sdk::address::IPCAddress;
+pub use ipc_sdk::subnet_id::SubnetID;
 use lazy_static::lazy_static;
 use num_derive::FromPrimitive;
 use num_traits::FromPrimitive;
-use std::collections::HashMap;
-
-pub use self::checkpoint::{Checkpoint, CrossMsgMeta};
-pub use self::cross::{is_bottomup, CrossMsg, CrossMsgs, IPCMsgType, StorableMsg};
-pub use self::state::*;
-pub use self::subnet::*;
-pub use self::types::*;
-pub use ipc_sdk::address::IPCAddress;
-pub use ipc_sdk::subnet_id::SubnetID;
 
 #[cfg(feature = "fil-actor")]
 fil_actors_runtime::wasm_trampoline!(Actor);
@@ -295,8 +293,7 @@ impl Actor {
     }
 
     /// CommitChildCheck propagates the commitment of a checkpoint from a child subnet,
-    /// process the cross-messages directed to the subnet, and propagates the corresponding
-    /// once further.
+    /// process the cross-messages directed to the subnet.
     fn commit_child_check<BS, RT>(rt: &mut RT, params: Checkpoint) -> Result<(), ActorError>
     where
         BS: Blockstore,
@@ -315,7 +312,6 @@ impl Actor {
             ));
         }
 
-        let mut burn_value = TokenAmount::zero();
         rt.transaction(|st: &mut State, rt| {
             let shid = SubnetID::new_from_parent(&st.network_name, subnet_addr);
             let sub = st.get_subnet(rt.store(), &shid).map_err(|e| {
@@ -359,25 +355,25 @@ impl Actor {
                         }
                     }
 
-                    // process and commit the checkpoint
-                    // apply check messages
-                    let ap_msgs: HashMap<SubnetID, Vec<&CrossMsgMeta>>;
-                    (burn_value, ap_msgs) = st
-                        .apply_check_msgs(rt.store(), &mut sub, &commit)
+                    // commit cross-message in checkpoint to either execute them or
+                    // queue them for propagation
+                    st.store_bottomup_msg(rt.store(), commit.cross_msgs())
                         .map_err(|e| {
                             e.downcast_default(
                                 ExitCode::USR_ILLEGAL_STATE,
-                                "error applying check messages",
+                                "error storing bottom_up messages from checkpoint",
                             )
                         })?;
-                    // aggregate message metas in checkpoint
-                    st.agg_child_msgmeta(rt.store(), &mut ch, ap_msgs)
+
+                    // release circulating supply
+                    sub.release_supply(&commit.cross_msgs().value)
                         .map_err(|e| {
                             e.downcast_default(
                                 ExitCode::USR_ILLEGAL_STATE,
-                                "error aggregating child msgmeta",
+                                "error releasing circulating supply",
                             )
                         })?;
+
                     // append new checkpoint to the list of childs
                     ch.add_child_check(&commit).map_err(|e| {
                         e.downcast_default(
@@ -385,6 +381,7 @@ impl Actor {
                             "error adding child checkpoint",
                         )
                     })?;
+
                     // flush checkpoint
                     st.flush_checkpoint(rt.store(), &ch).map_err(|e| {
                         e.downcast_default(ExitCode::USR_ILLEGAL_STATE, "error flushing checkpoint")
@@ -409,14 +406,6 @@ impl Actor {
             Ok(())
         })?;
 
-        if burn_value > TokenAmount::zero() {
-            rt.send(
-                *BURNT_FUNDS_ACTOR_ADDR,
-                METHOD_SEND,
-                RawBytes::default(),
-                burn_value.clone(),
-            )?;
-        }
         Ok(())
     }
 
@@ -531,7 +520,7 @@ impl Actor {
             Ok(())
         })?;
 
-        // burn funds that are being released
+        // burn funds that are send as bottom-up
         rt.send(
             *BURNT_FUNDS_ACTOR_ADDR,
             METHOD_SEND,
@@ -809,8 +798,9 @@ impl Actor {
         let PropagateParams { postbox_cid } = params;
         let owner = rt.message().caller();
         let mut value = rt.message().value_received();
+        let mut do_burn = false;
 
-        rt.transaction(|st: &mut State, rt| {
+        let cross_msg = rt.transaction(|st: &mut State, rt| {
             let postbox_item = st.load_from_postbox(rt.store(), postbox_cid).map_err(|e| {
                 log::error!("encountered error loading from postbox: {:?}", e);
                 actor_error!(unhandled_message, "cannot load from postbox")
@@ -823,10 +813,21 @@ impl Actor {
             // collect cross-fee
             st.collect_cross_fee(&mut value, &*CROSS_MSG_FEE)?;
 
-            let PostBoxItem { cross_msg, .. } = postbox_item;
-            Self::commit_cross_message(rt, st, cross_msg)?;
-            st.remove_from_postbox(rt.store(), postbox_cid)
+            let PostBoxItem { mut cross_msg, .. } = postbox_item;
+            do_burn = Self::commit_cross_message(rt, st, &mut cross_msg)?;
+            st.remove_from_postbox(rt.store(), postbox_cid)?;
+            Ok(cross_msg)
         })?;
+
+        // if bottom_up message being committed.
+        if do_burn {
+            rt.send(
+                *BURNT_FUNDS_ACTOR_ADDR,
+                METHOD_SEND,
+                RawBytes::default(),
+                cross_msg.msg.value.clone(),
+            )?;
+        }
 
         // send the remainder of the fee to the owner
         if value > TokenAmount::zero() {
@@ -836,18 +837,21 @@ impl Actor {
         Ok(RawBytes::default())
     }
 
-    /// Commit the cross message to storage.
+    /// Commit the cross message to storage. It outputs a flag signaling
+    /// if the committed messages was bottom-up and some funds need to be
+    /// burnt.
     ///
     /// NOTE: This function should always be called inside an `rt.transaction`
     fn commit_cross_message<BS, RT>(
         rt: &mut RT,
         st: &mut State,
-        mut cross_msg: CrossMsg,
-    ) -> Result<(), ActorError>
+        mut cross_msg: &mut CrossMsg,
+    ) -> Result<bool, ActorError>
     where
         BS: Blockstore,
         RT: Runtime<BS>,
     {
+        let mut do_burn = false;
         let sto = cross_msg
             .msg
             .to
@@ -879,9 +883,12 @@ impl Actor {
                 // if the message is a bottom-up message and it reached the common-parent
                 // then we need to start propagating it down to the destination.
                 let r = if nearest_common_parent == st.network_name {
-                    st.commit_topdown_msg(rt.store(), &mut cross_msg)
+                    st.commit_topdown_msg(rt.store(), cross_msg)
                 } else {
-                    st.commit_bottomup_msg(rt.store(), &cross_msg, rt.curr_epoch())
+                    if cross_msg.msg.value > TokenAmount::zero() {
+                        do_burn = true;
+                    }
+                    st.commit_bottomup_msg(rt.store(), cross_msg, rt.curr_epoch())
                 };
 
                 r.map_err(|e| {
@@ -891,7 +898,7 @@ impl Actor {
                     )
                 })?;
 
-                Ok(())
+                Ok(do_burn)
             }
             IPCMsgType::TopDown => {
                 st.applied_topdown_nonce += 1;
@@ -902,7 +909,7 @@ impl Actor {
                             "error committing top-down message while applying it",
                         )
                     })?;
-                Ok(())
+                Ok(do_burn)
             }
         }
     }

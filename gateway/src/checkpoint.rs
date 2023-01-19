@@ -64,39 +64,14 @@ impl Checkpoint {
         &self.data.prev_check
     }
 
-    /// return cross_msg metas included in the checkpoint.
-    pub fn cross_msgs(&self) -> &Vec<CrossMsgMeta> {
+    /// return cross_msg included in the checkpoint.
+    pub fn cross_msgs(&self) -> &CrossMsgMeta {
         &self.data.cross_msgs
     }
 
-    /// return specific crossmsg meta from and to the corresponding subnets.
-    pub fn crossmsg_meta(&self, from: &SubnetID, to: &SubnetID) -> Option<&CrossMsgMeta> {
-        self.data
-            .cross_msgs
-            .iter()
-            .find(|m| from == &m.from && to == &m.to)
-    }
-
-    /// return the index in crossmsg_meta of the structure including metadata from
-    /// and to the correponding subnets.
-    pub fn crossmsg_meta_index(&self, from: &SubnetID, to: &SubnetID) -> Option<usize> {
-        self.data
-            .cross_msgs
-            .iter()
-            .position(|m| from == &m.from && to == &m.to)
-    }
-
-    /// append msgmeta to checkpoint
-    pub fn append_msgmeta(&mut self, meta: CrossMsgMeta) -> anyhow::Result<()> {
-        match self.crossmsg_meta(&meta.from, &meta.to) {
-            Some(mm) => {
-                if meta != *mm {
-                    self.data.cross_msgs.push(meta)
-                }
-            }
-            None => self.data.cross_msgs.push(meta),
-        }
-        Ok(())
+    /// return cross_msg included in the checkpoint as mutable reference
+    pub fn cross_msgs_mut(&mut self) -> &mut CrossMsgMeta {
+        &mut self.data.cross_msgs
     }
 
     /// Add the cid of a checkpoint from a child subnet for further propagation
@@ -141,7 +116,7 @@ pub struct CheckData {
     pub epoch: ChainEpoch,
     pub prev_check: TCid<TLink<Checkpoint>>,
     pub children: Vec<ChildCheck>,
-    pub cross_msgs: Vec<CrossMsgMeta>,
+    pub cross_msgs: CrossMsgMeta,
 }
 impl CheckData {
     pub fn new(id: SubnetID, epoch: ChainEpoch) -> Self {
@@ -151,16 +126,16 @@ impl CheckData {
             epoch,
             prev_check: TCid::default(),
             children: Vec::new(),
-            cross_msgs: Vec::new(),
+            cross_msgs: CrossMsgMeta::default(),
         }
     }
 }
 impl Cbor for CheckData {}
 
+// CrossMsgMeta sends an aggregate of all messages being propagated up in
+// the checkpoint.
 #[derive(PartialEq, Eq, Clone, Debug, Default, Serialize, Deserialize)]
 pub struct CrossMsgMeta {
-    pub from: SubnetID,
-    pub to: SubnetID,
     pub msgs_cid: TCid<TLink<CrossMsgs>>,
     pub nonce: u64,
     pub value: TokenAmount,
@@ -168,12 +143,8 @@ pub struct CrossMsgMeta {
 impl Cbor for CrossMsgMeta {}
 
 impl CrossMsgMeta {
-    pub fn new(from: &SubnetID, to: &SubnetID) -> Self {
-        Self {
-            from: from.clone(),
-            to: to.clone(),
-            ..Default::default()
-        }
+    pub fn new() -> Self {
+        Self::default()
     }
 
     pub fn set_nonce(&mut self, nonce: u64) {
