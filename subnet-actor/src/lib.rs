@@ -10,8 +10,9 @@ use fvm_ipld_encoding::RawBytes;
 
 use fvm_shared::econ::TokenAmount;
 use fvm_shared::error::ExitCode;
-use fvm_shared::{MethodNum, METHOD_CONSTRUCTOR};
+use fvm_shared::{MethodNum, METHOD_CONSTRUCTOR, METHOD_SEND};
 use ipc_gateway::{Checkpoint, FundParams, MIN_COLLATERAL_AMOUNT};
+use num::BigInt;
 use num_derive::FromPrimitive;
 use num_traits::{FromPrimitive, Zero};
 
@@ -29,6 +30,7 @@ pub enum Method {
     Leave = 3,
     Kill = 4,
     SubmitCheckpoint = 5,
+    Reward = 6,
 }
 
 /// SubnetActor trait. Custom subnet actors need to implement this trait
@@ -61,6 +63,12 @@ pub trait SubnetActor {
         rt: &mut RT,
         ch: Checkpoint,
     ) -> Result<Option<RawBytes>, ActorError>
+    where
+        BS: Blockstore,
+        RT: Runtime<BS>;
+
+    /// Distributes the rewards for the subnet to validators.
+    fn reward<BS, RT>(rt: &mut RT) -> Result<Option<RawBytes>, ActorError>
     where
         BS: Blockstore,
         RT: Runtime<BS>;
@@ -144,7 +152,7 @@ impl SubnetActor for Actor {
 
             st.mutate_state();
 
-            Ok(true)
+            Ok(())
         })?;
 
         if let Some(p) = msg {
@@ -199,7 +207,7 @@ impl SubnetActor for Actor {
 
             st.mutate_state();
 
-            Ok(true)
+            Ok(())
         })?;
 
         if let Some(p) = msg {
@@ -252,7 +260,7 @@ impl SubnetActor for Actor {
                 TokenAmount::zero(),
             ));
 
-            Ok(true)
+            Ok(())
         })?;
 
         // unregister subnet
@@ -338,7 +346,7 @@ impl SubnetActor for Actor {
                 st.set_votes(rt.store(), &ch_cid, votes)?;
             }
 
-            Ok(true)
+            Ok(())
         })?;
 
         // propagate to sca
@@ -346,6 +354,46 @@ impl SubnetActor for Actor {
             rt.send(p.to, p.method, p.params, p.value)?;
         }
 
+        Ok(None)
+    }
+
+    /// Distributes the rewards for the subnet to validators.
+    fn reward<BS, RT>(rt: &mut RT) -> Result<Option<RawBytes>, ActorError>
+    where
+        BS: Blockstore,
+        RT: Runtime<BS>,
+    {
+        let st: State = rt.state()?;
+        // the ipc-gateway must trigger the reward distribution
+        rt.validate_immediate_caller_is(vec![&st.ipc_gateway_addr])?;
+
+        let amount = rt.message().value_received();
+        if amount == TokenAmount::zero() {
+            return Err(actor_error!(
+                illegal_argument,
+                "no rewards sent for distribution"
+            ));
+        };
+
+        // even distribution of rewards. Each subnet may choose more
+        // complex and fair policies to incentivize certain behaviors.
+        // we may even have a default one for IPC.
+        // let rew_amount = amount.div_floor(TokenAmount::from(st.validator_set.len().into()));
+        let div = {
+            if st.validator_set.len() == 0 {
+                return Err(actor_error!(illegal_state, "no validators in subnet"));
+            };
+            match BigInt::from_usize(st.validator_set.len()) {
+                None => {
+                    return Err(actor_error!(illegal_state, "couldn't convert into BigInt"));
+                }
+                Some(val) => val,
+            }
+        };
+        let rew_amount = amount.div_floor(div);
+        for v in st.validator_set.into_iter() {
+            rt.send(v.addr, METHOD_SEND, RawBytes::default(), rew_amount.clone())?;
+        }
         Ok(None)
     }
 }
@@ -379,6 +427,10 @@ impl ActorCode for Actor {
             }
             Some(Method::SubmitCheckpoint) => {
                 let res = Self::submit_checkpoint(rt, cbor::deserialize_params(params)?)?;
+                Ok(RawBytes::serialize(res)?)
+            }
+            Some(Method::Reward) => {
+                let res = Self::reward(rt)?;
                 Ok(RawBytes::serialize(res)?)
             }
             None => Err(actor_error!(unhandled_message; "Invalid method")),

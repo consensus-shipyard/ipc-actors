@@ -179,12 +179,10 @@ impl State {
         let ch_epoch = checkpoint_epoch(epoch, self.check_period);
         let checkpoints = self.checkpoints.load(store)?;
 
-        let out_ch = match get_checkpoint(&checkpoints, &ch_epoch)? {
+        Ok(match get_checkpoint(&checkpoints, &ch_epoch)? {
             Some(ch) => ch.clone(),
             None => Checkpoint::new(self.network_name.clone(), ch_epoch),
-        };
-
-        Ok(out_ch)
+        })
     }
 
     /// store a cross message in the current checkpoint for propagation
