@@ -19,6 +19,8 @@ pub const DEFAULT_CHECKPOINT_PERIOD: ChainEpoch = 10;
 pub const MAX_NONCE: u64 = u64::MAX;
 pub const MIN_COLLATERAL_AMOUNT: u64 = 10_u64.pow(18);
 
+pub const SUBNET_ACTOR_REWARD_METHOD: u64 = 6;
+
 pub type CrossMsgMetaArray<'bs, BS> = Array<'bs, CrossMsgMeta, BS>;
 pub type CrossMsgArray<'bs, BS> = Array<'bs, CrossMsg, BS>;
 
@@ -64,7 +66,7 @@ pub struct WhitelistPropagatorParams {
 }
 
 /// The item to store in the `State::postbox`
-#[derive(Serialize_tuple, Deserialize_tuple, PartialEq, Eq, Clone)]
+#[derive(Serialize_tuple, Deserialize_tuple, PartialEq, Eq, Clone, Debug)]
 pub struct PostBoxItem {
     pub cross_msg: CrossMsg,
     pub owners: Option<Vec<Address>>,

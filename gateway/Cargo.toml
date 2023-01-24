@@ -38,6 +38,7 @@ unsigned-varint = "0.7.1"
 # enable test_utils feature only in dev env
 fil_actors_runtime = { git = "https://github.com/consensus-shipyard/fvm-utils", features = ["fil-actor", "test_utils"] }
 base64 = "0.13.1"
+env_logger = "0.10.0"
 
 [build-dependencies]
 wasm-builder = "3.0.1"
