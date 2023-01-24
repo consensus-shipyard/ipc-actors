@@ -144,6 +144,7 @@ pub struct CrossMsgMeta {
     pub msgs_cid: TCid<TLink<CrossMsgs>>,
     pub nonce: u64,
     pub value: TokenAmount,
+    pub fee: TokenAmount,
 }
 impl Cbor for CrossMsgMeta {}
 

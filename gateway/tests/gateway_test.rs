@@ -10,8 +10,8 @@ use fvm_shared::error::ExitCode;
 use fvm_shared::METHOD_SEND;
 use ipc_gateway::Status::{Active, Inactive};
 use ipc_gateway::{
-    ext, get_topdown_msg, Checkpoint, CrossMsg, IPCAddress, State, StorableMsg, CROSS_MSG_FEE,
-    DEFAULT_CHECKPOINT_PERIOD,
+    ext, get_topdown_msg, Checkpoint, CrossMsg, IPCAddress, State, StorableMsg,
+    CROSSMSG_AMT_BITWIDTH, CROSS_MSG_FEE, DEFAULT_CHECKPOINT_PERIOD, SUBNET_ACTOR_REWARD_METHOD,
 };
 use ipc_sdk::subnet_id::SubnetID;
 use primitives::TCid;
@@ -255,7 +255,7 @@ fn checkpoint_commit() {
     rt.set_epoch(epoch);
     let ch = Checkpoint::new(shid.clone(), epoch + 9);
 
-    h.commit_child_check(&mut rt, &shid, &ch, ExitCode::OK, TokenAmount::zero())
+    h.commit_child_check(&mut rt, &shid, &ch, ExitCode::OK)
         .unwrap();
     let st: State = rt.get_state();
     let commit = st.get_window_checkpoint(rt.store(), epoch).unwrap();
@@ -265,20 +265,14 @@ fn checkpoint_commit() {
     assert_eq!(has_cid(&child_check.checks, &ch.cid()), true);
 
     // Commit a checkpoint for subnet twice
-    h.commit_child_check(
-        &mut rt,
-        &shid,
-        &ch,
-        ExitCode::USR_ILLEGAL_ARGUMENT,
-        TokenAmount::zero(),
-    )
-    .unwrap();
+    h.commit_child_check(&mut rt, &shid, &ch, ExitCode::USR_ILLEGAL_ARGUMENT)
+        .unwrap();
     let prev_cid = ch.cid();
 
     // Append a new checkpoint for the same subnet
     let mut ch = Checkpoint::new(shid.clone(), epoch + 11);
     ch.data.prev_check = TCid::from(prev_cid);
-    h.commit_child_check(&mut rt, &shid, &ch, ExitCode::OK, TokenAmount::zero())
+    h.commit_child_check(&mut rt, &shid, &ch, ExitCode::OK)
         .unwrap();
     let st: State = rt.get_state();
     let commit = st.get_window_checkpoint(rt.store(), epoch).unwrap();
@@ -300,21 +294,15 @@ fn checkpoint_commit() {
 
     // Trying to commit from the wrong subnet
     let ch = Checkpoint::new(shid.clone(), epoch + 9);
-    h.commit_child_check(
-        &mut rt,
-        &shid_two,
-        &ch,
-        ExitCode::USR_ILLEGAL_ARGUMENT,
-        TokenAmount::zero(),
-    )
-    .unwrap();
+    h.commit_child_check(&mut rt, &shid_two, &ch, ExitCode::USR_ILLEGAL_ARGUMENT)
+        .unwrap();
 
     // Commit first checkpoint for first window in second subnet
     let epoch: ChainEpoch = 10;
     rt.set_epoch(epoch);
     let ch = Checkpoint::new(shid_two.clone(), epoch + 9);
 
-    h.commit_child_check(&mut rt, &shid_two, &ch, ExitCode::OK, TokenAmount::zero())
+    h.commit_child_check(&mut rt, &shid_two, &ch, ExitCode::OK)
         .unwrap();
     let st: State = rt.get_state();
     let commit = st.get_window_checkpoint(rt.store(), epoch).unwrap();
@@ -347,10 +335,24 @@ fn checkpoint_crossmsgs() {
     let epoch: ChainEpoch = 10;
     rt.set_epoch(epoch);
     let mut ch = Checkpoint::new(shid.clone(), epoch + 9);
-    // And to this subnet
-    set_msg_meta(&mut ch, "rand1".as_bytes().to_vec(), TokenAmount::zero());
+    // and include some fees in msgmeta.
+    let fee = TokenAmount::from_atto(5);
+    set_msg_meta(
+        &mut ch,
+        "rand1".as_bytes().to_vec(),
+        TokenAmount::zero(),
+        fee.clone(),
+    );
 
-    h.commit_child_check(&mut rt, &shid, &ch, ExitCode::OK, TokenAmount::zero())
+    rt.expect_send(
+        shid.subnet_actor(),
+        SUBNET_ACTOR_REWARD_METHOD,
+        RawBytes::default(),
+        fee,
+        RawBytes::default(),
+        ExitCode::OK,
+    );
+    h.commit_child_check(&mut rt, &shid, &ch, ExitCode::OK)
         .unwrap();
     let st: State = rt.get_state();
     let commit = st.get_window_checkpoint(rt.store(), epoch).unwrap();
@@ -459,10 +461,19 @@ fn test_release() {
             r_amount.clone(),
             0,
             &Cid::default(),
+            CROSS_MSG_FEE.clone(),
         )
         .unwrap();
-    h.release(&mut rt, &releaser, ExitCode::OK, r_amount, 1, &prev_cid)
-        .unwrap();
+    h.release(
+        &mut rt,
+        &releaser,
+        ExitCode::OK,
+        r_amount,
+        1,
+        &prev_cid,
+        2 * CROSS_MSG_FEE.clone(),
+    )
+    .unwrap();
 }
 
 #[test]

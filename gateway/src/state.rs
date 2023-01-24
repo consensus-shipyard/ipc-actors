@@ -17,7 +17,7 @@ use primitives::{TAmt, TCid, THamt, TLink};
 use serde::{Deserialize, Serialize};
 use std::str::FromStr;
 
-use ipc_sdk::subnet_id::SubnetID;
+use ipc_sdk::subnet_id::{self, SubnetID};
 
 use super::checkpoint::*;
 use super::cross::*;
@@ -181,11 +181,11 @@ impl State {
         })
     }
 
-    /// store a cross-message and/or a reward in a checkpoint
-    pub(crate) fn store_in_checkpoint<BS: Blockstore>(
+    /// store a cross-message in a checkpoint
+    pub(crate) fn store_msg_in_checkpoint<BS: Blockstore>(
         &mut self,
         store: &BS,
-        cross_msg: Option<&CrossMsg>,
+        cross_msg: &CrossMsg,
         fee: &TokenAmount,
         curr_epoch: ChainEpoch,
     ) -> anyhow::Result<()> {
@@ -194,17 +194,19 @@ impl State {
         match ch.cross_msgs_mut() {
             Some(msgmeta) => {
                 let prev_cid = &msgmeta.msgs_cid;
-                let (m_cid, value) = self.append_to_meta(store, prev_cid, cross_msg, fee)?;
+                let m_cid = self.append_msg_to_meta(store, prev_cid, cross_msg)?;
                 msgmeta.msgs_cid = m_cid;
-                msgmeta.value += &value;
+                msgmeta.value += &cross_msg.msg.value + fee;
+                msgmeta.fee += fee;
             }
             None => self.check_msg_registry.modify(store, |cross_reg| {
                 let mut msgmeta = CrossMsgMeta::default();
                 let mut crossmsgs = CrossMsgs::new();
-                let val = crossmsgs.add_msg_and_fee(cross_msg, fee)?;
+                let _ = crossmsgs.add_msg(cross_msg)?;
                 let m_cid = put_msgmeta(cross_reg, crossmsgs)?;
                 msgmeta.msgs_cid = m_cid;
-                msgmeta.value += &val;
+                msgmeta.value += &cross_msg.msg.value + fee;
+                msgmeta.fee += fee;
                 ch.set_cross_msgs(msgmeta);
                 Ok(())
             })?,
@@ -218,23 +220,62 @@ impl State {
         Ok(())
     }
 
+    /// store a cross-fee in a checkpoint
+    pub(crate) fn store_fee_in_checkpoint<BS: Blockstore>(
+        &mut self,
+        store: &BS,
+        fee: &TokenAmount,
+        curr_epoch: ChainEpoch,
+    ) -> anyhow::Result<()> {
+        let mut ch = self.get_window_checkpoint(store, curr_epoch)?;
+
+        match ch.cross_msgs_mut() {
+            Some(msgmeta) => {
+                msgmeta.value += fee;
+                msgmeta.fee += fee;
+            }
+            None => {
+                let mut msgmeta = CrossMsgMeta::default();
+                msgmeta.value += fee;
+                msgmeta.fee += fee;
+                ch.set_cross_msgs(msgmeta);
+            }
+        };
+
+        // flush checkpoint
+        self.flush_checkpoint(store, &ch).map_err(|e| {
+            e.downcast_default(ExitCode::USR_ILLEGAL_STATE, "error flushing checkpoint")
+        })?;
+
+        Ok(())
+    }
+
     /// append cross-msg and/or fee reward to a specific message meta.
-    pub(crate) fn append_to_meta<BS: Blockstore>(
+    pub(crate) fn append_msg_to_meta<BS: Blockstore>(
         &mut self,
         store: &BS,
         meta_cid: &TCid<TLink<CrossMsgs>>,
-        cross_msg: Option<&CrossMsg>,
-        fee: &TokenAmount,
-    ) -> anyhow::Result<(TCid<TLink<CrossMsgs>>, TokenAmount)> {
+        cross_msg: &CrossMsg,
+    ) -> anyhow::Result<TCid<TLink<CrossMsgs>>> {
         self.check_msg_registry.modify(store, |cross_reg| {
             // get previous meta stored
             let mut prev_crossmsgs = match cross_reg.get(&meta_cid.cid().to_bytes())? {
                 Some(m) => m.clone(),
-                None => return Err(anyhow!("no msgmeta found for cid")),
+                None => {
+                    // double-check that is not find because there were no messages
+                    // in meta and not because we messed-up something.
+                    if meta_cid.cid() != Cid::default() {
+                        return Err(anyhow!("no msgmeta found for cid"));
+                    }
+                    // return empty messages
+                    CrossMsgs::new()
+                }
             };
-            let value = prev_crossmsgs.add_msg_and_fee(cross_msg, fee)?;
-            let m_cid = replace_msgmeta(cross_reg, meta_cid, prev_crossmsgs)?;
-            Ok((m_cid, value))
+            let added = prev_crossmsgs.add_msg(cross_msg)?;
+            if !added {
+                return Ok(meta_cid.clone());
+            }
+            replace_msgmeta(cross_reg, meta_cid, prev_crossmsgs)
         })
     }
 
@@ -288,8 +329,12 @@ impl State {
                 sub.circ_supply += &cross_msg.msg.value;
                 self.flush_subnet(store, &sub)?;
 
-                // store fee in checkpoint
-                self.store_in_checkpoint(store, None, fee, curr_epoch)?;
+                // store fee in checkpoint as long as we are not the root
+                // (the root should distribute the reward immediately to
+                // all validators)
+                if self.network_name != *subnet_id::ROOTNET_ID {
+                    self.store_fee_in_checkpoint(store, fee, curr_epoch)?;
+                }
             }
             None => {
                 return Err(anyhow!(
@@ -309,7 +354,7 @@ impl State {
         curr_epoch: ChainEpoch,
     ) -> anyhow::Result<()> {
         // store bottom-up msg and fee in checkpoint for propagation
-        self.store_in_checkpoint(store, Some(msg), fee, curr_epoch)?;
+        self.store_msg_in_checkpoint(store, msg, fee, curr_epoch)?;
         // increment nonce
         self.nonce += 1;
 

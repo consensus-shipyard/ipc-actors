@@ -23,6 +23,7 @@ pub use ipc_sdk::subnet_id::SubnetID;
 use lazy_static::lazy_static;
 use num_derive::FromPrimitive;
 use num_traits::FromPrimitive;
+use primitives::TCid;
 
 #[cfg(feature = "fil-actor")]
 fil_actors_runtime::wasm_trampoline!(Actor);
@@ -303,20 +304,23 @@ impl Actor {
 
         let subnet_addr = rt.message().caller();
         let commit = params;
+        let subnet_actor = commit.source().subnet_actor();
 
         // check if the checkpoint belongs to the subnet
-        if subnet_addr != commit.source().subnet_actor() {
+        if subnet_addr != subnet_actor {
             return Err(actor_error!(
                 illegal_argument,
                 "source in checkpoint doesn't belong to subnet"
             ));
         }
 
-        rt.transaction(|st: &mut State, rt| {
+        let fee = rt.transaction(|st: &mut State, rt| {
             let shid = SubnetID::new_from_parent(&st.network_name, subnet_addr);
             let sub = st.get_subnet(rt.store(), &shid).map_err(|e| {
                 e.downcast_default(ExitCode::USR_ILLEGAL_STATE, "failed to load subnet")
             })?;
+
+            let mut fee = TokenAmount::zero();
             match sub {
                 Some(mut sub) => {
                     // check if subnet active
@@ -359,12 +363,15 @@ impl Actor {
                     // queue them for propagation if there are cross-msgs availble.
                     match commit.cross_msgs() {
                         Some(cross_msg) => {
-                            st.store_bottomup_msg(rt.store(), cross_msg).map_err(|e| {
-                                e.downcast_default(
-                                    ExitCode::USR_ILLEGAL_STATE,
-                                    "error storing bottom_up messages from checkpoint",
-                                )
-                            })?;
+                            // if tcid not default it means cross-msgs are being propagated.
+                            if cross_msg.msgs_cid != TCid::default() {
+                                st.store_bottomup_msg(rt.store(), cross_msg).map_err(|e| {
+                                    e.downcast_default(
+                                        ExitCode::USR_ILLEGAL_STATE,
+                                        "error storing bottom_up messages from checkpoint",
+                                    )
+                                })?;
+                            }
 
                             // release circulating supply
                             sub.release_supply(&cross_msg.value).map_err(|e| {
@@ -373,6 +380,9 @@ impl Actor {
                                     "error releasing circulating supply",
                                 )
                             })?;
+
+                            // distribute fee
+                            fee = cross_msg.fee.clone();
                         }
                         None => {}
                     }
@@ -406,8 +416,18 @@ impl Actor {
                 }
             }
 
-            Ok(())
+            Ok(fee)
         })?;
+
+        // distribute rewards
+        if !fee.is_zero() {
+            rt.send(
+                subnet_actor,
+                SUBNET_ACTOR_REWARD_METHOD,
+                RawBytes::default(),
+                fee,
+            )?;
+        }
 
         Ok(())
     }
@@ -601,9 +621,17 @@ impl Actor {
                 }
             };
 
+            // check that the right funds were sent in message
+            if rt.message().value_received() != msg.value {
+                return Err(actor_error!(
+                    illegal_argument,
+                    "the funds in cross-msg params are not equal to the ones sent in the message"
+                ));
+            }
+
             // collect cross-fee
             let fee = &CROSS_MSG_FEE;
-            st.collect_cross_fee(&mut cross_msg.msg.value, &fee)?;
+            st.collect_cross_fee(&mut msg.value, &fee)?;
 
             tp = Some(st.send_cross(rt.store(), &mut cross_msg, &fee, rt.curr_epoch()).map_err(|e| {
                 e.downcast_default(ExitCode::USR_ILLEGAL_STATE, "error committing cross message")

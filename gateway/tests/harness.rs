@@ -251,7 +251,6 @@ impl Harness {
         id: &SubnetID,
         ch: &Checkpoint,
         code: ExitCode,
-        burn_value: TokenAmount,
     ) -> Result<(), ActorError> {
         rt.set_caller(*SUBNET_ACTOR_CODE_ID, id.subnet_actor());
         rt.expect_validate_caller_any();
@@ -266,17 +265,6 @@ impl Harness {
             );
             rt.verify();
             return Ok(());
-        }
-
-        if burn_value > TokenAmount::zero() {
-            rt.expect_send(
-                *BURNT_FUNDS_ACTOR_ADDR,
-                METHOD_SEND,
-                RawBytes::default(),
-                burn_value.clone(),
-                RawBytes::default(),
-                ExitCode::OK,
-            );
         }
         rt.call::<Actor>(
             Method::CommitChildCheckpoint as MethodNum,
@@ -356,6 +344,7 @@ impl Harness {
         value: TokenAmount,
         expected_nonce: u64,
         prev_meta: &Cid,
+        expected_fee: TokenAmount,
     ) -> Result<Cid, ActorError> {
         rt.set_caller(*ACCOUNT_ACTOR_CODE_ID, *releaser);
         rt.expect_validate_caller_type(SIG_TYPES.clone());
@@ -398,10 +387,12 @@ impl Harness {
         let to = IPCAddress::new(&parent, &TEST_BLS).unwrap();
         rt.set_epoch(0);
         let ch = st.get_window_checkpoint(rt.store(), 0).unwrap();
-        let chmeta = ch.cross_msgs();
+        let chmeta = ch.cross_msgs().unwrap();
+        // check that fees are collected
+        assert_eq!(chmeta.fee, expected_fee);
 
         let cross_reg = st.check_msg_registry.load(rt.store()).unwrap();
-        let meta = get_cross_msgs(&cross_reg, &chmeta.unwrap().msgs_cid.cid())
+        let meta = get_cross_msgs(&cross_reg, &chmeta.msgs_cid.cid())
             .unwrap()
             .unwrap();
         let msg = meta.msgs[expected_nonce as usize].clone();
@@ -419,7 +410,7 @@ impl Harness {
             }
         }
 
-        Ok(chmeta.unwrap().msgs_cid.cid())
+        Ok(chmeta.msgs_cid.cid())
     }
 
     pub fn send_cross(
@@ -446,7 +437,7 @@ impl Harness {
             nonce,
             method: METHOD_SEND,
             params: RawBytes::default(),
-            value: value.clone(),
+            value: value.clone() + &*CROSS_MSG_FEE,
         };
         let dest = sub.clone();
         let cross = CrossMsg {
@@ -773,7 +764,7 @@ fn set_rt_value_with_cross_fee(rt: &mut MockRuntime, value: &TokenAmount) {
     });
 }
 
-pub fn set_msg_meta(ch: &mut Checkpoint, rand: Vec<u8>, value: TokenAmount) {
+pub fn set_msg_meta(ch: &mut Checkpoint, rand: Vec<u8>, value: TokenAmount, fee: TokenAmount) {
     let mh_code = Code::Blake2b256;
     let c = TCid::from(Cid::new_v1(
         fvm_ipld_encoding::DAG_CBOR,
@@ -783,6 +774,7 @@ pub fn set_msg_meta(ch: &mut Checkpoint, rand: Vec<u8>, value: TokenAmount) {
         msgs_cid: c,
         nonce: 0,
         value,
+        fee,
     };
     ch.set_cross_msgs(meta);
 }
