@@ -91,24 +91,25 @@ impl Actor {
         }
 
         let msgs = rt.transaction(|st: &mut State, rt| {
-            st.modify_atomic_exec(rt.store(), exec_id.clone(), actors.clone(), |entry| {
+            st.modify_atomic_exec(rt.store(), &exec_id, &actors, |entry| {
                 // Record the pre-commitment
-                entry.insert(from, params.commit);
+                entry.insert(from.to_string().unwrap(), params.commit);
 
                 // Check if any pre-commitment is missing
                 for actor in actors {
-                    if !entry.contains_key(actor) {
+                    if !entry.contains_key(&actor.to_string().unwrap()) {
                         return Ok(None);
                     }
                 }
 
                 // Prepare messages to commit the atomic execution
                 let mut msgs = Vec::new();
-                entry.iter_mut().for_each(|(addr, &mut method)| {
+                for actor in actors {
+                    let method = entry[&actor.to_string().unwrap()];
                     msgs.push(CrossMsg {
                         msg: StorableMsg {
                             from: IPC_ADDR_PLACEHOLDER.clone(),
-                            to: addr.to_owned(),
+                            to: actor.clone(),
                             method,
                             params: exec_id.clone(),
                             value: TokenAmount::default(),
@@ -116,7 +117,7 @@ impl Actor {
                         },
                         wrapped: true,
                     });
-                });
+                }
                 Ok(Some(msgs))
             })
             .map_err(|e| {
@@ -138,7 +139,7 @@ impl Actor {
 
                 // Remove the atomic execution entry
                 rt.transaction(|st: &mut State, rt| {
-                    st.rm_atomic_exec(rt.store(), exec_id.clone(), actors.clone())
+                    st.rm_atomic_exec(rt.store(), &exec_id, &actors)
                         .map_err(|e| {
                             e.downcast_default(
                                 ExitCode::USR_ILLEGAL_STATE,
@@ -187,9 +188,9 @@ impl Actor {
         }
 
         let msg = rt.transaction(|st: &mut State, rt| {
-            st.modify_atomic_exec(rt.store(), exec_id.clone(), actors.clone(), |entry| {
+            st.modify_atomic_exec(rt.store(), &exec_id, &actors, |entry| {
                 // Remove the pre-commitment
-                entry.remove_entry(&from);
+                entry.remove_entry(&from.to_string().unwrap());
 
                 // Prepare a message to rollback the atomic execution
                 Ok(Some(CrossMsg {

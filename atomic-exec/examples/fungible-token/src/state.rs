@@ -11,7 +11,6 @@ use ipc_atomic_execution_primitives::{
 use ipc_gateway::IPCAddress;
 use serde::{Deserialize, Serialize};
 use serde_tuple::{Deserialize_tuple, Serialize_tuple};
-use std::collections::HashMap;
 
 pub type AccountState = AtomicInputState<TokenAmount>;
 
@@ -52,7 +51,7 @@ impl State {
         for (a, b) in balances {
             total += &b;
             let k = BytesKey::from(a.encode_var_vec());
-            if !balance_map.set_if_absent(k, b)? {
+            if !balance_map.set_if_absent(k, AccountState::new(b))? {
                 anyhow::bail!("duplicate balance for {}", a)
             }
         }
@@ -153,13 +152,21 @@ impl State {
     pub fn cancel_atomic_transfer(
         &mut self,
         bs: &impl Blockstore,
+        from: ActorID,
         input_id: AtomicInputID,
     ) -> anyhow::Result<()> {
         // Get the parameters of the atomic transfer.
         let atomic_registry = &mut self.atomic_registry;
-        let AtomicTransfer { from, .. } = atomic_registry
+        let AtomicTransfer {
+            from: orig_from, ..
+        } = atomic_registry
             .atomic_input(bs, &input_id)?
             .ok_or_else(|| anyhow::anyhow!("unexpected own input ID"))?;
+
+        // Check if the sender matches
+        if from != orig_from {
+            anyhow::bail!("unexpected sender address");
+        }
 
         // Get sender's account state.
         let from_key = Self::account_key(from);
@@ -181,10 +188,18 @@ impl State {
     pub fn prep_atomic_transfer(
         &mut self,
         bs: &impl Blockstore,
-        input_ids: &HashMap<IPCAddress, AtomicInputID>,
+        from: ActorID,
+        input_ids: &[(IPCAddress, AtomicInputID)],
     ) -> anyhow::Result<(IPCAddress, AtomicExecID)> {
+        let own_addr = self.ipc_address();
         let own_input_id = input_ids
-            .get(self.ipc_address())
+            .iter()
+            .find_map(|(a, i)| {
+                if a == own_addr {
+                    return Some(i);
+                };
+                None
+            })
             .ok_or_else(|| anyhow::anyhow!("missing own input ID"))?;
 
         // Get the parameters of the atomic transfer.
@@ -192,8 +207,13 @@ impl State {
         let input: AtomicTransfer = atomic_registry
             .atomic_input(bs, own_input_id)?
             .ok_or_else(|| anyhow::anyhow!("unexpected own input ID"))?;
-        let from = input.from;
+        let orig_from = input.from;
         let coordinator = input.coordinator.clone();
+
+        // Check if the sender matches
+        if from != orig_from {
+            anyhow::bail!("unexpected sender address");
+        }
 
         // Get sender's account state.
         let from_key = Self::account_key(from);
@@ -222,12 +242,12 @@ impl State {
         &self,
         bs: &impl Blockstore,
         exec_id: &AtomicExecID,
-    ) -> anyhow::Result<IPCAddress> {
+    ) -> anyhow::Result<AtomicTransfer> {
         let output: AtomicTransfer = self
             .atomic_registry
             .atomic_output(bs, exec_id)?
             .ok_or_else(|| anyhow::anyhow!("unexpected exec ID"))?;
-        Ok(output.coordinator)
+        Ok(output)
     }
 
     /// Commits the atomic transfer.
@@ -342,10 +362,10 @@ impl State {
     }
 }
 
-#[derive(Serialize_tuple, Deserialize_tuple)]
-struct AtomicTransfer {
-    coordinator: IPCAddress,
-    from: ActorID,
-    to: ActorID,
-    amount: TokenAmount,
+#[derive(Debug, Clone, PartialEq, Eq, Serialize_tuple, Deserialize_tuple)]
+pub struct AtomicTransfer {
+    pub coordinator: IPCAddress,
+    pub from: ActorID,
+    pub to: ActorID,
+    pub amount: TokenAmount,
 }

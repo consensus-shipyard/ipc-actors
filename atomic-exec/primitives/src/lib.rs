@@ -2,8 +2,6 @@ use cid::multihash::{Blake2b256, MultihashDigest};
 use cid::multihash::{Code, Hasher};
 use fvm_ipld_hamt::BytesKey;
 use ipc_gateway::IPCAddress;
-use std::cell::Cell;
-use std::collections::HashMap;
 use std::ops::Deref;
 
 use cid::Cid;
@@ -53,10 +51,6 @@ pub struct AtomicInputState<T>
 where
     T: Serialize + DeserializeOwned,
 {
-    // Cached CID value representing the current content.
-    #[serde(skip)]
-    cid: Cell<Option<Cid>>,
-
     // Flag indicating if the state is locked.
     locked: bool,
 
@@ -69,7 +63,6 @@ impl<T: Serialize + DeserializeOwned> AtomicInputState<T> {
     /// Converts some state into a lockable piece of state.
     pub fn new(state: T) -> Self {
         Self {
-            cid: Cell::new(None),
             locked: false,
             state,
         }
@@ -78,16 +71,12 @@ impl<T: Serialize + DeserializeOwned> AtomicInputState<T> {
     /// Attempts to load the content from the blockstore.
     pub fn load(cid: &Cid, bs: &impl Blockstore) -> anyhow::Result<Option<Self>> {
         let res = bs.get_cbor::<Self>(cid)?;
-        if let Some(s) = res.as_ref() {
-            s.cid.set(Some(*cid)); // cache known CID
-        }
         Ok(res)
     }
 
     /// Flushes the content to the blockstore.
     pub fn flush(&self, bs: &impl Blockstore) -> anyhow::Result<Cid> {
         let cid = bs.put_cbor(&self, Code::Blake2b256)?;
-        self.cid.set(Some(cid)); // cache computed CID
         Ok(cid)
     }
 
@@ -109,10 +98,7 @@ impl<T: Serialize + DeserializeOwned> AtomicInputState<T> {
     /// fails if the state is locked.
     pub fn get_mut(&mut self) -> anyhow::Result<&mut T> {
         match self.locked {
-            false => {
-                self.cid.set(None); // invalidate cached CID
-                Ok(&mut self.state)
-            }
+            false => Ok(&mut self.state),
             true => Err(anyhow::anyhow!("cannot modify locked state")),
         }
     }
@@ -141,7 +127,6 @@ impl<T: Serialize + DeserializeOwned> LockableState for AtomicInputState<T> {
     fn lock(&mut self) -> anyhow::Result<()> {
         match self.locked {
             false => {
-                self.cid.set(None); // invalidate cached CID
                 self.locked = true;
                 Ok(())
             }
@@ -152,7 +137,6 @@ impl<T: Serialize + DeserializeOwned> LockableState for AtomicInputState<T> {
     fn unlock(&mut self) -> anyhow::Result<()> {
         match self.locked {
             true => {
-                self.cid.set(None); // invalidate cached CID
                 self.locked = false;
                 Ok(())
             }
@@ -165,14 +149,7 @@ impl<T: Serialize + DeserializeOwned> LockableState for AtomicInputState<T> {
     }
 
     fn cid(&self) -> Cid {
-        match self.cid.get() {
-            Some(cid) => cid,
-            None => {
-                let cid = cid_from_cbor(self);
-                self.cid.set(Some(cid)); // cache computed CID
-                cid
-            }
-        }
+        cid_from_cbor(self)
     }
 }
 
@@ -290,7 +267,7 @@ impl AtomicExecRegistry {
                     input,
                 },
             )?;
-            assert!(v.is_some(), "input ID collision");
+            assert!(v.is_none(), "input ID collision");
             Ok(())
         })?;
 
@@ -375,7 +352,7 @@ impl AtomicExecRegistry {
         &mut self,
         bs: &impl Blockstore,
         own_input_id: &AtomicInputID,
-        input_ids: &HashMap<IPCAddress, AtomicInputID>,
+        input_ids: &[(IPCAddress, AtomicInputID)],
         state: impl IntoIterator<Item = &'a mut S>,
         output: O,
     ) -> anyhow::Result<AtomicExecID>
@@ -488,7 +465,7 @@ impl AtomicExecRegistry {
         Vec::from(h.finalize()).into()
     }
 
-    fn compute_exec_id(input_ids: &HashMap<IPCAddress, AtomicInputID>) -> AtomicExecID {
+    pub fn compute_exec_id(input_ids: &[(IPCAddress, AtomicInputID)]) -> AtomicExecID {
         let mut h = Blake2b256::default();
         h.update(&RawBytes::serialize(input_ids).unwrap());
         Vec::from(h.finalize()).into()

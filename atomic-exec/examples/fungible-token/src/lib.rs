@@ -18,10 +18,14 @@ use ipc_gateway::{ApplyMsgParams, CrossMsg, IPCAddress, StorableMsg, SubnetID};
 use num_derive::FromPrimitive;
 use num_traits::FromPrimitive;
 use serde_tuple::{Deserialize_tuple, Serialize_tuple};
-use state::State;
-use std::collections::{HashMap, HashSet};
+use state::{AtomicTransfer, State};
+use std::collections::HashMap;
+use std::str::FromStr;
 
 mod state;
+
+#[cfg(test)]
+mod tests;
 
 fvm_actors_runtime::wasm_trampoline!(Actor);
 
@@ -78,6 +82,9 @@ pub enum Method {
 
 struct Actor;
 
+// Address representation as a string.
+pub type AddrString = String;
+
 /// Parameters of [Method::Constructor].
 #[derive(Clone, Debug, Serialize_tuple, Deserialize_tuple)]
 pub struct ConstructorParams {
@@ -90,7 +97,7 @@ pub struct ConstructorParams {
     /// Token ticker symbol.
     pub symbol: String,
     /// Initial balance table.
-    pub balances: HashMap<Address, TokenAmount>,
+    pub balances: HashMap<AddrString, TokenAmount>,
 }
 
 /// Parameters of [Method::Transfer].
@@ -124,16 +131,18 @@ pub struct InitAtomicTransferParams {
 #[derive(Clone, Debug, Serialize_tuple, Deserialize_tuple)]
 pub struct PrepareAtomicTransferParams {
     /// Atomic input IDs from all executing actors participating in
-    /// the atomic execution.
-    pub input_ids: HashMap<IPCAddress, AtomicInputID>,
+    /// the atomic execution. Corresponding invocations must agree on the
+    /// order of elements in the vector.
+    pub input_ids: Vec<(IPCAddress, AtomicInputID)>,
 }
 
 /// Parameters of [Method::AbortAtomicTransfer].
 #[derive(Clone, Debug, Serialize_tuple, Deserialize_tuple)]
 pub struct AbortAtomicTransferParams {
     /// IPC addresses of all execution actors participating in the
-    /// atomic execution.
-    pub actors: HashSet<IPCAddress>,
+    /// atomic execution. Corresponding invocations must agree on the
+    /// order of elements in the vector.
+    pub actors: Vec<IPCAddress>,
     /// Atomic execution ID.
     pub exec_id: AtomicExecID,
 }
@@ -162,7 +171,9 @@ impl Actor {
         // addresses.
         let balances = balances.into_iter().try_fold(HashMap::new(), |mut m, (a, b)| -> Result<_, ActorError> {
             let id = rt
-                .resolve_address(&a)
+                .resolve_address(&Address::from_str(&a).map_err(|e| actor_error!(
+                    illegal_argument; "cannot parse address in initial balance table: {}", e))?
+                )
                 .ok_or_else(|| actor_error!(illegal_argument; "cannot resolve address in initial balance table"))?
                 .id()
                 .unwrap();
@@ -305,9 +316,12 @@ impl Actor {
         BS: Blockstore + Clone,
         RT: Runtime<BS>,
     {
-        // Modify the state to cancel the atomic transfer.
+        // Resolve sender's address to ID addresses.
+        let from_id = rt.message().caller().id().unwrap();
+
+        // Attempt to modify the state to cancel the atomic transfer.
         rt.transaction(|st: &mut State, rt| {
-            st.cancel_atomic_transfer(rt.store(), input_id)
+            st.cancel_atomic_transfer(rt.store(), from_id, input_id)
                 .map_err(|e| {
                     e.downcast_default(ExitCode::USR_UNSPECIFIED, "cannot cancel atomic transfer")
                 })
@@ -325,12 +339,15 @@ impl Actor {
     {
         let PrepareAtomicTransferParams { input_ids } = params;
 
+        // Resolve sender's address to ID addresses.
+        let from_id = rt.message().caller().id().unwrap();
+
         // Attempt to modify the state to prepare the atomic transfer.
         // This returns the IPC address of the coordinator actor and
         // the atomic exec ID.
         let st: State = rt.state()?;
         let (coordinator, exec_id) = rt.transaction(|st: &mut State, rt| {
-            st.prep_atomic_transfer(rt.store(), &input_ids)
+            st.prep_atomic_transfer(rt.store(), from_id, &input_ids)
                 .map_err(|e| {
                     e.downcast_default(ExitCode::USR_UNSPECIFIED, "cannot prepare atomic transfer")
                 })
@@ -344,7 +361,7 @@ impl Actor {
                 to: coordinator,
                 method: ipc_atomic_execution::Method::PreCommit as MethodNum,
                 params: RawBytes::serialize(ipc_atomic_execution::PreCommitParams {
-                    actors: input_ids.keys().cloned().collect(),
+                    actors: input_ids.iter().map(|(a, _)| a.clone()).collect(),
                     exec_id: exec_id.clone(),
                     commit: Method::CommitAtomicTransfer as MethodNum,
                 })?,
@@ -377,11 +394,15 @@ impl Actor {
         let ApplyMsgParams {
             cross_msg:
                 CrossMsg {
-                    msg: StorableMsg { from, params, .. },
+                    msg:
+                        StorableMsg {
+                            from,
+                            params: exec_id,
+                            ..
+                        },
                     ..
                 },
         } = params;
-        let exec_id = cbor::deserialize_params(&params)?;
 
         // Modify the state to commit the atomic transfer.
         rt.transaction(|st: &mut State, rt| {
@@ -403,10 +424,17 @@ impl Actor {
     {
         let AbortAtomicTransferParams { actors, exec_id } = params;
 
+        // Resolve sender's address to ID addresses.
+        let from_id = rt.message().caller().id().unwrap();
+
         // Retrieve the IPC address of the coordinator actor
         // associates with this atomic transfer.
         let st: State = rt.state()?;
-        let coordinator = st
+        let AtomicTransfer {
+            coordinator,
+            from: orig_from,
+            ..
+        } = st
             .atomic_transfer_coordinator(rt.store(), &exec_id)
             .map_err(|e| {
                 e.downcast_default(
@@ -414,6 +442,11 @@ impl Actor {
                     "cannot retrieve coordinator actor address",
                 )
             })?;
+
+        // Check if the sender matches
+        if from_id != orig_from {
+            return Err(actor_error!(forbidden; "unexpected sender address"));
+        }
 
         // Send a cross-message to the coordinator actor, revoking
         // actor's pre-committment to the atomic transfer.
@@ -458,11 +491,15 @@ impl Actor {
         let ApplyMsgParams {
             cross_msg:
                 CrossMsg {
-                    msg: StorableMsg { from, params, .. },
+                    msg:
+                        StorableMsg {
+                            from,
+                            params: exec_id,
+                            ..
+                        },
                     ..
                 },
         } = params;
-        let exec_id = cbor::deserialize_params(&params)?;
 
         // Modify the state to roll back the atomic transfer.
         rt.transaction(|st: &mut State, rt| {
