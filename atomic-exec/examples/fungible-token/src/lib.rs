@@ -163,7 +163,7 @@ impl Actor {
         let balances = balances.into_iter().try_fold(HashMap::new(), |mut m, (a, b)| -> Result<_, ActorError> {
             let id = rt
                 .resolve_address(&a)
-                .ok_or(actor_error!(illegal_argument; "cannot resolve address in initial balance table"))?
+                .ok_or_else(|| actor_error!(illegal_argument; "cannot resolve address in initial balance table"))?
                 .id()
                 .unwrap();
             m.insert(id, b);

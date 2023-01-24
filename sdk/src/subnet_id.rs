@@ -27,7 +27,7 @@ lazy_static! {
 }
 
 impl SubnetID {
-    pub fn new(parent: &SubnetID, subnet_act: Address) -> Self {
+    pub fn new_from_parent(parent: &SubnetID, subnet_act: Address) -> Self {
         Self {
             parent: parent.to_string(),
             actor: subnet_act,
@@ -221,7 +221,7 @@ mod tests {
     #[test]
     fn test_subnet_id() {
         let act = Address::new_id(1001);
-        let sub_id = SubnetID::new(&ROOTNET_ID.clone(), act);
+        let sub_id = SubnetID::new_from_parent(&ROOTNET_ID.clone(), act);
         let sub_id_str = sub_id.to_string();
         assert_eq!(sub_id_str, "/root/f01001");
 

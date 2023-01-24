@@ -1,6 +1,5 @@
 use crate::ApplyMsgParams;
 use anyhow::anyhow;
-use cid::Cid;
 use fil_actors_runtime::runtime::Runtime;
 use fil_actors_runtime::ActorError;
 use fil_actors_runtime::BURNT_FUNDS_ACTOR_ADDR;
@@ -14,11 +13,9 @@ use fvm_shared::MethodNum;
 use fvm_shared::METHOD_SEND;
 use ipc_sdk::address::IPCAddress;
 use ipc_sdk::subnet_id::SubnetID;
-use primitives::{TAmt, TCid, TLink};
+use primitives::{TCid, TLink};
 use serde::{Deserialize, Serialize};
 use std::path::Path;
-
-use crate::checkpoint::CrossMsgMeta;
 
 /// StorableMsg stores all the relevant information required
 /// to execute cross-messages.
@@ -46,7 +43,6 @@ pub struct CrossMsg {
 
 #[derive(PartialEq, Eq)]
 pub enum IPCMsgType {
-    Unknown = 0,
     BottomUp,
     TopDown,
 }
@@ -150,68 +146,28 @@ pub fn is_bottomup(from: &SubnetID, to: &SubnetID) -> bool {
 
 #[derive(PartialEq, Eq, Clone, Debug, Default, Serialize, Deserialize)]
 pub struct CrossMsgs {
+    // FIXME: Consider to make this an AMT if we expect
+    // a lot of cross-messages to be propagated.
     pub msgs: Vec<CrossMsg>,
-    pub metas: Vec<CrossMsgMeta>,
 }
 impl Cbor for CrossMsgs {}
-
-#[derive(PartialEq, Eq, Clone, Debug, Serialize, Deserialize)]
-pub struct MetaTag {
-    pub msgs_cid: TCid<TAmt<CrossMsg>>,
-    pub meta_cid: TCid<TAmt<CrossMsgMeta>>,
-}
-impl Cbor for MetaTag {}
-
-impl MetaTag {
-    pub fn new<BS: Blockstore>(store: &BS) -> anyhow::Result<MetaTag> {
-        Ok(Self {
-            msgs_cid: TCid::new_amt(store)?,
-            meta_cid: TCid::new_amt(store)?,
-        })
-    }
-}
 
 impl CrossMsgs {
     pub fn new() -> Self {
         Self::default()
     }
 
-    pub(crate) fn cid(&self) -> anyhow::Result<Cid> {
-        let store = MemoryBlockstore::new();
-        let mut meta = MetaTag::new(&store)?;
-
-        meta.msgs_cid.update(&store, |msgs_array| {
-            msgs_array
-                .batch_set(self.msgs.clone())
-                .map_err(|e| e.into())
-        })?;
-
-        meta.meta_cid.update(&store, |meta_array| {
-            meta_array
-                .batch_set(self.metas.clone())
-                .map_err(|e| e.into())
-        })?;
-
-        let meta_cid: TCid<TLink<MetaTag>> = TCid::new_link(&store, &meta)?;
-
-        Ok(meta_cid.cid())
+    pub(crate) fn cid(&self) -> anyhow::Result<TCid<TLink<CrossMsgs>>> {
+        TCid::new_link(&MemoryBlockstore::new(), &self)
     }
 
-    pub(crate) fn add_metas(&mut self, metas: Vec<CrossMsgMeta>) -> anyhow::Result<()> {
-        for m in metas.iter() {
-            if self.metas.iter().any(|ms| ms == m) {
-                continue;
-            }
-            self.metas.push(m.clone());
+    /// Appends a cross-message to cross-msgs
+    pub(crate) fn add_msg(&mut self, msg: &CrossMsg) -> bool {
+        if !self.msgs.contains(msg) {
+            self.msgs.push(msg.clone());
+            return true;
         }
-
-        Ok(())
-    }
-
-    pub(crate) fn add_msg(&mut self, msg: &CrossMsg) -> anyhow::Result<()> {
-        // TODO: Check if the message has already been added.
-        self.msgs.push(msg.clone());
-        Ok(())
+        false
     }
 }
 

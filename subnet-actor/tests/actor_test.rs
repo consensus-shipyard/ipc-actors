@@ -9,10 +9,13 @@ mod test {
     use fvm_shared::crypto::signature::Signature;
     use fvm_shared::econ::TokenAmount;
     use fvm_shared::error::ExitCode;
+    use fvm_shared::METHOD_SEND;
     use ipc_gateway::{Checkpoint, FundParams, SubnetID, MIN_COLLATERAL_AMOUNT};
     use ipc_subnet_actor::{
         Actor, ConsensusType, ConstructParams, JoinParams, Method, State, Status,
     };
+    use num::BigInt;
+    use num_traits::FromPrimitive;
     use num_traits::Zero;
     use primitives::TCid;
     use std::str::FromStr;
@@ -95,6 +98,7 @@ mod test {
 
         let caller = Address::new_id(10);
         let validator = Address::new_id(100);
+        let gateway = Address::new_id(IPC_GATEWAY_ADDR);
         let start_token_value = 5_u64.pow(18);
         let params = JoinParams {
             validator_net_addr: validator.to_string(),
@@ -114,6 +118,15 @@ mod test {
             )
             .unwrap();
 
+        // reward fails because there is no validators.
+        runtime.set_value(value.clone());
+        runtime.set_caller(Cid::default(), gateway.clone());
+        runtime.expect_validate_caller_addr(vec![gateway.clone()]);
+        expect_abort(
+            ExitCode::USR_ILLEGAL_STATE,
+            runtime.call::<Actor>(Method::Reward as u64, &RawBytes::default()),
+        );
+
         // verify state.
         // as the value is less than min collateral, state is initiated
         let st: State = runtime.get_state();
@@ -130,7 +143,7 @@ mod test {
         runtime.set_balance(TokenAmount::from_atto(MIN_COLLATERAL_AMOUNT));
         runtime.expect_validate_caller_any();
         runtime.expect_send(
-            Address::new_id(IPC_GATEWAY_ADDR),
+            gateway.clone(),
             ipc_gateway::Method::Register as u64,
             RawBytes::default(),
             TokenAmount::from_atto(MIN_COLLATERAL_AMOUNT),
@@ -168,7 +181,7 @@ mod test {
         runtime.set_balance(TokenAmount::from_atto(MIN_COLLATERAL_AMOUNT));
         runtime.expect_validate_caller_any();
         runtime.expect_send(
-            Address::new_id(IPC_GATEWAY_ADDR),
+            gateway.clone(),
             ipc_gateway::Method::AddStake as u64,
             RawBytes::default(),
             TokenAmount::from_atto(MIN_COLLATERAL_AMOUNT),
@@ -196,6 +209,39 @@ mod test {
             stake.unwrap(),
             TokenAmount::from_atto(MIN_COLLATERAL_AMOUNT)
         );
+        runtime.verify();
+
+        // reward is fairly distribute among all validators,
+        // and fails if no tokens are sent.
+        runtime.set_value(TokenAmount::zero());
+        runtime.set_caller(Cid::default(), gateway.clone());
+        runtime.expect_validate_caller_addr(vec![gateway.clone()]);
+        expect_abort(
+            ExitCode::USR_ILLEGAL_ARGUMENT,
+            runtime.call::<Actor>(Method::Reward as u64, &RawBytes::default()),
+        );
+
+        let total_reward = TokenAmount::from_atto(2);
+        runtime.set_value(total_reward.clone());
+        runtime.set_caller(Cid::default(), gateway.clone());
+        runtime.expect_validate_caller_addr(vec![gateway.clone()]);
+        runtime.set_balance(TokenAmount::from_atto(3));
+        let st: State = runtime.get_state();
+        let rew_amount =
+            total_reward.div_floor(BigInt::from_usize(st.validator_set.len()).unwrap());
+        for v in st.validator_set.into_iter() {
+            runtime.expect_send(
+                v.addr,
+                METHOD_SEND,
+                RawBytes::default(),
+                rew_amount.clone(),
+                RawBytes::default(),
+                ExitCode::new(0),
+            );
+        }
+        runtime
+            .call::<Actor>(Method::Reward as u64, &RawBytes::default())
+            .unwrap();
         runtime.verify();
     }
 
@@ -488,7 +534,7 @@ mod test {
 
         // Generate the check point
         let root_subnet = SubnetID::from_str("/root").unwrap();
-        let subnet = SubnetID::new(&root_subnet, test_actor_address);
+        let subnet = SubnetID::new_from_parent(&root_subnet, test_actor_address);
         let epoch = 10;
         let mut checkpoint_0 = Checkpoint::new(subnet.clone(), epoch);
         checkpoint_0.set_signature(

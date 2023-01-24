@@ -1,13 +1,18 @@
 use cid::Cid;
 use fil_actors_runtime::runtime::Runtime;
-use fil_actors_runtime::BURNT_FUNDS_ACTOR_ADDR;
+use fil_actors_runtime::{BURNT_FUNDS_ACTOR_ADDR, REWARD_ACTOR_ADDR};
+use fvm_ipld_encoding::RawBytes;
 use fvm_shared::address::Address;
 use fvm_shared::bigint::Zero;
 use fvm_shared::clock::ChainEpoch;
 use fvm_shared::econ::TokenAmount;
 use fvm_shared::error::ExitCode;
+use fvm_shared::METHOD_SEND;
 use ipc_gateway::Status::{Active, Inactive};
-use ipc_gateway::{get_bottomup_msg, Checkpoint, IPCAddress, State, DEFAULT_CHECKPOINT_PERIOD};
+use ipc_gateway::{
+    ext, get_topdown_msg, Checkpoint, CrossMsg, IPCAddress, State, StorableMsg, CROSS_MSG_FEE,
+    DEFAULT_CHECKPOINT_PERIOD, SUBNET_ACTOR_REWARD_METHOD,
+};
 use ipc_sdk::subnet_id::SubnetID;
 use primitives::TCid;
 use std::ops::Mul;
@@ -35,7 +40,7 @@ fn register_subnet() {
 
     let st: State = rt.get_state();
     assert_eq!(st.total_subnets, 1);
-    let shid = SubnetID::new(&h.net_name, *SUBNET_ONE);
+    let shid = SubnetID::new_from_parent(&h.net_name, *SUBNET_ONE);
     let subnet = h.get_subnet(&rt, &shid).unwrap();
     assert_eq!(subnet.id, shid);
     assert_eq!(subnet.stake, value);
@@ -65,7 +70,7 @@ fn register_subnet() {
 
     let st: State = rt.get_state();
     assert_eq!(st.total_subnets, 2);
-    let shid = SubnetID::new(&h.net_name, *SUBNET_TWO);
+    let shid = SubnetID::new_from_parent(&h.net_name, *SUBNET_TWO);
     let subnet = h.get_subnet(&rt, &shid).unwrap();
     assert_eq!(subnet.id, shid);
     assert_eq!(subnet.stake, value);
@@ -85,7 +90,7 @@ fn add_stake() {
 
     let st: State = rt.get_state();
     assert_eq!(st.total_subnets, 1);
-    let shid = SubnetID::new(&h.net_name, *SUBNET_ONE);
+    let shid = SubnetID::new_from_parent(&h.net_name, *SUBNET_ONE);
     let subnet = h.get_subnet(&rt, &shid).unwrap();
     assert_eq!(subnet.id, shid);
     assert_eq!(subnet.stake, value);
@@ -101,7 +106,7 @@ fn add_stake() {
     // Add to unregistered subnet
     h.add_stake(
         &mut rt,
-        &SubnetID::new(&h.net_name, *SUBNET_TWO),
+        &SubnetID::new_from_parent(&h.net_name, *SUBNET_TWO),
         &value,
         ExitCode::USR_ILLEGAL_ARGUMENT,
     )
@@ -133,7 +138,7 @@ fn release_stake() {
 
     let st: State = rt.get_state();
     assert_eq!(st.total_subnets, 1);
-    let shid = SubnetID::new(&h.net_name, *SUBNET_ONE);
+    let shid = SubnetID::new_from_parent(&h.net_name, *SUBNET_ONE);
     let subnet = h.get_subnet(&rt, &shid).unwrap();
     assert_eq!(subnet.id, shid);
     assert_eq!(subnet.stake, value);
@@ -156,7 +161,7 @@ fn release_stake() {
     // Release from unregistered subnet
     h.release_stake(
         &mut rt,
-        &SubnetID::new(&h.net_name, *SUBNET_TWO),
+        &SubnetID::new_from_parent(&h.net_name, *SUBNET_TWO),
         &value,
         ExitCode::USR_ILLEGAL_ARGUMENT,
     )
@@ -211,7 +216,7 @@ fn test_kill() {
 
     let st: State = rt.get_state();
     assert_eq!(st.total_subnets, 1);
-    let shid = SubnetID::new(&h.net_name, *SUBNET_ONE);
+    let shid = SubnetID::new_from_parent(&h.net_name, *SUBNET_ONE);
     let subnet = h.get_subnet(&rt, &shid).unwrap();
     assert_eq!(subnet.id, shid);
     assert_eq!(subnet.stake, value);
@@ -237,7 +242,7 @@ fn checkpoint_commit() {
 
     let st: State = rt.get_state();
     assert_eq!(st.total_subnets, 1);
-    let shid = SubnetID::new(&h.net_name, *SUBNET_ONE);
+    let shid = SubnetID::new_from_parent(&h.net_name, *SUBNET_ONE);
     let subnet = h.get_subnet(&rt, &shid).unwrap();
     assert_eq!(subnet.id, shid);
     assert_eq!(subnet.stake, value);
@@ -250,7 +255,7 @@ fn checkpoint_commit() {
     rt.set_epoch(epoch);
     let ch = Checkpoint::new(shid.clone(), epoch + 9);
 
-    h.commit_child_check(&mut rt, &shid, &ch, ExitCode::OK, TokenAmount::zero())
+    h.commit_child_check(&mut rt, &shid, &ch, ExitCode::OK)
         .unwrap();
     let st: State = rt.get_state();
     let commit = st.get_window_checkpoint(rt.store(), epoch).unwrap();
@@ -260,20 +265,14 @@ fn checkpoint_commit() {
     assert_eq!(has_cid(&child_check.checks, &ch.cid()), true);
 
     // Commit a checkpoint for subnet twice
-    h.commit_child_check(
-        &mut rt,
-        &shid,
-        &ch,
-        ExitCode::USR_ILLEGAL_ARGUMENT,
-        TokenAmount::zero(),
-    )
-    .unwrap();
+    h.commit_child_check(&mut rt, &shid, &ch, ExitCode::USR_ILLEGAL_ARGUMENT)
+        .unwrap();
     let prev_cid = ch.cid();
 
     // Append a new checkpoint for the same subnet
     let mut ch = Checkpoint::new(shid.clone(), epoch + 11);
     ch.data.prev_check = TCid::from(prev_cid);
-    h.commit_child_check(&mut rt, &shid, &ch, ExitCode::OK, TokenAmount::zero())
+    h.commit_child_check(&mut rt, &shid, &ch, ExitCode::OK)
         .unwrap();
     let st: State = rt.get_state();
     let commit = st.get_window_checkpoint(rt.store(), epoch).unwrap();
@@ -288,28 +287,22 @@ fn checkpoint_commit() {
 
     let st: State = rt.get_state();
     assert_eq!(st.total_subnets, 2);
-    let shid_two = SubnetID::new(&h.net_name, *SUBNET_TWO);
+    let shid_two = SubnetID::new_from_parent(&h.net_name, *SUBNET_TWO);
     let subnet = h.get_subnet(&rt, &shid_two).unwrap();
     assert_eq!(subnet.id, shid_two);
     h.check_state();
 
     // Trying to commit from the wrong subnet
     let ch = Checkpoint::new(shid.clone(), epoch + 9);
-    h.commit_child_check(
-        &mut rt,
-        &shid_two,
-        &ch,
-        ExitCode::USR_ILLEGAL_ARGUMENT,
-        TokenAmount::zero(),
-    )
-    .unwrap();
+    h.commit_child_check(&mut rt, &shid_two, &ch, ExitCode::USR_ILLEGAL_ARGUMENT)
+        .unwrap();
 
     // Commit first checkpoint for first window in second subnet
     let epoch: ChainEpoch = 10;
     rt.set_epoch(epoch);
     let ch = Checkpoint::new(shid_two.clone(), epoch + 9);
 
-    h.commit_child_check(&mut rt, &shid_two, &ch, ExitCode::OK, TokenAmount::zero())
+    h.commit_child_check(&mut rt, &shid_two, &ch, ExitCode::OK)
         .unwrap();
     let st: State = rt.get_state();
     let commit = st.get_window_checkpoint(rt.store(), epoch).unwrap();
@@ -330,7 +323,7 @@ fn checkpoint_crossmsgs() {
 
     let st: State = rt.get_state();
     assert_eq!(st.total_subnets, 1);
-    let shid = SubnetID::new(&h.net_name, *SUBNET_ONE);
+    let shid = SubnetID::new_from_parent(&h.net_name, *SUBNET_ONE);
     let subnet = h.get_subnet(&rt, &shid).unwrap();
     assert_eq!(subnet.id, shid);
     assert_eq!(subnet.stake, value);
@@ -342,53 +335,24 @@ fn checkpoint_crossmsgs() {
     let epoch: ChainEpoch = 10;
     rt.set_epoch(epoch);
     let mut ch = Checkpoint::new(shid.clone(), epoch + 9);
-    // Directed to other subnets
-    add_msg_meta(
+    // and include some fees in msgmeta.
+    let fee = TokenAmount::from_atto(5);
+    set_msg_meta(
         &mut ch,
-        &shid,
-        &SubnetID::from_str("/root/f0102/f0101").unwrap(),
         "rand1".as_bytes().to_vec(),
         TokenAmount::zero(),
-    );
-    add_msg_meta(
-        &mut ch,
-        &shid,
-        &SubnetID::from_str("/root/f0102/f0102").unwrap(),
-        "rand2".as_bytes().to_vec(),
-        TokenAmount::zero(),
-    );
-    // And to this subnet
-    add_msg_meta(
-        &mut ch,
-        &shid,
-        &h.net_name,
-        "rand1".as_bytes().to_vec(),
-        TokenAmount::zero(),
-    );
-    add_msg_meta(
-        &mut ch,
-        &shid,
-        &h.net_name,
-        "rand2".as_bytes().to_vec(),
-        TokenAmount::zero(),
-    );
-    add_msg_meta(
-        &mut ch,
-        &shid,
-        &h.net_name,
-        "rand3".as_bytes().to_vec(),
-        TokenAmount::zero(),
-    );
-    // And to other child from the subnet
-    add_msg_meta(
-        &mut ch,
-        &shid,
-        &SubnetID::new(&h.net_name, Address::new_id(100)),
-        "rand1".as_bytes().to_vec(),
-        TokenAmount::zero(),
+        fee.clone(),
     );
 
-    h.commit_child_check(&mut rt, &shid, &ch, ExitCode::OK, TokenAmount::zero())
+    rt.expect_send(
+        shid.subnet_actor(),
+        SUBNET_ACTOR_REWARD_METHOD,
+        RawBytes::default(),
+        fee,
+        RawBytes::default(),
+        ExitCode::OK,
+    );
+    h.commit_child_check(&mut rt, &shid, &ch, ExitCode::OK)
         .unwrap();
     let st: State = rt.get_state();
     let commit = st.get_window_checkpoint(rt.store(), epoch).unwrap();
@@ -397,76 +361,6 @@ fn checkpoint_crossmsgs() {
     assert_eq!(&child_check.checks.len(), &1);
     let prev_cid = ch.cid();
     assert_eq!(has_cid(&child_check.checks, &prev_cid), true);
-
-    let crossmsgs = st.bottomup_msg_meta.load(rt.store()).unwrap();
-    for item in 0..=2 {
-        get_bottomup_msg(&crossmsgs, item).unwrap().unwrap();
-    }
-    // Check that the ones directed to other subnets are aggregated in message-meta
-    for to in vec![
-        SubnetID::from_str("/root/f0102/f0101").unwrap(),
-        SubnetID::from_str("/root/f0102/f0102").unwrap(),
-    ] {
-        commit.crossmsg_meta(&h.net_name, &to).unwrap();
-    }
-
-    // funding subnet so it has some funds
-    let funder = Address::new_id(1001);
-    let amount = TokenAmount::from_atto(10_u64.pow(18));
-    h.fund(
-        &mut rt,
-        &funder,
-        &shid,
-        ExitCode::OK,
-        amount.clone(),
-        1,
-        &amount,
-    )
-    .unwrap();
-
-    let mut ch = Checkpoint::new(shid.clone(), epoch + 9);
-    ch.data.prev_check = TCid::from(prev_cid);
-    add_msg_meta(
-        &mut ch,
-        &shid,
-        &SubnetID::from_str("/root/f0102/f0101").unwrap(),
-        "rand1".as_bytes().to_vec(),
-        TokenAmount::from_atto(5_u64.pow(18)),
-    );
-    add_msg_meta(
-        &mut ch,
-        &shid,
-        &SubnetID::from_str("/root/f0102/f0102").unwrap(),
-        "rand2".as_bytes().to_vec(),
-        TokenAmount::from_atto(5_u64.pow(18)),
-    );
-    h.commit_child_check(
-        &mut rt,
-        &shid,
-        &ch,
-        ExitCode::OK,
-        2 * TokenAmount::from_atto(5_u64.pow(18)),
-    )
-    .unwrap();
-    let st: State = rt.get_state();
-    let commit = st.get_window_checkpoint(rt.store(), epoch).unwrap();
-    assert_eq!(commit.epoch(), DEFAULT_CHECKPOINT_PERIOD);
-    let child_check = has_childcheck_source(&commit.data.children, &shid).unwrap();
-    assert_eq!(&child_check.checks.len(), &2);
-    assert_eq!(has_cid(&child_check.checks, &ch.cid()), true);
-
-    let crossmsgs = &st.bottomup_msg_meta.load(rt.store()).unwrap();
-    for item in 0..=2 {
-        get_bottomup_msg(&crossmsgs, item).unwrap().unwrap();
-    }
-    for to in vec![
-        SubnetID::from_str("/root/f0102/f0101").unwrap(),
-        SubnetID::from_str("/root/f0102/f0102").unwrap(),
-    ] {
-        // verify that some value has been included in metas.
-        let meta = commit.crossmsg_meta(&h.net_name, &to).unwrap();
-        assert_eq!(true, meta.value > TokenAmount::zero());
-    }
 
     // TODO: More extensive tests?
 }
@@ -482,7 +376,7 @@ fn test_fund() {
 
     let st: State = rt.get_state();
     assert_eq!(st.total_subnets, 1);
-    let shid = SubnetID::new(&h.net_name, *SUBNET_ONE);
+    let shid = SubnetID::new_from_parent(&h.net_name, *SUBNET_ONE);
     let subnet = h.get_subnet(&rt, &shid).unwrap();
     assert_eq!(subnet.id, shid);
     assert_eq!(subnet.stake, value);
@@ -541,7 +435,7 @@ fn test_fund() {
     h.fund(
         &mut rt,
         &funder,
-        &SubnetID::new(&h.net_name, *SUBNET_TWO),
+        &SubnetID::new_from_parent(&h.net_name, *SUBNET_TWO),
         ExitCode::USR_ILLEGAL_ARGUMENT,
         TokenAmount::zero(),
         3,
@@ -552,7 +446,7 @@ fn test_fund() {
 
 #[test]
 fn test_release() {
-    let shid = SubnetID::new(&ROOTNET_ID, *SUBNET_ONE);
+    let shid = SubnetID::new_from_parent(&ROOTNET_ID, *SUBNET_ONE);
     let (h, mut rt) = setup(shid.clone());
 
     let releaser = Address::new_id(1001);
@@ -567,15 +461,24 @@ fn test_release() {
             r_amount.clone(),
             0,
             &Cid::default(),
+            CROSS_MSG_FEE.clone(),
         )
         .unwrap();
-    h.release(&mut rt, &releaser, ExitCode::OK, r_amount, 1, &prev_cid)
-        .unwrap();
+    h.release(
+        &mut rt,
+        &releaser,
+        ExitCode::OK,
+        r_amount,
+        1,
+        &prev_cid,
+        2 * CROSS_MSG_FEE.clone(),
+    )
+    .unwrap();
 }
 
 #[test]
 fn test_send_cross() {
-    let shid = SubnetID::new(&ROOTNET_ID, *SUBNET_ONE);
+    let shid = SubnetID::new_from_parent(&ROOTNET_ID, *SUBNET_ONE);
     let (h, mut rt) = setup(shid.clone());
 
     let from = Address::new_id(1001);
@@ -669,46 +572,410 @@ fn test_send_cross() {
         sub,
         ExitCode::OK,
         value.clone(),
-        0,
+        2,
         &zero,
     )
     .unwrap();
 }
 
+/// This test covers the case where a bottom up cross_msg's target subnet is the SAME as that of
+/// the gateway. It should directly commit the message and will not save in postbox.
 #[test]
-fn test_apply_routing() {
-    let shid = SubnetID::new(&ROOTNET_ID, *SUBNET_ONE);
+fn test_apply_msg_bu_target_subnet() {
+    // ============== Register subnet ==============
+    let shid = SubnetID::new_from_parent(&ROOTNET_ID, *SUBNET_ONE);
+    let (h, mut rt) = setup(ROOTNET_ID.clone());
+
+    let from = Address::new_bls(&[3; fvm_shared::address::BLS_PUB_LEN]).unwrap();
+    let to = Address::new_bls(&[4; fvm_shared::address::BLS_PUB_LEN]).unwrap();
+
+    let sub = shid.clone();
+
+    // ================ Setup ===============
+    let value = TokenAmount::from_atto(10_u64.pow(17));
+
+    // ================= Bottom-Up ===============
+    let ff = IPCAddress::new(&sub, &to).unwrap();
+    let tt = IPCAddress::new(&ROOTNET_ID, &from).unwrap();
+    let msg_nonce = 0;
+
+    // Only system code is allowed to this method
+    let params = StorableMsg {
+        to: tt.clone(),
+        from: ff.clone(),
+        method: METHOD_SEND,
+        value: value.clone(),
+        params: RawBytes::default(),
+        nonce: msg_nonce,
+    };
+    let sto = tt.raw_addr().unwrap();
+
+    let cid = h
+        .apply_cross_execute_only(
+            &mut rt,
+            value.clone(),
+            params,
+            Some(Box::new(move |rt| {
+                rt.expect_send(
+                    sto.clone(),
+                    METHOD_SEND,
+                    RawBytes::default(),
+                    value.clone(),
+                    RawBytes::default(),
+                    ExitCode::OK,
+                );
+            })),
+        )
+        .unwrap();
+    assert_eq!(cid.is_none(), true);
+}
+
+/// This test covers the case where a bottom up cross_msg's target subnet is NOT the same as that of
+/// the gateway. It will save it in the postbox.
+#[test]
+fn test_apply_msg_bu_not_target_subnet() {
+    // ============== Register subnet ==============
+    let shid = SubnetID::new_from_parent(&ROOTNET_ID, *SUBNET_ONE);
     let (h, mut rt) = setup(shid.clone());
 
     let from = Address::new_bls(&[3; fvm_shared::address::BLS_PUB_LEN]).unwrap();
     let to = Address::new_bls(&[4; fvm_shared::address::BLS_PUB_LEN]).unwrap();
 
-    let sub1 = SubnetID::new(&shid, *SUBNET_ONE);
-    let sub2 = SubnetID::new(&shid, *SUBNET_TWO);
+    let sub = shid.clone();
 
-    // register subnets
-    let reg_value = TokenAmount::from_atto(10_u64.pow(18));
-    h.register(&mut rt, &SUBNET_ONE, &reg_value, ExitCode::OK)
+    // ================ Setup ===============
+    let value = TokenAmount::from_atto(10_u64.pow(17));
+
+    // ================= Bottom-Up ===============
+    let ff = IPCAddress::new(&sub, &to).unwrap();
+    let tt = IPCAddress::new(&ROOTNET_ID, &from).unwrap();
+    let msg_nonce = 0;
+
+    // Only system code is allowed to this method
+    let params = StorableMsg {
+        to: tt.clone(),
+        from: ff.clone(),
+        method: METHOD_SEND,
+        value: value.clone(),
+        params: RawBytes::default(),
+        nonce: msg_nonce,
+    };
+    let cid = h
+        .apply_cross_execute_only(&mut rt, value.clone(), params.clone(), None)
+        .unwrap()
         .unwrap();
+
+    // Part 1: test the message is stored in postbox
+    let st: State = rt.get_state();
+    assert_ne!(tt.subnet().unwrap(), st.network_name);
+
+    // Check 1: `tt` is in `sub1`, which is not in that of `runtime` of gateway, will store in postbox
+    let item = st.load_from_postbox(rt.store(), cid.clone()).unwrap();
+    assert_eq!(item.owners, Some(vec![ff.clone().raw_addr().unwrap()]));
+    let msg = item.cross_msg.msg;
+    assert_eq!(msg.to, tt);
+    // the nonce should not have changed at all
+    assert_eq!(msg.nonce, msg_nonce);
+    assert_eq!(msg.value, value);
+
+    // Part 2: Now we propagate from postbox
+    // get the original subnet nonce first
+    let caller = ff.clone().raw_addr().unwrap();
+    let old_state: State = rt.get_state();
+    // propagating a bottom-up message triggers the
+    // funds included in the message to be burnt.
+    rt.expect_send(
+        *BURNT_FUNDS_ACTOR_ADDR,
+        METHOD_SEND,
+        RawBytes::default(),
+        params.clone().value,
+        RawBytes::default(),
+        ExitCode::OK,
+    );
+    h.propagate(
+        &mut rt,
+        caller,
+        cid.clone(),
+        &params.value,
+        TokenAmount::zero(),
+    )
+    .unwrap();
+
+    // state should be updated, load again
+    let new_state: State = rt.get_state();
+
+    // cid should be removed from postbox
+    let r = new_state.load_from_postbox(rt.store(), cid.clone());
+    assert_eq!(r.is_err(), true);
+    let err = r.unwrap_err();
+    assert_eq!(err.to_string(), "cid not found in postbox");
+    assert_eq!(new_state.nonce, old_state.nonce + 1);
+}
+
+/// This test covers the case where the amount send in the propagate
+/// message exceeds the required fee and the remainder is returned
+/// to the caller.
+#[test]
+fn test_propagate_with_remainder() {
+    // ============== Register subnet ==============
+    let shid = SubnetID::new_from_parent(&ROOTNET_ID, *SUBNET_ONE);
+    let (h, mut rt) = setup(shid.clone());
+
+    let from = Address::new_bls(&[3; fvm_shared::address::BLS_PUB_LEN]).unwrap();
+    let to = Address::new_bls(&[4; fvm_shared::address::BLS_PUB_LEN]).unwrap();
+
+    let sub = shid.clone();
+
+    // ================ Setup ===============
+    let value = TokenAmount::from_atto(10_u64.pow(17));
+
+    // ================= Bottom-Up ===============
+    let ff = IPCAddress::new(&sub, &to).unwrap();
+    let tt = IPCAddress::new(&ROOTNET_ID, &from).unwrap();
+    let msg_nonce = 0;
+
+    // Only system code is allowed to this method
+    let params = StorableMsg {
+        to: tt.clone(),
+        from: ff.clone(),
+        method: METHOD_SEND,
+        value: value.clone(),
+        params: RawBytes::default(),
+        nonce: msg_nonce,
+    };
+    let cid = h
+        .apply_cross_execute_only(&mut rt, value.clone(), params.clone(), None)
+        .unwrap()
+        .unwrap();
+
+    // Part 1: test the message is stored in postbox
+    let st: State = rt.get_state();
+    assert_ne!(tt.subnet().unwrap(), st.network_name);
+
+    // Check 1: `tt` is in `sub1`, which is not in that of `runtime` of gateway, will store in postbox
+    let item = st.load_from_postbox(rt.store(), cid.clone()).unwrap();
+    assert_eq!(item.owners, Some(vec![ff.clone().raw_addr().unwrap()]));
+    let msg = item.cross_msg.msg;
+    assert_eq!(msg.to, tt);
+    // the nonce should not have changed at all
+    assert_eq!(msg.nonce, msg_nonce);
+    assert_eq!(msg.value, value);
+
+    // Part 2: Now we propagate from postbox
+    // get the original subnet nonce first with an
+    // excess to check that there is a remainder
+    // to be returned
+    let caller = ff.clone().raw_addr().unwrap();
+    let old_state: State = rt.get_state();
+    // propagating a bottom-up message triggers the
+    // funds included in the message to be burnt.
+    rt.expect_send(
+        *BURNT_FUNDS_ACTOR_ADDR,
+        METHOD_SEND,
+        RawBytes::default(),
+        params.clone().value,
+        RawBytes::default(),
+        ExitCode::OK,
+    );
+    h.propagate(&mut rt, caller, cid.clone(), &params.value, value.clone())
+        .unwrap();
+
+    // state should be updated, load again
+    let new_state: State = rt.get_state();
+
+    // cid should be removed from postbox
+    let r = new_state.load_from_postbox(rt.store(), cid.clone());
+    assert_eq!(r.is_err(), true);
+    let err = r.unwrap_err();
+    assert_eq!(err.to_string(), "cid not found in postbox");
+    assert_eq!(new_state.nonce, old_state.nonce + 1);
+}
+
+/// This test covers the case where a bottom up cross_msg's target subnet is NOT the same as that of
+/// the gateway. It would save in postbox. Also, the gateway is the nearest parent, a switch to
+/// top down cross msg should occur.
+#[test]
+fn test_apply_msg_bu_switch_td() {
+    // ============== Register subnet ==============
+    let parent_sub = SubnetID::new_from_parent(&ROOTNET_ID, *SUBNET_ONE);
+    let (h, mut rt) = setup(parent_sub.clone());
+
+    let from = Address::new_bls(&[3; fvm_shared::address::BLS_PUB_LEN]).unwrap();
+    let to = Address::new_bls(&[4; fvm_shared::address::BLS_PUB_LEN]).unwrap();
+
+    // ================ Setup ===============
+    let value = TokenAmount::from_atto(10_u64.pow(17));
+
+    // ================= Bottom-Up ===============
+    let reg_value = TokenAmount::from_atto(10_u64.pow(18));
+    // ff: /root/f101/f102
+    // to: /root/f101/f103
+    // we are executing the message from, harness or the gateway is at: /root/f101
+    let ff_sub = SubnetID::new_from_parent(&parent_sub, *SUBNET_TWO);
+    let tt_sub = SubnetID::new_from_parent(&parent_sub, *SUBNET_THR);
     h.register(&mut rt, &SUBNET_TWO, &reg_value, ExitCode::OK)
         .unwrap();
+    h.register(&mut rt, &SUBNET_THR, &reg_value, ExitCode::OK)
+        .unwrap();
 
+    let ff = IPCAddress::new(&ff_sub, &to).unwrap();
+    let tt = IPCAddress::new(&tt_sub, &from).unwrap();
+    let msg_nonce = 0;
+
+    // Only system code is allowed to this method
+    let params = StorableMsg {
+        to: tt.clone(),
+        from: ff.clone(),
+        method: METHOD_SEND,
+        value: value.clone(),
+        params: RawBytes::default(),
+        nonce: msg_nonce,
+    };
+
+    let caller = ff.clone().raw_addr().unwrap();
+
+    // we directly insert message into postbox as we dont really care how it's got stored in queue
+    let cid = rt
+        .transaction(|st: &mut State, r| {
+            Ok(st
+                .insert_postbox(
+                    r.store(),
+                    Some(vec![caller.clone()]),
+                    CrossMsg {
+                        wrapped: false,
+                        msg: params.clone(),
+                    },
+                )
+                .unwrap())
+        })
+        .unwrap();
+
+    let starting_nonce = get_subnet(&rt, &tt.subnet().unwrap().down(&h.net_name).unwrap())
+        .unwrap()
+        .nonce;
+
+    // now we propagate
+    h.propagate(
+        &mut rt,
+        caller,
+        cid.clone(),
+        &params.value,
+        TokenAmount::zero(),
+    )
+    .unwrap();
+
+    // state should be updated, load again to perform the checks!
+    let st: State = rt.get_state();
+
+    // cid should be removed from postbox
+    let r = st.load_from_postbox(rt.store(), cid.clone());
+    assert_eq!(r.is_err(), true);
+    let err = r.unwrap_err();
+    assert_eq!(err.to_string(), "cid not found in postbox");
+
+    // the cross msg should have been committed to the next subnet, check this!
+    let sub = get_subnet(&rt, &tt.subnet().unwrap().down(&h.net_name).unwrap()).unwrap();
+    assert_eq!(sub.nonce, starting_nonce + 1);
+    let crossmsgs = sub.top_down_msgs.load(rt.store()).unwrap();
+    let msg = get_topdown_msg(&crossmsgs, starting_nonce).unwrap();
+    assert_eq!(msg.is_some(), true);
+    let msg = msg.unwrap();
+    assert_eq!(msg.to, tt);
+    // the nonce should not have changed at all
+    assert_eq!(msg.nonce, starting_nonce);
+    assert_eq!(msg.value, value);
+}
+
+/// This test covers the case where the cross_msg's target subnet is the SAME as that of
+/// the gateway. It would directly commit the message and will not save in postbox.
+#[test]
+fn test_apply_msg_tp_target_subnet() {
+    // ============== Register subnet ==============
+    let shid = SubnetID::new_from_parent(&ROOTNET_ID, *SUBNET_ONE);
+    let (h, mut rt) = setup(shid.clone());
+
+    let from = Address::new_bls(&[3; fvm_shared::address::BLS_PUB_LEN]).unwrap();
+    let to = Address::new_bls(&[4; fvm_shared::address::BLS_PUB_LEN]).unwrap();
+
+    let sub = shid.clone();
+
+    // ================ Setup ===============
+    let value = TokenAmount::from_atto(10_u64.pow(17));
+
+    // ================= Top-Down ===============
+    let ff = IPCAddress::new(&ROOTNET_ID, &from).unwrap();
+    let tt = IPCAddress::new(&sub, &to).unwrap();
+    let msg_nonce = 0;
+
+    // Only system code is allowed to this method
+    let params = StorableMsg {
+        to: tt.clone(),
+        from: ff.clone(),
+        method: METHOD_SEND,
+        value: value.clone(),
+        params: RawBytes::default(),
+        nonce: msg_nonce,
+    };
+    let sto = tt.raw_addr().unwrap();
+    let v = value.clone();
+    let cid = h
+        .apply_cross_execute_only(
+            &mut rt,
+            value.clone(),
+            params,
+            Some(Box::new(move |rt| {
+                // expect to send reward message
+                rt.expect_send(
+                    *REWARD_ACTOR_ADDR,
+                    ext::reward::EXTERNAL_FUNDING_METHOD,
+                    RawBytes::serialize(ext::reward::FundingParams {
+                        addr: *ACTOR,
+                        value: v.clone(),
+                    })
+                    .unwrap(),
+                    TokenAmount::zero(),
+                    RawBytes::default(),
+                    ExitCode::OK,
+                );
+                rt.expect_send(
+                    sto.clone(),
+                    METHOD_SEND,
+                    RawBytes::default(),
+                    v.clone(),
+                    RawBytes::default(),
+                    ExitCode::OK,
+                );
+            })),
+        )
+        .unwrap();
+    assert_eq!(cid.is_none(), true);
+}
+
+/// This test covers the case where the cross_msg's target subnet is not the same as that of
+/// the gateway.
+#[test]
+fn test_apply_msg_tp_not_target_subnet() {
+    // ============== Define Parameters ==============
+    // gateway: /root/sub1
+    let shid = SubnetID::new_from_parent(&ROOTNET_ID, *SUBNET_ONE);
+
+    let from = Address::new_bls(&[3; fvm_shared::address::BLS_PUB_LEN]).unwrap();
+    let to = Address::new_bls(&[4; fvm_shared::address::BLS_PUB_LEN]).unwrap();
+
+    // /root/sub1/sub1
+    let sub = SubnetID::new_from_parent(&shid, *SUBNET_ONE);
+
+    // ================ Setup ===============
+    let reg_value = TokenAmount::from_atto(10_u64.pow(18));
+    let (h, mut rt) = setup(shid.clone());
+    h.register(&mut rt, &SUBNET_ONE, &reg_value, ExitCode::OK)
+        .unwrap();
     // add some circulating supply to subnets
     let funder = Address::new_id(1002);
     h.fund(
         &mut rt,
         &funder,
-        &sub1,
-        ExitCode::OK,
-        reg_value.clone(),
-        1,
-        &reg_value,
-    )
-    .unwrap();
-    h.fund(
-        &mut rt,
-        &funder,
-        &sub2,
+        &sub,
         ExitCode::OK,
         reg_value.clone(),
         1,
@@ -718,52 +985,105 @@ fn test_apply_routing() {
 
     let value = TokenAmount::from_atto(10_u64.pow(17));
 
-    //top-down
+    // ================= Top-Down ===============
     let ff = IPCAddress::new(&ROOTNET_ID, &from).unwrap();
-    let tt = IPCAddress::new(&sub1, &to).unwrap();
-    h.apply_cross_msg(&mut rt, &ff, &tt, value.clone(), 0, 1, ExitCode::OK, false)
-        .unwrap();
-    let tt = IPCAddress::new(&sub2, &to).unwrap();
-    h.apply_cross_msg(&mut rt, &ff, &tt, value.clone(), 1, 1, ExitCode::OK, false)
-        .unwrap();
-    let ff = IPCAddress::new(&SubnetID::from_str("/root/f01/f012").unwrap(), &from).unwrap();
-    let tt = IPCAddress::new(&sub1, &to).unwrap();
-    h.apply_cross_msg(&mut rt, &ff, &tt, value.clone(), 2, 2, ExitCode::OK, false)
-        .unwrap();
-    // directed to current network
-    let tt = IPCAddress::new(&shid, &to).unwrap();
-    h.apply_cross_msg(&mut rt, &ff, &tt, value.clone(), 3, 0, ExitCode::OK, false)
+    let tt = IPCAddress::new(&sub, &to).unwrap();
+    let msg_nonce = 0;
+
+    // Only system code is allowed to this method
+    let params = StorableMsg {
+        to: tt.clone(),
+        from: ff.clone(),
+        method: METHOD_SEND,
+        value: value.clone(),
+        params: RawBytes::default(),
+        nonce: msg_nonce,
+    };
+    let v = value.clone();
+    // cid is expected, should not be None
+    let cid = h
+        .apply_cross_execute_only(
+            &mut rt,
+            value.clone(),
+            params.clone(),
+            Some(Box::new(move |rt| {
+                // expect to send reward message
+                rt.expect_send(
+                    *REWARD_ACTOR_ADDR,
+                    ext::reward::EXTERNAL_FUNDING_METHOD,
+                    RawBytes::serialize(ext::reward::FundingParams {
+                        addr: *ACTOR,
+                        value: v.clone(),
+                    })
+                    .unwrap(),
+                    TokenAmount::zero(),
+                    RawBytes::default(),
+                    ExitCode::OK,
+                );
+            })),
+        )
+        .unwrap()
         .unwrap();
 
-    // bottom-up
-    let ff = IPCAddress::new(&sub1, &from).unwrap();
-    let tt = IPCAddress::new(&SubnetID::from_str("/root/f0101/f0102/f011").unwrap(), &to).unwrap();
-    h.apply_cross_msg(&mut rt, &ff, &tt, value.clone(), 0, 2, ExitCode::OK, false)
-        .unwrap();
-    let ff = IPCAddress::new(&sub2, &from).unwrap();
-    let tt = IPCAddress::new(&SubnetID::from_str("/root/f0101/f0101/f011").unwrap(), &to).unwrap();
-    h.apply_cross_msg(&mut rt, &ff, &tt, value.clone(), 1, 3, ExitCode::OK, false)
-        .unwrap();
-    // directed to current network
-    let ff = IPCAddress::new(
-        &SubnetID::from_str("/root/f0101/f0102/f011").unwrap(),
-        &from,
+    // Part 1: test the message is stored in postbox
+    let st: State = rt.get_state();
+    assert_ne!(tt.subnet().unwrap(), st.network_name);
+
+    // Check 1: `tt` is in `sub1`, which is not in that of `runtime` of gateway, will store in postbox
+    let item = st.load_from_postbox(rt.store(), cid.clone()).unwrap();
+    assert_eq!(item.owners, Some(vec![ff.clone().raw_addr().unwrap()]));
+    let msg = item.cross_msg.msg;
+    assert_eq!(msg.to, tt);
+    // the nonce should not have changed at all
+    assert_eq!(msg.nonce, msg_nonce);
+    assert_eq!(msg.value, value);
+
+    // Part 2: Now we propagate from postbox
+    // get the original subnet nonce first
+    let starting_nonce = get_subnet(&rt, &tt.subnet().unwrap().down(&h.net_name).unwrap())
+        .unwrap()
+        .nonce;
+    let caller = ff.clone().raw_addr().unwrap();
+    h.propagate(
+        &mut rt,
+        caller,
+        cid.clone(),
+        &params.value,
+        TokenAmount::zero(),
     )
     .unwrap();
-    let tt = IPCAddress::new(&shid, &to).unwrap();
-    h.apply_cross_msg(&mut rt, &ff, &tt, value.clone(), 1, 0, ExitCode::OK, false)
-        .unwrap();
+
+    // state should be updated, load again
+    let st: State = rt.get_state();
+
+    // cid should be removed from postbox
+    let r = st.load_from_postbox(rt.store(), cid.clone());
+    assert_eq!(r.is_err(), true);
+    let err = r.unwrap_err();
+    assert_eq!(err.to_string(), "cid not found in postbox");
+
+    // the cross msg should have been committed to the next subnet, check this!
+    let sub = get_subnet(&rt, &tt.subnet().unwrap().down(&h.net_name).unwrap()).unwrap();
+    assert_eq!(sub.nonce, starting_nonce + 1);
+    let crossmsgs = sub.top_down_msgs.load(rt.store()).unwrap();
+    let msg = get_topdown_msg(&crossmsgs, starting_nonce).unwrap();
+    assert_eq!(msg.is_some(), true);
+    let msg = msg.unwrap();
+    assert_eq!(msg.to, tt);
+    // the nonce should not have changed at all
+    assert_eq!(msg.nonce, starting_nonce);
+    assert_eq!(msg.value, value);
 }
 
 #[test]
-fn test_apply_msg() {
+fn test_apply_msg_match_target_subnet() {
     let (h, mut rt) = setup_root();
 
     // Register a subnet with 1FIL collateral
     let value = TokenAmount::from_atto(10_u64.pow(18));
     h.register(&mut rt, &SUBNET_ONE, &value, ExitCode::OK)
         .unwrap();
-    let shid = SubnetID::new(&h.net_name, *SUBNET_ONE);
+    let shid = SubnetID::new_from_parent(&h.net_name, *SUBNET_ONE);
 
     // inject some funds
     let funder_id = Address::new_id(1001);
@@ -786,47 +1106,20 @@ fn test_apply_msg() {
 
     // Apply fund messages
     for i in 0..5 {
-        h.apply_cross_msg(
-            &mut rt,
-            &funder,
-            &funder,
-            value.clone(),
-            i,
-            i,
-            ExitCode::OK,
-            false,
-        )
-        .unwrap();
+        h.apply_cross_msg(&mut rt, &funder, &funder, value.clone(), i, i, ExitCode::OK)
+            .unwrap();
     }
     // Apply release messages
     let from = IPCAddress::new(&shid, &BURNT_FUNDS_ACTOR_ADDR).unwrap();
     // with the same nonce
     for _ in 0..5 {
-        h.apply_cross_msg(
-            &mut rt,
-            &from,
-            &funder,
-            value.clone(),
-            0,
-            0,
-            ExitCode::OK,
-            false,
-        )
-        .unwrap();
+        h.apply_cross_msg(&mut rt, &from, &funder, value.clone(), 0, 0, ExitCode::OK)
+            .unwrap();
     }
     // with increasing nonce
     for i in 0..5 {
-        h.apply_cross_msg(
-            &mut rt,
-            &from,
-            &funder,
-            value.clone(),
-            i,
-            i,
-            ExitCode::OK,
-            false,
-        )
-        .unwrap();
+        h.apply_cross_msg(&mut rt, &from, &funder, value.clone(), i, i, ExitCode::OK)
+            .unwrap();
     }
 
     // trying to apply non-subsequent nonce.
@@ -838,7 +1131,6 @@ fn test_apply_msg() {
         10,
         0,
         ExitCode::USR_ILLEGAL_STATE,
-        false,
     )
     .unwrap();
     // trying already applied nonce
@@ -850,14 +1142,8 @@ fn test_apply_msg() {
         0,
         0,
         ExitCode::USR_ILLEGAL_STATE,
-        false,
     )
     .unwrap();
 
     // TODO: Trying to release over circulating supply
-}
-
-#[test]
-fn test_noop() {
-    // TODO: Implement tests of what happens if the application
 }
