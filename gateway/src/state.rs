@@ -262,7 +262,7 @@ impl State {
             let mut prev_crossmsgs = match cross_reg.get(&meta_cid.cid().to_bytes())? {
                 Some(m) => m.clone(),
                 None => {
-                    // double-check that is not find because there were no messages
+                    // double-check that is not found because there were no messages
                     // in meta and not because we messed-up something.
                     if meta_cid.cid() != Cid::default() {
                         return Err(anyhow!("no msgmeta found for cid"));
@@ -332,6 +332,7 @@ impl State {
                 // store fee in checkpoint as long as we are not the root
                 // (the root should distribute the reward immediately to
                 // all validators)
+                // FIXME: Figure out how to distribute cross-fees in root.
                 if self.network_name != *subnet_id::ROOTNET_ID {
                     self.store_fee_in_checkpoint(store, fee, curr_epoch)?;
                 }
