@@ -302,7 +302,7 @@ lazy_static::lazy_static! {
         &Address::new_bls(&[0; fvm_shared::address::BLS_PUB_LEN]).unwrap(),
     ).unwrap();
 
-    static ref IPC_GATEWAY_ADDR: Address = *ipc_gateway::SCA_ACTOR_ADDR;
+    static ref IPC_GATEWAY_ADDR: Address = Address::new_id(64);
 
     static ref INITIAL_BALANCES: HashMap<Address, TokenAmount> = HashMap::from([
         (*ACCOUNT_X, TokenAmount::from_whole(1)),
@@ -326,12 +326,12 @@ lazy_static::lazy_static! {
 
     static ref COORD_ACTOR: IPCAddress = IPCAddress::new(&ROOTNET_ID, &Address::new_id(1)).unwrap();
 
-    static ref SUBNET_A: SubnetID = SubnetID::new(&ROOTNET_ID, Address::new_id('A' as u64));
+    static ref SUBNET_A: SubnetID = SubnetID::new_from_parent(&ROOTNET_ID, Address::new_id('A' as u64));
     static ref TOKEN_ACTOR_A: IPCAddress = IPCAddress::new(&*SUBNET_A, &Address::new_id(100)).unwrap();
     static ref ACCOUNT_X: Address = Address::new_id('X' as u64);
     static ref ACCOUNT_Y: Address = Address::new_id('Y' as u64);
 
-    static ref SUBNET_B: SubnetID = SubnetID::new(&ROOTNET_ID, Address::new_id('B' as u64));
+    static ref SUBNET_B: SubnetID = SubnetID::new_from_parent(&ROOTNET_ID, Address::new_id('B' as u64));
     static ref TOKEN_ACTOR_B: IPCAddress = IPCAddress::new(&*SUBNET_B, &Address::new_id(100)).unwrap();
 }
 

@@ -174,7 +174,7 @@ impl Actor {
                 .resolve_address(&Address::from_str(&a).map_err(|e| actor_error!(
                     illegal_argument; "cannot parse address in initial balance table: {}", e))?
                 )
-                .ok_or(actor_error!(illegal_argument; "cannot resolve address in initial balance table"))?
+                .ok_or_else(|| actor_error!(illegal_argument; "cannot resolve address in initial balance table"))?
                 .id()
                 .unwrap();
             m.insert(id, b);

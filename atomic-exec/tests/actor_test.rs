@@ -74,7 +74,7 @@ lazy_static::lazy_static! {
         &Address::new_bls(&[0; fvm_shared::address::BLS_PUB_LEN]).unwrap(),
     ).unwrap();
 
-    static ref IPC_GATEWAY_ADDR: Address = *ipc_gateway::SCA_ACTOR_ADDR;
+    static ref IPC_GATEWAY_ADDR: Address = Address::new_id(64);
 
     static ref CONSTRUCTOR_PARAMS: ConstructorParams = ConstructorParams {
         ipc_gateway_address: *IPC_GATEWAY_ADDR,
@@ -82,11 +82,11 @@ lazy_static::lazy_static! {
 
     static ref COORD_ACTOR: IPCAddress = IPCAddress::new(&ROOTNET_ID, &Address::new_id(1)).unwrap();
 
-    static ref SUBNET_A: SubnetID = SubnetID::new(&ROOTNET_ID, Address::new_id('A' as u64));
+    static ref SUBNET_A: SubnetID = SubnetID::new_from_parent(&ROOTNET_ID, Address::new_id('A' as u64));
     static ref ACTOR_A1: IPCAddress = IPCAddress::new(&SUBNET_A, &Address::new_id(1)).unwrap();
     static ref ACTOR_A2: IPCAddress = IPCAddress::new(&SUBNET_A, &Address::new_id(2)).unwrap();
 
-    static ref SUBNET_B: SubnetID = SubnetID::new(&ROOTNET_ID, Address::new_id('B' as u64));
+    static ref SUBNET_B: SubnetID = SubnetID::new_from_parent(&ROOTNET_ID, Address::new_id('B' as u64));
     static ref ACTOR_B1: IPCAddress = IPCAddress::new(&SUBNET_B, &Address::new_id(1)).unwrap();
     static ref ACTOR_B2: IPCAddress = IPCAddress::new(&SUBNET_B, &Address::new_id(2)).unwrap();
 }

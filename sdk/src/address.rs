@@ -77,7 +77,7 @@ mod tests {
     #[test]
     fn test_ipc_address() {
         let act = Address::new_id(1001);
-        let sub_id = SubnetID::new(&ROOTNET_ID.clone(), act);
+        let sub_id = SubnetID::new_from_parent(&ROOTNET_ID.clone(), act);
         let bls = Address::from_str("f3vvmn62lofvhjd2ugzca6sof2j2ubwok6cj4xxbfzz4yuxfkgobpihhd2thlanmsh3w2ptld2gqkn2jvlss4a").unwrap();
         let haddr = IPCAddress::new(&sub_id, &bls).unwrap();
 
@@ -91,7 +91,7 @@ mod tests {
 
     #[test]
     fn test_ipc_from_str() {
-        let sub_id = SubnetID::new(&ROOTNET_ID.clone(), Address::new_id(100));
+        let sub_id = SubnetID::new_from_parent(&ROOTNET_ID.clone(), Address::new_id(100));
         let addr = IPCAddress::new(&sub_id, &Address::new_id(101)).unwrap();
         let st = addr.to_string().unwrap();
         let addr_out = IPCAddress::from_str(&st).unwrap();
@@ -100,7 +100,7 @@ mod tests {
 
     #[test]
     fn test_ipc_serialization() {
-        let sub_id = SubnetID::new(&ROOTNET_ID.clone(), Address::new_id(100));
+        let sub_id = SubnetID::new_from_parent(&ROOTNET_ID.clone(), Address::new_id(100));
         let addr = IPCAddress::new(&sub_id, &Address::new_id(101)).unwrap();
         let st = addr.to_bytes().unwrap();
         let addr_out = IPCAddress::from_bytes(&st).unwrap();
