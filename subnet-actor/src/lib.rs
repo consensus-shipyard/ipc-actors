@@ -378,7 +378,6 @@ impl SubnetActor for Actor {
         // even distribution of rewards. Each subnet may choose more
         // complex and fair policies to incentivize certain behaviors.
         // we may even have a default one for IPC.
-        // let rew_amount = amount.div_floor(TokenAmount::from(st.validator_set.len().into()));
         let div = {
             if st.validator_set.len() == 0 {
                 return Err(actor_error!(illegal_state, "no validators in subnet"));
