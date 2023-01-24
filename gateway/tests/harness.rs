@@ -437,7 +437,8 @@ impl Harness {
         rt.set_caller(*SYSTEM_ACTOR_CODE_ID, *SYSTEM_ACTOR_ADDR);
         rt.expect_validate_caller_not_type(SIG_TYPES.clone());
 
-        rt.set_value(value.clone());
+        // set value and include the cross_msg_fee
+        set_rt_value_with_cross_fee(rt, &value);
 
         let msg = StorableMsg {
             from: IPCAddress::new(source_sub, from).unwrap(),
@@ -599,7 +600,6 @@ impl Harness {
         msg_nonce: u64,
         td_nonce: u64,
         code: ExitCode,
-        noop: bool,
     ) -> Result<(), ActorError> {
         rt.set_caller(*SYSTEM_ACTOR_CODE_ID, *SYSTEM_ACTOR_ADDR);
         rt.expect_validate_caller_addr(vec![SYSTEM_ACTOR_ADDR.clone()]);
@@ -719,10 +719,6 @@ impl Harness {
             } else {
                 assert_eq!(st.applied_topdown_nonce, msg_nonce + 1);
             }
-        }
-
-        if noop {
-            panic!("TODO: Not implemented yet");
         }
         Ok(())
     }

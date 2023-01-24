@@ -440,9 +440,6 @@ fn test_fund() {
         &exp_cs,
     )
     .unwrap();
-    let st: State = rt.get_state();
-    // check that fees are collected successfully
-    assert_eq!(st.gov_acc, 3 * &*CROSS_MSG_FEE);
 }
 
 #[test]
@@ -466,10 +463,6 @@ fn test_release() {
         .unwrap();
     h.release(&mut rt, &releaser, ExitCode::OK, r_amount, 1, &prev_cid)
         .unwrap();
-
-    let st: State = rt.get_state();
-    // check that fees are collected successfully
-    assert_eq!(st.gov_acc, 2 * &*CROSS_MSG_FEE);
 }
 
 #[test]
@@ -1102,47 +1095,20 @@ fn test_apply_msg_match_target_subnet() {
 
     // Apply fund messages
     for i in 0..5 {
-        h.apply_cross_msg(
-            &mut rt,
-            &funder,
-            &funder,
-            value.clone(),
-            i,
-            i,
-            ExitCode::OK,
-            false,
-        )
-        .unwrap();
+        h.apply_cross_msg(&mut rt, &funder, &funder, value.clone(), i, i, ExitCode::OK)
+            .unwrap();
     }
     // Apply release messages
     let from = IPCAddress::new(&shid, &BURNT_FUNDS_ACTOR_ADDR).unwrap();
     // with the same nonce
     for _ in 0..5 {
-        h.apply_cross_msg(
-            &mut rt,
-            &from,
-            &funder,
-            value.clone(),
-            0,
-            0,
-            ExitCode::OK,
-            false,
-        )
-        .unwrap();
+        h.apply_cross_msg(&mut rt, &from, &funder, value.clone(), 0, 0, ExitCode::OK)
+            .unwrap();
     }
     // with increasing nonce
     for i in 0..5 {
-        h.apply_cross_msg(
-            &mut rt,
-            &from,
-            &funder,
-            value.clone(),
-            i,
-            i,
-            ExitCode::OK,
-            false,
-        )
-        .unwrap();
+        h.apply_cross_msg(&mut rt, &from, &funder, value.clone(), i, i, ExitCode::OK)
+            .unwrap();
     }
 
     // trying to apply non-subsequent nonce.
@@ -1154,7 +1120,6 @@ fn test_apply_msg_match_target_subnet() {
         10,
         0,
         ExitCode::USR_ILLEGAL_STATE,
-        false,
     )
     .unwrap();
     // trying already applied nonce
@@ -1166,7 +1131,6 @@ fn test_apply_msg_match_target_subnet() {
         0,
         0,
         ExitCode::USR_ILLEGAL_STATE,
-        false,
     )
     .unwrap();
 

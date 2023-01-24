@@ -47,9 +47,6 @@ pub struct State {
     pub bottomup_msg_meta: TCid<TAmt<CrossMsgMeta, CROSSMSG_AMT_BITWIDTH>>,
     pub applied_bottomup_nonce: u64,
     pub applied_topdown_nonce: u64,
-    /// governance account handling all the fees collected for cross-net
-    /// messages handled by the gateway.
-    pub gov_acc: TokenAmount,
 }
 
 lazy_static! {
@@ -79,7 +76,6 @@ impl State {
             // We first increase to the subsequent and then execute for bottom-up messages
             applied_bottomup_nonce: MAX_NONCE,
             applied_topdown_nonce: Default::default(),
-            gov_acc: TokenAmount::zero(),
         })
     }
 
@@ -185,11 +181,12 @@ impl State {
         })
     }
 
-    /// store a cross message in the current checkpoint for propagation
-    pub(crate) fn store_msg_in_checkpoint<BS: Blockstore>(
+    /// store a cross-message and/or a reward in a checkpoint
+    pub(crate) fn store_in_checkpoint<BS: Blockstore>(
         &mut self,
         store: &BS,
-        cross_msg: &CrossMsg,
+        cross_msg: Option<&CrossMsg>,
+        fee: &TokenAmount,
         curr_epoch: ChainEpoch,
     ) -> anyhow::Result<()> {
         let mut ch = self.get_window_checkpoint(store, curr_epoch)?;
@@ -197,17 +194,17 @@ impl State {
         match ch.cross_msgs_mut() {
             Some(msgmeta) => {
                 let prev_cid = &msgmeta.msgs_cid;
-                let m_cid = self.append_msg_to_meta(store, prev_cid, cross_msg)?;
+                let (m_cid, value) = self.append_to_meta(store, prev_cid, cross_msg, fee)?;
                 msgmeta.msgs_cid = m_cid;
-                msgmeta.value += &cross_msg.msg.value;
+                msgmeta.value += &value;
             }
             None => self.check_msg_registry.modify(store, |cross_reg| {
                 let mut msgmeta = CrossMsgMeta::default();
                 let mut crossmsgs = CrossMsgs::new();
-                let _ = crossmsgs.add_msg(cross_msg)?;
+                let val = crossmsgs.add_msg_and_fee(cross_msg, fee)?;
                 let m_cid = put_msgmeta(cross_reg, crossmsgs)?;
                 msgmeta.msgs_cid = m_cid;
-                msgmeta.value += &cross_msg.msg.value;
+                msgmeta.value += &val;
                 ch.set_cross_msgs(msgmeta);
                 Ok(())
             })?,
@@ -221,25 +218,23 @@ impl State {
         Ok(())
     }
 
-    /// append crossmsg to a specific mesasge meta.
-    pub(crate) fn append_msg_to_meta<BS: Blockstore>(
+    /// append cross-msg and/or fee reward to a specific message meta.
+    pub(crate) fn append_to_meta<BS: Blockstore>(
         &mut self,
         store: &BS,
         meta_cid: &TCid<TLink<CrossMsgs>>,
-        cross_msg: &CrossMsg,
-    ) -> anyhow::Result<TCid<TLink<CrossMsgs>>> {
+        cross_msg: Option<&CrossMsg>,
+        fee: &TokenAmount,
+    ) -> anyhow::Result<(TCid<TLink<CrossMsgs>>, TokenAmount)> {
         self.check_msg_registry.modify(store, |cross_reg| {
             // get previous meta stored
             let mut prev_crossmsgs = match cross_reg.get(&meta_cid.cid().to_bytes())? {
                 Some(m) => m.clone(),
                 None => return Err(anyhow!("no msgmeta found for cid")),
             };
-
-            let added = prev_crossmsgs.add_msg(cross_msg)?;
-            if !added {
-                return Ok(meta_cid.clone());
-            }
-            replace_msgmeta(cross_reg, meta_cid, prev_crossmsgs)
+            let value = prev_crossmsgs.add_msg_and_fee(cross_msg, fee)?;
+            let m_cid = replace_msgmeta(cross_reg, meta_cid, prev_crossmsgs)?;
+            Ok((m_cid, value))
         })
     }
 
@@ -268,6 +263,8 @@ impl State {
         &mut self,
         store: &BS,
         cross_msg: &mut CrossMsg,
+        fee: &TokenAmount,
+        curr_epoch: ChainEpoch,
     ) -> anyhow::Result<()> {
         let msg = &cross_msg.msg;
         let sto = msg.to.subnet()?;
@@ -290,15 +287,14 @@ impl State {
                 sub.nonce += 1;
                 sub.circ_supply += &cross_msg.msg.value;
                 self.flush_subnet(store, &sub)?;
+
+                // store fee in checkpoint
+                self.store_in_checkpoint(store, None, fee, curr_epoch)?;
             }
             None => {
-                if sto == self.network_name {
-                    return Err(anyhow!(
-                        "can't direct top-down message to the current subnet"
-                    ));
-                } else {
-                    self.noop_msg();
-                }
+                return Err(anyhow!(
+                    "can't direct top-down message to destination subnet"
+                ));
             }
         }
         Ok(())
@@ -309,10 +305,11 @@ impl State {
         &mut self,
         store: &BS,
         msg: &CrossMsg,
+        fee: &TokenAmount,
         curr_epoch: ChainEpoch,
     ) -> anyhow::Result<()> {
-        // store msg in checkpoint for propagation
-        self.store_msg_in_checkpoint(store, msg, curr_epoch)?;
+        // store bottom-up msg and fee in checkpoint for propagation
+        self.store_in_checkpoint(store, Some(msg), fee, curr_epoch)?;
         // increment nonce
         self.nonce += 1;
 
@@ -324,13 +321,14 @@ impl State {
         &mut self,
         store: &BS,
         cross_msg: &mut CrossMsg,
+        fee: &TokenAmount,
         curr_epoch: ChainEpoch,
     ) -> anyhow::Result<IPCMsgType> {
         let msg = &cross_msg.msg;
         let tp = msg.ipc_type()?;
         match tp {
-            IPCMsgType::TopDown => self.commit_topdown_msg(store, cross_msg)?,
-            IPCMsgType::BottomUp => self.commit_bottomup_msg(store, cross_msg, curr_epoch)?,
+            IPCMsgType::TopDown => self.commit_topdown_msg(store, cross_msg, fee, curr_epoch)?,
+            IPCMsgType::BottomUp => self.commit_bottomup_msg(store, cross_msg, fee, curr_epoch)?,
         };
         Ok(tp)
     }
@@ -356,11 +354,6 @@ impl State {
             ));
         }
         Ok(())
-    }
-
-    /// noop is triggered to notify when a crossMsg fails to be applied successfully.
-    pub fn noop_msg(&self) {
-        panic!("error committing cross-msg. noop should be returned but not implemented yet");
     }
 
     /// Insert a cross message to the `postbox` before propagate can be called for the
@@ -464,9 +457,8 @@ impl State {
                 "not enough gas to pay cross-message"
             ));
         }
-        // assign fee to balance account and reduce
-        // used balance.
-        self.gov_acc += fee;
+
+        // update balance after collecting the fee
         *balance -= fee;
         Ok(())
     }

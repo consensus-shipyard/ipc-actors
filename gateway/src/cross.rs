@@ -14,6 +14,7 @@ use fvm_shared::MethodNum;
 use fvm_shared::METHOD_SEND;
 use ipc_sdk::address::IPCAddress;
 use ipc_sdk::subnet_id::SubnetID;
+use num_traits::Zero;
 use primitives::{TCid, TLink};
 use serde::{Deserialize, Serialize};
 use std::path::Path;
@@ -173,6 +174,7 @@ pub struct CrossMsgs {
     // FIXME: Consider to make this an AMT if we expect
     // a lot of cross-messages to be propagated.
     pub msgs: Vec<CrossMsg>,
+    pub fee: TokenAmount,
 }
 impl Cbor for CrossMsgs {}
 
@@ -185,13 +187,31 @@ impl CrossMsgs {
         TCid::new_link(&MemoryBlockstore::new(), &self)
     }
 
-    pub(crate) fn add_msg(&mut self, msg: &CrossMsg) -> anyhow::Result<bool> {
-        // FIXME: Consider a more efficient impl.
-        if !self.msgs.contains(msg) {
-            self.msgs.push(msg.clone());
-            return Ok(true);
+    /// Appends a cross-message and/or a fee to CrossMsg and
+    /// returns the total value being appended to the checkpoint.
+    pub(crate) fn add_msg_and_fee(
+        &mut self,
+        msg: Option<&CrossMsg>,
+        fee: &TokenAmount,
+    ) -> anyhow::Result<TokenAmount> {
+        if msg.is_none() && fee == &TokenAmount::zero() {
+            return Ok(TokenAmount::zero());
         }
-        Ok(false)
+
+        // add message
+        let mut value = TokenAmount::zero();
+        if msg.is_some() {
+            let msg = msg.unwrap();
+            if !self.msgs.contains(msg) {
+                self.msgs.push(msg.clone());
+                value += &msg.msg.value;
+            }
+        }
+
+        // add fee
+        self.fee += fee;
+        value += fee;
+        Ok(value)
     }
 }
 

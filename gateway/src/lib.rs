@@ -438,7 +438,8 @@ impl Actor {
         let sig_addr = resolve_secp_bls(rt, rt.message().caller())?;
 
         rt.transaction(|st: &mut State, rt| {
-            st.collect_cross_fee(&mut value, &*CROSS_MSG_FEE)?;
+            let fee = &CROSS_MSG_FEE;
+            st.collect_cross_fee(&mut value, &fee)?;
             // Create fund message
             let mut f_msg = CrossMsg {
                 msg: StorableMsg::new_fund_msg(&params, &sig_addr, value).map_err(|e| {
@@ -453,12 +454,13 @@ impl Actor {
             log::debug!("fund cross msg is: {:?}", f_msg);
 
             // Commit top-down message.
-            st.commit_topdown_msg(rt.store(), &mut f_msg).map_err(|e| {
-                e.downcast_default(
-                    ExitCode::USR_ILLEGAL_STATE,
-                    "error committing top-down message",
-                )
-            })?;
+            st.commit_topdown_msg(rt.store(), &mut f_msg, &fee, rt.curr_epoch())
+                .map_err(|e| {
+                    e.downcast_default(
+                        ExitCode::USR_ILLEGAL_STATE,
+                        "error committing top-down message",
+                    )
+                })?;
             Ok(())
         })?;
 
@@ -492,8 +494,9 @@ impl Actor {
         let sig_addr = resolve_secp_bls(rt, rt.message().caller())?;
 
         rt.transaction(|st: &mut State, rt| {
+            let fee = &CROSS_MSG_FEE;
             // collect fees
-            st.collect_cross_fee(&mut value, &*CROSS_MSG_FEE)?;
+            st.collect_cross_fee(&mut value, &fee)?;
 
             // Create release message
             let r_msg = CrossMsg {
@@ -513,7 +516,7 @@ impl Actor {
             };
 
             // Commit bottom-up message.
-            st.commit_bottomup_msg(rt.store(), &r_msg, rt.curr_epoch())
+            st.commit_bottomup_msg(rt.store(), &r_msg, &fee, rt.curr_epoch())
                 .map_err(|e| {
                     e.downcast_default(
                         ExitCode::USR_ILLEGAL_STATE,
@@ -598,7 +601,11 @@ impl Actor {
                 }
             };
 
-            tp = Some(st.send_cross(rt.store(), &mut cross_msg, rt.curr_epoch()).map_err(|e| {
+            // collect cross-fee
+            let fee = &CROSS_MSG_FEE;
+            st.collect_cross_fee(&mut cross_msg.msg.value, &fee)?;
+
+            tp = Some(st.send_cross(rt.store(), &mut cross_msg, &fee, rt.curr_epoch()).map_err(|e| {
                 e.downcast_default(ExitCode::USR_ILLEGAL_STATE, "error committing cross message")
             })?);
 
@@ -814,10 +821,11 @@ impl Actor {
             }
 
             // collect cross-fee
-            st.collect_cross_fee(&mut value, &*CROSS_MSG_FEE)?;
+            let fee = &CROSS_MSG_FEE;
+            st.collect_cross_fee(&mut value, &fee)?;
 
             let PostBoxItem { mut cross_msg, .. } = postbox_item;
-            do_burn = Self::commit_cross_message(rt, st, &mut cross_msg)?;
+            do_burn = Self::commit_cross_message(rt, st, &mut cross_msg, &fee)?;
             st.remove_from_postbox(rt.store(), postbox_cid)?;
             Ok(cross_msg)
         })?;
@@ -849,6 +857,7 @@ impl Actor {
         rt: &mut RT,
         st: &mut State,
         mut cross_msg: &mut CrossMsg,
+        fee: &TokenAmount,
     ) -> Result<bool, ActorError>
     where
         BS: Blockstore,
@@ -886,12 +895,12 @@ impl Actor {
                 // if the message is a bottom-up message and it reached the common-parent
                 // then we need to start propagating it down to the destination.
                 let r = if nearest_common_parent == st.network_name {
-                    st.commit_topdown_msg(rt.store(), cross_msg)
+                    st.commit_topdown_msg(rt.store(), cross_msg, fee, rt.curr_epoch())
                 } else {
                     if cross_msg.msg.value > TokenAmount::zero() {
                         do_burn = true;
                     }
-                    st.commit_bottomup_msg(rt.store(), cross_msg, rt.curr_epoch())
+                    st.commit_bottomup_msg(rt.store(), cross_msg, fee, rt.curr_epoch())
                 };
 
                 r.map_err(|e| {
@@ -905,7 +914,7 @@ impl Actor {
             }
             IPCMsgType::TopDown => {
                 st.applied_topdown_nonce += 1;
-                st.commit_topdown_msg(rt.store(), &mut cross_msg)
+                st.commit_topdown_msg(rt.store(), &mut cross_msg, fee, rt.curr_epoch())
                     .map_err(|e| {
                         e.downcast_default(
                             ExitCode::USR_ILLEGAL_STATE,
