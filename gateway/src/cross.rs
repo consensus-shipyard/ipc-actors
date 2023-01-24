@@ -3,7 +3,6 @@ use anyhow::anyhow;
 use fil_actors_runtime::runtime::Runtime;
 use fil_actors_runtime::ActorError;
 use fil_actors_runtime::BURNT_FUNDS_ACTOR_ADDR;
-use fil_actors_runtime::REWARD_ACTOR_ADDR;
 use fvm_ipld_blockstore::Blockstore;
 use fvm_ipld_blockstore::MemoryBlockstore;
 use fvm_ipld_encoding::Cbor;
@@ -115,29 +114,6 @@ impl StorableMsg {
         })
     }
 
-    pub fn new_reward_msg(
-        curr_sub: &SubnetID,
-        value: TokenAmount,
-        nonce: u64,
-    ) -> anyhow::Result<Self> {
-        let to = IPCAddress::new(
-            &match curr_sub.parent() {
-                Some(s) => s,
-                None => return Err(anyhow!("error getting parent for subnet addr")),
-            },
-            &curr_sub.subnet_actor(),
-        )?;
-        let from = IPCAddress::new(curr_sub, &REWARD_ACTOR_ADDR)?;
-        Ok(Self {
-            from,
-            to,
-            method: METHOD_SEND,
-            params: RawBytes::default(),
-            value,
-            nonce,
-        })
-    }
-
     pub fn ipc_type(&self) -> anyhow::Result<IPCMsgType> {
         let sto = self.to.subnet()?;
         let sfrom = self.from.subnet()?;
@@ -186,12 +162,12 @@ impl CrossMsgs {
     }
 
     /// Appends a cross-message to cross-msgs
-    pub(crate) fn add_msg(&mut self, msg: &CrossMsg) -> anyhow::Result<bool> {
+    pub(crate) fn add_msg(&mut self, msg: &CrossMsg) -> bool {
         if !self.msgs.contains(msg) {
             self.msgs.push(msg.clone());
-            return Ok(true);
+            return true;
         }
-        Ok(false)
+        false
     }
 }
 

@@ -202,7 +202,7 @@ impl State {
             None => self.check_msg_registry.modify(store, |cross_reg| {
                 let mut msgmeta = CrossMsgMeta::default();
                 let mut crossmsgs = CrossMsgs::new();
-                let _ = crossmsgs.add_msg(cross_msg)?;
+                let _ = crossmsgs.add_msg(cross_msg);
                 let m_cid = put_msgmeta(cross_reg, crossmsgs)?;
                 msgmeta.msgs_cid = m_cid;
                 msgmeta.value += &cross_msg.msg.value + fee;
@@ -271,7 +271,7 @@ impl State {
                     CrossMsgs::new()
                 }
             };
-            let added = prev_crossmsgs.add_msg(cross_msg)?;
+            let added = prev_crossmsgs.add_msg(cross_msg);
             if !added {
                 return Ok(meta_cid.clone());
             }

@@ -10,8 +10,8 @@ use fvm_shared::error::ExitCode;
 use fvm_shared::METHOD_SEND;
 use ipc_gateway::Status::{Active, Inactive};
 use ipc_gateway::{
-    ext, get_topdown_msg, Checkpoint, CrossMsg, IPCAddress, State, StorableMsg,
-    CROSSMSG_AMT_BITWIDTH, CROSS_MSG_FEE, DEFAULT_CHECKPOINT_PERIOD, SUBNET_ACTOR_REWARD_METHOD,
+    ext, get_topdown_msg, Checkpoint, CrossMsg, IPCAddress, State, StorableMsg, CROSS_MSG_FEE,
+    DEFAULT_CHECKPOINT_PERIOD, SUBNET_ACTOR_REWARD_METHOD,
 };
 use ipc_sdk::subnet_id::SubnetID;
 use primitives::TCid;
