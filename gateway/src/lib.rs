@@ -1,5 +1,10 @@
 #![feature(let_chains)] // For some simpler syntax for if let Some conditions
 
+pub use self::checkpoint::{Checkpoint, CrossMsgMeta};
+pub use self::cross::{is_bottomup, CrossMsg, CrossMsgs, IPCMsgType, StorableMsg};
+pub use self::state::*;
+pub use self::subnet::*;
+pub use self::types::*;
 use fil_actors_runtime::runtime::{ActorCode, Runtime};
 use fil_actors_runtime::{
     actor_error, cbor, ActorDowncast, ActorError, BURNT_FUNDS_ACTOR_ADDR, CALLER_TYPES_SIGNABLE,
@@ -13,18 +18,12 @@ use fvm_shared::econ::TokenAmount;
 use fvm_shared::error::ExitCode;
 use fvm_shared::METHOD_SEND;
 use fvm_shared::{MethodNum, METHOD_CONSTRUCTOR};
+pub use ipc_sdk::address::IPCAddress;
+pub use ipc_sdk::subnet_id::SubnetID;
 use lazy_static::lazy_static;
 use num_derive::FromPrimitive;
 use num_traits::FromPrimitive;
-use std::collections::HashMap;
-
-pub use self::checkpoint::{Checkpoint, CrossMsgMeta};
-pub use self::cross::{is_bottomup, CrossMsg, CrossMsgs, IPCMsgType, StorableMsg};
-pub use self::state::*;
-pub use self::subnet::*;
-pub use self::types::*;
-pub use ipc_sdk::address::IPCAddress;
-pub use ipc_sdk::subnet_id::SubnetID;
+use primitives::TCid;
 
 #[cfg(feature = "fil-actor")]
 fil_actors_runtime::wasm_trampoline!(Actor);
@@ -40,11 +39,10 @@ mod types;
 
 // TODO: make this into constructor!
 lazy_static! {
-    pub static ref SCA_ACTOR_ADDR: Address = Address::new_id(100);
-    pub static ref MIN_CROSS_MSG_GAS: TokenAmount = TokenAmount::from_atto(1);
+    pub static ref CROSS_MSG_FEE: TokenAmount = TokenAmount::from_nano(100);
 }
 
-/// SCA actor methods available
+/// Gateway actor methods available
 #[derive(FromPrimitive)]
 #[repr(u64)]
 pub enum Method {
@@ -63,7 +61,7 @@ pub enum Method {
     WhitelistPropagator = 12,
 }
 
-/// Subnet Coordinator Actor
+/// Gateway Actor
 pub struct Actor;
 
 impl Actor {
@@ -296,8 +294,7 @@ impl Actor {
     }
 
     /// CommitChildCheck propagates the commitment of a checkpoint from a child subnet,
-    /// process the cross-messages directed to the subnet, and propagates the corresponding
-    /// once further.
+    /// process the cross-messages directed to the subnet.
     fn commit_child_check<BS, RT>(rt: &mut RT, params: Checkpoint) -> Result<(), ActorError>
     where
         BS: Blockstore,
@@ -307,21 +304,23 @@ impl Actor {
 
         let subnet_addr = rt.message().caller();
         let commit = params;
+        let subnet_actor = commit.source().subnet_actor();
 
         // check if the checkpoint belongs to the subnet
-        if subnet_addr != commit.source().subnet_actor() {
+        if subnet_addr != subnet_actor {
             return Err(actor_error!(
                 illegal_argument,
                 "source in checkpoint doesn't belong to subnet"
             ));
         }
 
-        let mut burn_value = TokenAmount::zero();
-        rt.transaction(|st: &mut State, rt| {
+        let fee = rt.transaction(|st: &mut State, rt| {
             let shid = SubnetID::new_from_parent(&st.network_name, subnet_addr);
             let sub = st.get_subnet(rt.store(), &shid).map_err(|e| {
                 e.downcast_default(ExitCode::USR_ILLEGAL_STATE, "failed to load subnet")
             })?;
+
+            let mut fee = TokenAmount::zero();
             match sub {
                 Some(mut sub) => {
                     // check if subnet active
@@ -360,25 +359,34 @@ impl Actor {
                         }
                     }
 
-                    // process and commit the checkpoint
-                    // apply check messages
-                    let ap_msgs: HashMap<SubnetID, Vec<&CrossMsgMeta>>;
-                    (burn_value, ap_msgs) = st
-                        .apply_check_msgs(rt.store(), &mut sub, &commit)
-                        .map_err(|e| {
-                            e.downcast_default(
-                                ExitCode::USR_ILLEGAL_STATE,
-                                "error applying check messages",
-                            )
-                        })?;
-                    // aggregate message metas in checkpoint
-                    st.agg_child_msgmeta(rt.store(), &mut ch, ap_msgs)
-                        .map_err(|e| {
-                            e.downcast_default(
-                                ExitCode::USR_ILLEGAL_STATE,
-                                "error aggregating child msgmeta",
-                            )
-                        })?;
+                    // commit cross-message in checkpoint to either execute them or
+                    // queue them for propagation if there are cross-msgs availble.
+                    match commit.cross_msgs() {
+                        Some(cross_msg) => {
+                            // if tcid not default it means cross-msgs are being propagated.
+                            if cross_msg.msgs_cid != TCid::default() {
+                                st.store_bottomup_msg(rt.store(), cross_msg).map_err(|e| {
+                                    e.downcast_default(
+                                        ExitCode::USR_ILLEGAL_STATE,
+                                        "error storing bottom_up messages from checkpoint",
+                                    )
+                                })?;
+                            }
+
+                            // release circulating supply
+                            sub.release_supply(&cross_msg.value).map_err(|e| {
+                                e.downcast_default(
+                                    ExitCode::USR_ILLEGAL_STATE,
+                                    "error releasing circulating supply",
+                                )
+                            })?;
+
+                            // distribute fee
+                            fee = cross_msg.fee.clone();
+                        }
+                        None => {}
+                    }
+
                     // append new checkpoint to the list of childs
                     ch.add_child_check(&commit).map_err(|e| {
                         e.downcast_default(
@@ -386,6 +394,7 @@ impl Actor {
                             "error adding child checkpoint",
                         )
                     })?;
+
                     // flush checkpoint
                     st.flush_checkpoint(rt.store(), &ch).map_err(|e| {
                         e.downcast_default(ExitCode::USR_ILLEGAL_STATE, "error flushing checkpoint")
@@ -407,17 +416,19 @@ impl Actor {
                 }
             }
 
-            Ok(())
+            Ok(fee)
         })?;
 
-        if burn_value > TokenAmount::zero() {
+        // distribute rewards
+        if !fee.is_zero() {
             rt.send(
-                *BURNT_FUNDS_ACTOR_ADDR,
-                METHOD_SEND,
+                subnet_actor,
+                SUBNET_ACTOR_REWARD_METHOD,
                 RawBytes::default(),
-                burn_value.clone(),
+                fee,
             )?;
         }
+
         Ok(())
     }
 
@@ -436,7 +447,7 @@ impl Actor {
         // funds can only be moved between subnets by signable addresses
         rt.validate_immediate_caller_type(CALLER_TYPES_SIGNABLE.iter())?;
 
-        let value = rt.message().value_received();
+        let mut value = rt.message().value_received();
         if value <= TokenAmount::zero() {
             return Err(actor_error!(
                 illegal_argument,
@@ -447,6 +458,8 @@ impl Actor {
         let sig_addr = resolve_secp_bls(rt, rt.message().caller())?;
 
         rt.transaction(|st: &mut State, rt| {
+            let fee = &CROSS_MSG_FEE;
+            st.collect_cross_fee(&mut value, &fee)?;
             // Create fund message
             let mut f_msg = CrossMsg {
                 msg: StorableMsg::new_fund_msg(&params, &sig_addr, value).map_err(|e| {
@@ -461,12 +474,13 @@ impl Actor {
             log::debug!("fund cross msg is: {:?}", f_msg);
 
             // Commit top-down message.
-            st.commit_topdown_msg(rt.store(), &mut f_msg).map_err(|e| {
-                e.downcast_default(
-                    ExitCode::USR_ILLEGAL_STATE,
-                    "error committing top-down message",
-                )
-            })?;
+            st.commit_topdown_msg(rt.store(), &mut f_msg, &fee, rt.curr_epoch())
+                .map_err(|e| {
+                    e.downcast_default(
+                        ExitCode::USR_ILLEGAL_STATE,
+                        "error committing top-down message",
+                    )
+                })?;
             Ok(())
         })?;
 
@@ -489,7 +503,7 @@ impl Actor {
         // FIXME: Only supporting cross-messages initiated by signable addresses for
         // now. Consider supporting also send-cross messages initiated by actors.
 
-        let value = rt.message().value_received();
+        let mut value = rt.message().value_received();
         if value <= TokenAmount::zero() {
             return Err(actor_error!(
                 illegal_argument,
@@ -499,29 +513,30 @@ impl Actor {
 
         let sig_addr = resolve_secp_bls(rt, rt.message().caller())?;
 
-        // burn funds that are being released
-        rt.send(
-            *BURNT_FUNDS_ACTOR_ADDR,
-            METHOD_SEND,
-            RawBytes::default(),
-            value.clone(),
-        )?;
-
         rt.transaction(|st: &mut State, rt| {
+            let fee = &CROSS_MSG_FEE;
+            // collect fees
+            st.collect_cross_fee(&mut value, &fee)?;
+
             // Create release message
             let r_msg = CrossMsg {
-                msg: StorableMsg::new_release_msg(&st.network_name, &sig_addr, value, st.nonce)
-                    .map_err(|e| {
-                        e.downcast_default(
-                            ExitCode::USR_ILLEGAL_STATE,
-                            "error creating release cross-message",
-                        )
-                    })?,
+                msg: StorableMsg::new_release_msg(
+                    &st.network_name,
+                    &sig_addr,
+                    value.clone(),
+                    st.nonce,
+                )
+                .map_err(|e| {
+                    e.downcast_default(
+                        ExitCode::USR_ILLEGAL_STATE,
+                        "error creating release cross-message",
+                    )
+                })?,
                 wrapped: false,
             };
 
             // Commit bottom-up message.
-            st.commit_bottomup_msg(rt.store(), &r_msg, rt.curr_epoch())
+            st.commit_bottomup_msg(rt.store(), &r_msg, &fee, rt.curr_epoch())
                 .map_err(|e| {
                     e.downcast_default(
                         ExitCode::USR_ILLEGAL_STATE,
@@ -530,6 +545,14 @@ impl Actor {
                 })?;
             Ok(())
         })?;
+
+        // burn funds that are send as bottom-up
+        rt.send(
+            *BURNT_FUNDS_ACTOR_ADDR,
+            METHOD_SEND,
+            RawBytes::default(),
+            value,
+        )?;
 
         Ok(())
     }
@@ -598,7 +621,19 @@ impl Actor {
                 }
             };
 
-            tp = Some(st.send_cross(rt.store(), &mut cross_msg, rt.curr_epoch()).map_err(|e| {
+            // check that the right funds were sent in message
+            if rt.message().value_received() != msg.value {
+                return Err(actor_error!(
+                    illegal_argument,
+                    "the funds in cross-msg params are not equal to the ones sent in the message"
+                ));
+            }
+
+            // collect cross-fee
+            let fee = &CROSS_MSG_FEE;
+            st.collect_cross_fee(&mut msg.value, &fee)?;
+
+            tp = Some(st.send_cross(rt.store(), &mut cross_msg, &fee, rt.curr_epoch()).map_err(|e| {
                 e.downcast_default(ExitCode::USR_ILLEGAL_STATE, "error committing cross message")
             })?);
 
@@ -677,26 +712,31 @@ impl Actor {
                 }
             }
             Ok(IPCMsgType::TopDown) => {
-                // Mint funds for SCA so it can direct them accordingly as part of the message.
+                // Mint funds for the gateway, as any topdown message
+                // including tokens traversing the subnet will provide
+                // the gateway with additional balance (circ_supply).
                 let params = ext::reward::FundingParams {
-                    addr: *SCA_ACTOR_ADDR,
+                    // curr gateway address
+                    addr: rt.message().receiver(),
                     value: cross_msg.msg.value.clone(),
                 };
-                rt.send(
-                    *REWARD_ACTOR_ADDR,
-                    ext::reward::EXTERNAL_FUNDING_METHOD,
-                    RawBytes::serialize(params)?,
-                    TokenAmount::zero(),
-                )?;
-
-                if st.applied_topdown_nonce != cross_msg.msg.nonce {
-                    return Err(actor_error!(
-                        illegal_state,
-                        "the top-down message being applied doesn't hold the subsequent nonce"
-                    ));
+                if cross_msg.msg.value > TokenAmount::zero() {
+                    rt.send(
+                        *REWARD_ACTOR_ADDR,
+                        ext::reward::EXTERNAL_FUNDING_METHOD,
+                        RawBytes::serialize(params)?,
+                        TokenAmount::zero(),
+                    )?;
                 }
 
                 if sto == st.network_name {
+                    if st.applied_topdown_nonce != cross_msg.msg.nonce {
+                        return Err(actor_error!(
+                            illegal_state,
+                            "the top-down message being applied doesn't hold the subsequent nonce"
+                        ));
+                    }
+
                     rt.transaction(|st: &mut State, _| {
                         st.applied_topdown_nonce += 1;
                         Ok(())
@@ -795,8 +835,10 @@ impl Actor {
 
         let PropagateParams { postbox_cid } = params;
         let owner = rt.message().caller();
+        let mut value = rt.message().value_received();
+        let mut do_burn = false;
 
-        rt.transaction(|st: &mut State, rt| {
+        let cross_msg = rt.transaction(|st: &mut State, rt| {
             let postbox_item = st.load_from_postbox(rt.store(), postbox_cid).map_err(|e| {
                 log::error!("encountered error loading from postbox: {:?}", e);
                 actor_error!(unhandled_message, "cannot load from postbox")
@@ -806,30 +848,50 @@ impl Actor {
                 return Err(actor_error!(illegal_state, "owner not match"));
             }
 
-            if rt.message().value_received() < *MIN_CROSS_MSG_GAS {
-                return Err(actor_error!(illegal_state, "not enough gas"));
-            }
+            // collect cross-fee
+            let fee = &CROSS_MSG_FEE;
+            st.collect_cross_fee(&mut value, &fee)?;
 
-            let PostBoxItem { cross_msg, .. } = postbox_item;
-            Self::commit_cross_message(rt, st, cross_msg)?;
-            st.remove_from_postbox(rt.store(), postbox_cid)
+            let PostBoxItem { mut cross_msg, .. } = postbox_item;
+            do_burn = Self::commit_cross_message(rt, st, &mut cross_msg, &fee)?;
+            st.remove_from_postbox(rt.store(), postbox_cid)?;
+            Ok(cross_msg)
         })?;
+
+        // if bottom_up message being committed.
+        if do_burn {
+            rt.send(
+                *BURNT_FUNDS_ACTOR_ADDR,
+                METHOD_SEND,
+                RawBytes::default(),
+                cross_msg.msg.value.clone(),
+            )?;
+        }
+
+        // send the remainder of the fee to the owner
+        if value > TokenAmount::zero() {
+            rt.send(owner, METHOD_SEND, RawBytes::default(), value.clone())?;
+        }
 
         Ok(RawBytes::default())
     }
 
-    /// Commit the cross message to storage.
+    /// Commit the cross message to storage. It outputs a flag signaling
+    /// if the committed messages was bottom-up and some funds need to be
+    /// burnt.
     ///
     /// NOTE: This function should always be called inside an `rt.transaction`
     fn commit_cross_message<BS, RT>(
         rt: &mut RT,
         st: &mut State,
-        mut cross_msg: CrossMsg,
-    ) -> Result<(), ActorError>
+        mut cross_msg: &mut CrossMsg,
+        fee: &TokenAmount,
+    ) -> Result<bool, ActorError>
     where
         BS: Blockstore,
         RT: Runtime<BS>,
     {
+        let mut do_burn = false;
         let sto = cross_msg
             .msg
             .to
@@ -861,9 +923,12 @@ impl Actor {
                 // if the message is a bottom-up message and it reached the common-parent
                 // then we need to start propagating it down to the destination.
                 let r = if nearest_common_parent == st.network_name {
-                    st.commit_topdown_msg(rt.store(), &mut cross_msg)
+                    st.commit_topdown_msg(rt.store(), cross_msg, fee, rt.curr_epoch())
                 } else {
-                    st.commit_bottomup_msg(rt.store(), &cross_msg, rt.curr_epoch())
+                    if cross_msg.msg.value > TokenAmount::zero() {
+                        do_burn = true;
+                    }
+                    st.commit_bottomup_msg(rt.store(), cross_msg, fee, rt.curr_epoch())
                 };
 
                 r.map_err(|e| {
@@ -873,18 +938,18 @@ impl Actor {
                     )
                 })?;
 
-                Ok(())
+                Ok(do_burn)
             }
             IPCMsgType::TopDown => {
                 st.applied_topdown_nonce += 1;
-                st.commit_topdown_msg(rt.store(), &mut cross_msg)
+                st.commit_topdown_msg(rt.store(), &mut cross_msg, fee, rt.curr_epoch())
                     .map_err(|e| {
                         e.downcast_default(
                             ExitCode::USR_ILLEGAL_STATE,
                             "error committing top-down message while applying it",
                         )
                     })?;
-                Ok(())
+                Ok(do_burn)
             }
         }
     }

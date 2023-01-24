@@ -10,8 +10,8 @@ use fvm_shared::error::ExitCode;
 use fvm_shared::METHOD_SEND;
 use ipc_gateway::Status::{Active, Inactive};
 use ipc_gateway::{
-    ext, get_bottomup_msg, get_topdown_msg, Checkpoint, CrossMsg, IPCAddress, State, StorableMsg,
-    DEFAULT_CHECKPOINT_PERIOD, SCA_ACTOR_ADDR,
+    ext, get_topdown_msg, Checkpoint, CrossMsg, IPCAddress, State, StorableMsg, CROSS_MSG_FEE,
+    DEFAULT_CHECKPOINT_PERIOD, SUBNET_ACTOR_REWARD_METHOD,
 };
 use ipc_sdk::subnet_id::SubnetID;
 use primitives::TCid;
@@ -255,7 +255,7 @@ fn checkpoint_commit() {
     rt.set_epoch(epoch);
     let ch = Checkpoint::new(shid.clone(), epoch + 9);
 
-    h.commit_child_check(&mut rt, &shid, &ch, ExitCode::OK, TokenAmount::zero())
+    h.commit_child_check(&mut rt, &shid, &ch, ExitCode::OK)
         .unwrap();
     let st: State = rt.get_state();
     let commit = st.get_window_checkpoint(rt.store(), epoch).unwrap();
@@ -265,20 +265,14 @@ fn checkpoint_commit() {
     assert_eq!(has_cid(&child_check.checks, &ch.cid()), true);
 
     // Commit a checkpoint for subnet twice
-    h.commit_child_check(
-        &mut rt,
-        &shid,
-        &ch,
-        ExitCode::USR_ILLEGAL_ARGUMENT,
-        TokenAmount::zero(),
-    )
-    .unwrap();
+    h.commit_child_check(&mut rt, &shid, &ch, ExitCode::USR_ILLEGAL_ARGUMENT)
+        .unwrap();
     let prev_cid = ch.cid();
 
     // Append a new checkpoint for the same subnet
     let mut ch = Checkpoint::new(shid.clone(), epoch + 11);
     ch.data.prev_check = TCid::from(prev_cid);
-    h.commit_child_check(&mut rt, &shid, &ch, ExitCode::OK, TokenAmount::zero())
+    h.commit_child_check(&mut rt, &shid, &ch, ExitCode::OK)
         .unwrap();
     let st: State = rt.get_state();
     let commit = st.get_window_checkpoint(rt.store(), epoch).unwrap();
@@ -300,21 +294,15 @@ fn checkpoint_commit() {
 
     // Trying to commit from the wrong subnet
     let ch = Checkpoint::new(shid.clone(), epoch + 9);
-    h.commit_child_check(
-        &mut rt,
-        &shid_two,
-        &ch,
-        ExitCode::USR_ILLEGAL_ARGUMENT,
-        TokenAmount::zero(),
-    )
-    .unwrap();
+    h.commit_child_check(&mut rt, &shid_two, &ch, ExitCode::USR_ILLEGAL_ARGUMENT)
+        .unwrap();
 
     // Commit first checkpoint for first window in second subnet
     let epoch: ChainEpoch = 10;
     rt.set_epoch(epoch);
     let ch = Checkpoint::new(shid_two.clone(), epoch + 9);
 
-    h.commit_child_check(&mut rt, &shid_two, &ch, ExitCode::OK, TokenAmount::zero())
+    h.commit_child_check(&mut rt, &shid_two, &ch, ExitCode::OK)
         .unwrap();
     let st: State = rt.get_state();
     let commit = st.get_window_checkpoint(rt.store(), epoch).unwrap();
@@ -347,53 +335,24 @@ fn checkpoint_crossmsgs() {
     let epoch: ChainEpoch = 10;
     rt.set_epoch(epoch);
     let mut ch = Checkpoint::new(shid.clone(), epoch + 9);
-    // Directed to other subnets
-    add_msg_meta(
+    // and include some fees in msgmeta.
+    let fee = TokenAmount::from_atto(5);
+    set_msg_meta(
         &mut ch,
-        &shid,
-        &SubnetID::from_str("/root/f0102/f0101").unwrap(),
         "rand1".as_bytes().to_vec(),
         TokenAmount::zero(),
-    );
-    add_msg_meta(
-        &mut ch,
-        &shid,
-        &SubnetID::from_str("/root/f0102/f0102").unwrap(),
-        "rand2".as_bytes().to_vec(),
-        TokenAmount::zero(),
-    );
-    // And to this subnet
-    add_msg_meta(
-        &mut ch,
-        &shid,
-        &h.net_name,
-        "rand1".as_bytes().to_vec(),
-        TokenAmount::zero(),
-    );
-    add_msg_meta(
-        &mut ch,
-        &shid,
-        &h.net_name,
-        "rand2".as_bytes().to_vec(),
-        TokenAmount::zero(),
-    );
-    add_msg_meta(
-        &mut ch,
-        &shid,
-        &h.net_name,
-        "rand3".as_bytes().to_vec(),
-        TokenAmount::zero(),
-    );
-    // And to other child from the subnet
-    add_msg_meta(
-        &mut ch,
-        &shid,
-        &SubnetID::new_from_parent(&h.net_name, Address::new_id(100)),
-        "rand1".as_bytes().to_vec(),
-        TokenAmount::zero(),
+        fee.clone(),
     );
 
-    h.commit_child_check(&mut rt, &shid, &ch, ExitCode::OK, TokenAmount::zero())
+    rt.expect_send(
+        shid.subnet_actor(),
+        SUBNET_ACTOR_REWARD_METHOD,
+        RawBytes::default(),
+        fee,
+        RawBytes::default(),
+        ExitCode::OK,
+    );
+    h.commit_child_check(&mut rt, &shid, &ch, ExitCode::OK)
         .unwrap();
     let st: State = rt.get_state();
     let commit = st.get_window_checkpoint(rt.store(), epoch).unwrap();
@@ -402,76 +361,6 @@ fn checkpoint_crossmsgs() {
     assert_eq!(&child_check.checks.len(), &1);
     let prev_cid = ch.cid();
     assert_eq!(has_cid(&child_check.checks, &prev_cid), true);
-
-    let crossmsgs = st.bottomup_msg_meta.load(rt.store()).unwrap();
-    for item in 0..=2 {
-        get_bottomup_msg(&crossmsgs, item).unwrap().unwrap();
-    }
-    // Check that the ones directed to other subnets are aggregated in message-meta
-    for to in vec![
-        SubnetID::from_str("/root/f0102/f0101").unwrap(),
-        SubnetID::from_str("/root/f0102/f0102").unwrap(),
-    ] {
-        commit.crossmsg_meta(&h.net_name, &to).unwrap();
-    }
-
-    // funding subnet so it has some funds
-    let funder = Address::new_id(1001);
-    let amount = TokenAmount::from_atto(10_u64.pow(18));
-    h.fund(
-        &mut rt,
-        &funder,
-        &shid,
-        ExitCode::OK,
-        amount.clone(),
-        1,
-        &amount,
-    )
-    .unwrap();
-
-    let mut ch = Checkpoint::new(shid.clone(), epoch + 9);
-    ch.data.prev_check = TCid::from(prev_cid);
-    add_msg_meta(
-        &mut ch,
-        &shid,
-        &SubnetID::from_str("/root/f0102/f0101").unwrap(),
-        "rand1".as_bytes().to_vec(),
-        TokenAmount::from_atto(5_u64.pow(18)),
-    );
-    add_msg_meta(
-        &mut ch,
-        &shid,
-        &SubnetID::from_str("/root/f0102/f0102").unwrap(),
-        "rand2".as_bytes().to_vec(),
-        TokenAmount::from_atto(5_u64.pow(18)),
-    );
-    h.commit_child_check(
-        &mut rt,
-        &shid,
-        &ch,
-        ExitCode::OK,
-        2 * TokenAmount::from_atto(5_u64.pow(18)),
-    )
-    .unwrap();
-    let st: State = rt.get_state();
-    let commit = st.get_window_checkpoint(rt.store(), epoch).unwrap();
-    assert_eq!(commit.epoch(), DEFAULT_CHECKPOINT_PERIOD);
-    let child_check = has_childcheck_source(&commit.data.children, &shid).unwrap();
-    assert_eq!(&child_check.checks.len(), &2);
-    assert_eq!(has_cid(&child_check.checks, &ch.cid()), true);
-
-    let crossmsgs = &st.bottomup_msg_meta.load(rt.store()).unwrap();
-    for item in 0..=2 {
-        get_bottomup_msg(&crossmsgs, item).unwrap().unwrap();
-    }
-    for to in vec![
-        SubnetID::from_str("/root/f0102/f0101").unwrap(),
-        SubnetID::from_str("/root/f0102/f0102").unwrap(),
-    ] {
-        // verify that some value has been included in metas.
-        let meta = commit.crossmsg_meta(&h.net_name, &to).unwrap();
-        assert_eq!(true, meta.value > TokenAmount::zero());
-    }
 
     // TODO: More extensive tests?
 }
@@ -572,10 +461,19 @@ fn test_release() {
             r_amount.clone(),
             0,
             &Cid::default(),
+            CROSS_MSG_FEE.clone(),
         )
         .unwrap();
-    h.release(&mut rt, &releaser, ExitCode::OK, r_amount, 1, &prev_cid)
-        .unwrap();
+    h.release(
+        &mut rt,
+        &releaser,
+        ExitCode::OK,
+        r_amount,
+        1,
+        &prev_cid,
+        2 * CROSS_MSG_FEE.clone(),
+    )
+    .unwrap();
 }
 
 #[test]
@@ -674,7 +572,7 @@ fn test_send_cross() {
         sub,
         ExitCode::OK,
         value.clone(),
-        0,
+        2,
         &zero,
     )
     .unwrap();
@@ -763,7 +661,7 @@ fn test_apply_msg_bu_not_target_subnet() {
         nonce: msg_nonce,
     };
     let cid = h
-        .apply_cross_execute_only(&mut rt, value.clone(), params, None)
+        .apply_cross_execute_only(&mut rt, value.clone(), params.clone(), None)
         .unwrap()
         .unwrap();
 
@@ -784,7 +682,103 @@ fn test_apply_msg_bu_not_target_subnet() {
     // get the original subnet nonce first
     let caller = ff.clone().raw_addr().unwrap();
     let old_state: State = rt.get_state();
-    h.propagate(&mut rt, caller, cid.clone()).unwrap();
+    // propagating a bottom-up message triggers the
+    // funds included in the message to be burnt.
+    rt.expect_send(
+        *BURNT_FUNDS_ACTOR_ADDR,
+        METHOD_SEND,
+        RawBytes::default(),
+        params.clone().value,
+        RawBytes::default(),
+        ExitCode::OK,
+    );
+    h.propagate(
+        &mut rt,
+        caller,
+        cid.clone(),
+        &params.value,
+        TokenAmount::zero(),
+    )
+    .unwrap();
+
+    // state should be updated, load again
+    let new_state: State = rt.get_state();
+
+    // cid should be removed from postbox
+    let r = new_state.load_from_postbox(rt.store(), cid.clone());
+    assert_eq!(r.is_err(), true);
+    let err = r.unwrap_err();
+    assert_eq!(err.to_string(), "cid not found in postbox");
+    assert_eq!(new_state.nonce, old_state.nonce + 1);
+}
+
+/// This test covers the case where the amount send in the propagate
+/// message exceeds the required fee and the remainder is returned
+/// to the caller.
+#[test]
+fn test_propagate_with_remainder() {
+    // ============== Register subnet ==============
+    let shid = SubnetID::new_from_parent(&ROOTNET_ID, *SUBNET_ONE);
+    let (h, mut rt) = setup(shid.clone());
+
+    let from = Address::new_bls(&[3; fvm_shared::address::BLS_PUB_LEN]).unwrap();
+    let to = Address::new_bls(&[4; fvm_shared::address::BLS_PUB_LEN]).unwrap();
+
+    let sub = shid.clone();
+
+    // ================ Setup ===============
+    let value = TokenAmount::from_atto(10_u64.pow(17));
+
+    // ================= Bottom-Up ===============
+    let ff = IPCAddress::new(&sub, &to).unwrap();
+    let tt = IPCAddress::new(&ROOTNET_ID, &from).unwrap();
+    let msg_nonce = 0;
+
+    // Only system code is allowed to this method
+    let params = StorableMsg {
+        to: tt.clone(),
+        from: ff.clone(),
+        method: METHOD_SEND,
+        value: value.clone(),
+        params: RawBytes::default(),
+        nonce: msg_nonce,
+    };
+    let cid = h
+        .apply_cross_execute_only(&mut rt, value.clone(), params.clone(), None)
+        .unwrap()
+        .unwrap();
+
+    // Part 1: test the message is stored in postbox
+    let st: State = rt.get_state();
+    assert_ne!(tt.subnet().unwrap(), st.network_name);
+
+    // Check 1: `tt` is in `sub1`, which is not in that of `runtime` of gateway, will store in postbox
+    let item = st.load_from_postbox(rt.store(), cid.clone()).unwrap();
+    assert_eq!(item.owners, Some(vec![ff.clone().raw_addr().unwrap()]));
+    let msg = item.cross_msg.msg;
+    assert_eq!(msg.to, tt);
+    // the nonce should not have changed at all
+    assert_eq!(msg.nonce, msg_nonce);
+    assert_eq!(msg.value, value);
+
+    // Part 2: Now we propagate from postbox
+    // get the original subnet nonce first with an
+    // excess to check that there is a remainder
+    // to be returned
+    let caller = ff.clone().raw_addr().unwrap();
+    let old_state: State = rt.get_state();
+    // propagating a bottom-up message triggers the
+    // funds included in the message to be burnt.
+    rt.expect_send(
+        *BURNT_FUNDS_ACTOR_ADDR,
+        METHOD_SEND,
+        RawBytes::default(),
+        params.clone().value,
+        RawBytes::default(),
+        ExitCode::OK,
+    );
+    h.propagate(&mut rt, caller, cid.clone(), &params.value, value.clone())
+        .unwrap();
 
     // state should be updated, load again
     let new_state: State = rt.get_state();
@@ -849,7 +843,7 @@ fn test_apply_msg_bu_switch_td() {
                     Some(vec![caller.clone()]),
                     CrossMsg {
                         wrapped: false,
-                        msg: params,
+                        msg: params.clone(),
                     },
                 )
                 .unwrap())
@@ -861,7 +855,14 @@ fn test_apply_msg_bu_switch_td() {
         .nonce;
 
     // now we propagate
-    h.propagate(&mut rt, caller, cid.clone()).unwrap();
+    h.propagate(
+        &mut rt,
+        caller,
+        cid.clone(),
+        &params.value,
+        TokenAmount::zero(),
+    )
+    .unwrap();
 
     // state should be updated, load again to perform the checks!
     let st: State = rt.get_state();
@@ -928,7 +929,7 @@ fn test_apply_msg_tp_target_subnet() {
                     *REWARD_ACTOR_ADDR,
                     ext::reward::EXTERNAL_FUNDING_METHOD,
                     RawBytes::serialize(ext::reward::FundingParams {
-                        addr: *SCA_ACTOR_ADDR,
+                        addr: *ACTOR,
                         value: v.clone(),
                     })
                     .unwrap(),
@@ -1004,14 +1005,14 @@ fn test_apply_msg_tp_not_target_subnet() {
         .apply_cross_execute_only(
             &mut rt,
             value.clone(),
-            params,
+            params.clone(),
             Some(Box::new(move |rt| {
                 // expect to send reward message
                 rt.expect_send(
                     *REWARD_ACTOR_ADDR,
                     ext::reward::EXTERNAL_FUNDING_METHOD,
                     RawBytes::serialize(ext::reward::FundingParams {
-                        addr: *SCA_ACTOR_ADDR,
+                        addr: *ACTOR,
                         value: v.clone(),
                     })
                     .unwrap(),
@@ -1043,7 +1044,14 @@ fn test_apply_msg_tp_not_target_subnet() {
         .unwrap()
         .nonce;
     let caller = ff.clone().raw_addr().unwrap();
-    h.propagate(&mut rt, caller, cid.clone()).unwrap();
+    h.propagate(
+        &mut rt,
+        caller,
+        cid.clone(),
+        &params.value,
+        TokenAmount::zero(),
+    )
+    .unwrap();
 
     // state should be updated, load again
     let st: State = rt.get_state();
@@ -1098,47 +1106,20 @@ fn test_apply_msg_match_target_subnet() {
 
     // Apply fund messages
     for i in 0..5 {
-        h.apply_cross_msg(
-            &mut rt,
-            &funder,
-            &funder,
-            value.clone(),
-            i,
-            i,
-            ExitCode::OK,
-            false,
-        )
-        .unwrap();
+        h.apply_cross_msg(&mut rt, &funder, &funder, value.clone(), i, i, ExitCode::OK)
+            .unwrap();
     }
     // Apply release messages
     let from = IPCAddress::new(&shid, &BURNT_FUNDS_ACTOR_ADDR).unwrap();
     // with the same nonce
     for _ in 0..5 {
-        h.apply_cross_msg(
-            &mut rt,
-            &from,
-            &funder,
-            value.clone(),
-            0,
-            0,
-            ExitCode::OK,
-            false,
-        )
-        .unwrap();
+        h.apply_cross_msg(&mut rt, &from, &funder, value.clone(), 0, 0, ExitCode::OK)
+            .unwrap();
     }
     // with increasing nonce
     for i in 0..5 {
-        h.apply_cross_msg(
-            &mut rt,
-            &from,
-            &funder,
-            value.clone(),
-            i,
-            i,
-            ExitCode::OK,
-            false,
-        )
-        .unwrap();
+        h.apply_cross_msg(&mut rt, &from, &funder, value.clone(), i, i, ExitCode::OK)
+            .unwrap();
     }
 
     // trying to apply non-subsequent nonce.
@@ -1150,7 +1131,6 @@ fn test_apply_msg_match_target_subnet() {
         10,
         0,
         ExitCode::USR_ILLEGAL_STATE,
-        false,
     )
     .unwrap();
     // trying already applied nonce
@@ -1162,14 +1142,8 @@ fn test_apply_msg_match_target_subnet() {
         0,
         0,
         ExitCode::USR_ILLEGAL_STATE,
-        false,
     )
     .unwrap();
 
     // TODO: Trying to release over circulating supply
-}
-
-#[test]
-fn test_noop() {
-    // TODO: Implement tests of what happens if the application
 }
