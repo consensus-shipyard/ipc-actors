@@ -1,6 +1,6 @@
 [package]
 name = "ipc-gateway"
-description = "Subnet Coordinator Actor (SCA) for IPC"
+description = "IPC Gateway Actor"
 version = "0.0.1"
 license = "MIT OR Apache-2.0"
 authors = ["ConsensusLab", "Protocol Labs", "Filecoin Core Devs"]
