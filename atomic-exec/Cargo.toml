@@ -3,7 +3,7 @@ name = "ipc_atomic_execution"
 version = "0.0.1"
 license = "MIT OR Apache-2.0"
 authors = ["ConsensusLab", "Protocol Labs", "Filecoin Core Devs"]
-edition = "2018"
+edition = "2021"
 repository = "https://github.com/consensus-shipyard/ipc-atomic-execution"
 keywords = ["filecoin", "web3", "wasm"]
 
@@ -17,10 +17,10 @@ ipc_gateway = { path = "../gateway", package = "ipc-gateway" }
 
 fil_actors_runtime = { git = "https://github.com/consensus-shipyard/fvm-utils", features = ["fil-actor"] }
 primitives = { git = "https://github.com/consensus-shipyard/fvm-utils" }
-fvm_shared = { version = "3.0.0-alpha.5", default-features = false }
+fvm_shared = { version = "3.0.0-alpha.17", default-features = false }
 fvm_ipld_hamt = "0.5.1"
 fvm_ipld_blockstore = "0.1.1"
-fvm_ipld_encoding = "0.3.0"
+fvm_ipld_encoding = "0.3.3"
 
 num-traits = "0.2.14"
 num-derive = "0.3.3"

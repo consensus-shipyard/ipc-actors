@@ -4,7 +4,7 @@
 //!
 //! [frc-46]: https://github.com/filecoin-project/FIPs/blob/master/FRCs/frc-0046.md
 
-use frc42_macros::method_hash;
+use frc42_dispatch::method_hash;
 use fvm_actors_runtime::runtime::{ActorCode, Runtime};
 use fvm_actors_runtime::{actor_error, cbor, ActorDowncast, ActorError, INIT_ACTOR_ADDR};
 use fvm_ipld_blockstore::Blockstore;

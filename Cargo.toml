@@ -17,3 +17,15 @@ members = [
     "atomic-exec/primitives",
     "atomic-exec/examples/fungible-token",
 ]
+
+# [patch.crates-io]
+# primitives = { path = "../fvm-utils/primitives" }
+# fil_actors_runtime = { path = "../fvm-utils/runtime" }
+
+# [patch.crates-io]
+# primitives = { git = "https://github.com/consensus-shipyard/fvm-utils", rev = "eff7df493789dec885578dc765a9fa1d7d012ec8" }
+# fil_actors_runtime = { git = "https://github.com/consensus-shipyard/fvm-utils", rev = "eff7df493789dec885578dc765a9fa1d7d012ec8" }
+
+[patch."https://github.com/consensus-shipyard/fvm-utils"]
+primitives = { path = "../fvm-utils/primitives" }
+fil_actors_runtime = { path = "../fvm-utils/runtime" }

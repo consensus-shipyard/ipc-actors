@@ -4,7 +4,7 @@ use fil_actors_runtime::runtime::fvm::resolve_secp_bls;
 use fil_actors_runtime::runtime::Runtime;
 use fil_actors_runtime::{actor_error, ActorError};
 use fvm_ipld_blockstore::Blockstore;
-use fvm_ipld_encoding::{Cbor, RawBytes};
+use fvm_ipld_encoding::RawBytes;
 use fvm_ipld_hamt::BytesKey;
 use fvm_shared::address::Address;
 use fvm_shared::bigint::Zero;
@@ -47,8 +47,6 @@ pub struct State {
     pub validator_set: Vec<Validator>,
     pub min_validators: u64,
 }
-
-impl Cbor for State {}
 
 /// We should probably have a derive macro to mark an object as a state object,
 /// and have load and save methods automatically generated for them as part of a

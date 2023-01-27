@@ -1,6 +1,6 @@
 use fvm_ipld_encoding::repr::*;
 use fvm_ipld_encoding::tuple::{Deserialize_tuple, Serialize_tuple};
-use fvm_ipld_encoding::{Cbor, RawBytes};
+use fvm_ipld_encoding::RawBytes;
 use fvm_shared::address::Address;
 use fvm_shared::clock::ChainEpoch;
 use fvm_shared::econ::TokenAmount;
@@ -25,8 +25,6 @@ pub struct Validator {
 pub struct Votes {
     pub validators: Vec<Address>,
 }
-
-impl Cbor for Votes {}
 
 /// Consensus types supported by hierarchical consensus
 #[derive(PartialEq, Eq, Clone, Copy, Debug, Deserialize_repr, Serialize_repr)]
@@ -65,13 +63,11 @@ pub struct ConstructParams {
     // param
     pub genesis: Vec<u8>,
 }
-impl Cbor for ConstructParams {}
 
 #[derive(Clone, Debug, Serialize_tuple, Deserialize_tuple, PartialEq, Eq)]
 pub struct JoinParams {
     pub validator_net_addr: String,
 }
-impl Cbor for JoinParams {}
 
 pub(crate) struct CrossActorPayload {
     pub to: Address,
