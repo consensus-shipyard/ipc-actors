@@ -1,7 +1,6 @@
 use anyhow::anyhow;
 use fil_actors_runtime::runtime::Runtime;
 use fvm_ipld_blockstore::Blockstore;
-use fvm_ipld_encoding::Cbor;
 use fvm_shared::econ::TokenAmount;
 use primitives::{TAmt, TCid};
 use serde::{Deserialize, Serialize};
@@ -32,19 +31,13 @@ pub struct Subnet {
     pub prev_checkpoint: Option<Checkpoint>,
 }
 
-impl Cbor for Subnet {}
-
 impl Subnet {
-    pub(crate) fn add_stake<BS, RT>(
+    pub(crate) fn add_stake(
         &mut self,
-        rt: &RT,
+        rt: &impl Runtime,
         st: &mut State,
         value: &TokenAmount,
-    ) -> anyhow::Result<()>
-    where
-        BS: Blockstore,
-        RT: Runtime<BS>,
-    {
+    ) -> anyhow::Result<()> {
         self.stake += value;
         if self.stake < st.min_stake {
             self.status = Status::Inactive;

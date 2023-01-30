@@ -3,11 +3,12 @@ use cid::multihash::Code;
 use cid::multihash::MultihashDigest;
 use cid::Cid;
 use fil_actors_runtime::builtin::HAMT_BIT_WIDTH;
+use fil_actors_runtime::deserialize_block;
 use fil_actors_runtime::runtime::Runtime;
 use fil_actors_runtime::test_utils::expect_abort;
 use fil_actors_runtime::test_utils::{
-    MockRuntime, ACCOUNT_ACTOR_CODE_ID, MULTISIG_ACTOR_CODE_ID, SUBNET_ACTOR_CODE_ID,
-    SYSTEM_ACTOR_CODE_ID,
+    MockRuntime, ACCOUNT_ACTOR_CODE_ID, INIT_ACTOR_CODE_ID, MULTISIG_ACTOR_CODE_ID,
+    SUBNET_ACTOR_CODE_ID, SYSTEM_ACTOR_CODE_ID,
 };
 use fil_actors_runtime::{
     make_map_with_root_and_bitwidth, ActorError, Map, BURNT_FUNDS_ACTOR_ADDR, REWARD_ACTOR_ADDR,
@@ -15,6 +16,7 @@ use fil_actors_runtime::{
 };
 use fil_actors_runtime::{Array, INIT_ACTOR_ADDR};
 use fvm_ipld_blockstore::Blockstore;
+use fvm_ipld_encoding::ipld_block::IpldBlock;
 use fvm_ipld_encoding::RawBytes;
 use fvm_shared::address::Address;
 use fvm_shared::bigint::bigint_ser::BigIntDe;
@@ -49,7 +51,7 @@ lazy_static! {
 pub fn new_runtime() -> MockRuntime {
     MockRuntime {
         receiver: *ACTOR,
-        caller: *SYSTEM_ACTOR_ADDR,
+        caller: SYSTEM_ACTOR_ADDR,
         caller_type: *SYSTEM_ACTOR_CODE_ID,
         ..Default::default()
     }
@@ -77,15 +79,15 @@ pub struct Harness {
 
 impl Harness {
     pub fn construct(&self, rt: &mut MockRuntime) {
-        rt.expect_validate_caller_addr(vec![*INIT_ACTOR_ADDR]);
+        rt.expect_validate_caller_addr(vec![INIT_ACTOR_ADDR]);
         let params = ConstructorParams {
             network_name: self.net_name.to_string(),
             checkpoint_period: 10,
         };
-        rt.set_caller(Cid::default(), *INIT_ACTOR_ADDR);
+        rt.set_caller(*INIT_ACTOR_CODE_ID, INIT_ACTOR_ADDR);
         rt.call::<Actor>(
             Method::Constructor as MethodNum,
-            &RawBytes::serialize(params).unwrap(),
+            IpldBlock::serialize_cbor(&params).unwrap(),
         )
         .unwrap();
     }
@@ -122,20 +124,17 @@ impl Harness {
         rt.expect_validate_caller_any();
 
         if code != ExitCode::OK {
-            expect_abort(
-                code,
-                rt.call::<Actor>(Method::Register as MethodNum, &RawBytes::default()),
-            );
+            expect_abort(code, rt.call::<Actor>(Method::Register as MethodNum, None));
             rt.verify();
             return Ok(());
         }
 
         let register_ret = SubnetID::new_from_parent(&self.net_name, *subnet_addr);
         let ret = rt
-            .call::<Actor>(Method::Register as MethodNum, &RawBytes::default())
+            .call::<Actor>(Method::Register as MethodNum, None)
             .unwrap();
         rt.verify();
-        let ret: SubnetID = RawBytes::deserialize(&ret).unwrap();
+        let ret: SubnetID = deserialize_block(ret).unwrap();
         assert_eq!(ret, register_ret);
         Ok(())
     }
@@ -152,15 +151,12 @@ impl Harness {
         rt.expect_validate_caller_any();
 
         if code != ExitCode::OK {
-            expect_abort(
-                code,
-                rt.call::<Actor>(Method::AddStake as MethodNum, &RawBytes::default()),
-            );
+            expect_abort(code, rt.call::<Actor>(Method::AddStake as MethodNum, None));
             rt.verify();
             return Ok(());
         }
 
-        rt.call::<Actor>(Method::AddStake as MethodNum, &RawBytes::default())
+        rt.call::<Actor>(Method::AddStake as MethodNum, None)
             .unwrap();
         rt.verify();
 
@@ -186,7 +182,7 @@ impl Harness {
                 code,
                 rt.call::<Actor>(
                     Method::ReleaseStake as MethodNum,
-                    &RawBytes::serialize(params).unwrap(),
+                    IpldBlock::serialize_cbor(&params).unwrap(),
                 ),
             );
             rt.verify();
@@ -196,14 +192,14 @@ impl Harness {
         rt.expect_send(
             id.subnet_actor(),
             METHOD_SEND,
-            RawBytes::default(),
+            None,
             value.clone(),
-            RawBytes::default(),
+            None,
             ExitCode::OK,
         );
         rt.call::<Actor>(
             Method::ReleaseStake as MethodNum,
-            &RawBytes::serialize(params).unwrap(),
+            IpldBlock::serialize_cbor(&params).unwrap(),
         )
         .unwrap();
         rt.verify();
@@ -222,10 +218,7 @@ impl Harness {
         rt.expect_validate_caller_any();
 
         if code != ExitCode::OK {
-            expect_abort(
-                code,
-                rt.call::<Actor>(Method::Kill as MethodNum, &RawBytes::default()),
-            );
+            expect_abort(code, rt.call::<Actor>(Method::Kill as MethodNum, None));
             rt.verify();
             return Ok(());
         }
@@ -233,13 +226,12 @@ impl Harness {
         rt.expect_send(
             id.subnet_actor(),
             METHOD_SEND,
-            RawBytes::default(),
+            None,
             release_value.clone(),
-            RawBytes::default(),
+            None,
             ExitCode::OK,
         );
-        rt.call::<Actor>(Method::Kill as MethodNum, &RawBytes::default())
-            .unwrap();
+        rt.call::<Actor>(Method::Kill as MethodNum, None).unwrap();
         rt.verify();
 
         Ok(())
@@ -260,7 +252,7 @@ impl Harness {
                 code,
                 rt.call::<Actor>(
                     Method::CommitChildCheckpoint as MethodNum,
-                    &RawBytes::serialize(ch).unwrap(),
+                    IpldBlock::serialize_cbor(&ch).unwrap(),
                 ),
             );
             rt.verify();
@@ -268,7 +260,7 @@ impl Harness {
         }
         rt.call::<Actor>(
             Method::CommitChildCheckpoint as MethodNum,
-            &RawBytes::serialize(ch).unwrap(),
+            IpldBlock::serialize_cbor(&ch).unwrap(),
         )
         .unwrap();
         rt.verify();
@@ -297,7 +289,7 @@ impl Harness {
                 code,
                 rt.call::<Actor>(
                     Method::Fund as MethodNum,
-                    &RawBytes::serialize(id.clone()).unwrap(),
+                    IpldBlock::serialize_cbor(&id).unwrap(),
                 ),
             );
             rt.verify();
@@ -307,14 +299,14 @@ impl Harness {
         rt.expect_send(
             *funder,
             ext::account::PUBKEY_ADDRESS_METHOD,
-            RawBytes::default(),
+            None,
             TokenAmount::zero(),
-            RawBytes::serialize(*TEST_BLS).unwrap(),
+            IpldBlock::serialize_cbor(&*TEST_BLS).unwrap(),
             ExitCode::OK,
         );
         rt.call::<Actor>(
             Method::Fund as MethodNum,
-            &RawBytes::serialize(id.clone()).unwrap(),
+            IpldBlock::serialize_cbor(&id).unwrap(),
         )
         .unwrap();
         rt.verify();
@@ -326,7 +318,7 @@ impl Harness {
             .unwrap();
         assert_eq!(&sub.circ_supply, expected_circ_sup);
         assert_eq!(sub.nonce, expected_nonce);
-        let from = IPCAddress::new(&self.net_name, &TEST_BLS).unwrap();
+        let from = IPCAddress::new(&self.net_name, &*TEST_BLS).unwrap();
         let to = IPCAddress::new(&id, &TEST_BLS).unwrap();
         assert_eq!(msg.from, from);
         assert_eq!(msg.to, to);
@@ -352,10 +344,7 @@ impl Harness {
         set_rt_value_with_cross_fee(rt, &value);
 
         if code != ExitCode::OK {
-            expect_abort(
-                code,
-                rt.call::<Actor>(Method::Release as MethodNum, &RawBytes::default()),
-            );
+            expect_abort(code, rt.call::<Actor>(Method::Release as MethodNum, None));
             rt.verify();
             return Ok(Cid::default());
         }
@@ -363,20 +352,20 @@ impl Harness {
         rt.expect_send(
             *releaser,
             ext::account::PUBKEY_ADDRESS_METHOD,
-            RawBytes::default(),
+            None,
             TokenAmount::zero(),
-            RawBytes::serialize(*TEST_BLS).unwrap(),
+            IpldBlock::serialize_cbor(&*TEST_BLS).unwrap(),
             ExitCode::OK,
         );
         rt.expect_send(
-            *BURNT_FUNDS_ACTOR_ADDR,
+            BURNT_FUNDS_ACTOR_ADDR,
             METHOD_SEND,
-            RawBytes::default(),
+            None,
             value.clone(),
-            RawBytes::default(),
+            None,
             ExitCode::OK,
         );
-        rt.call::<Actor>(Method::Release as MethodNum, &RawBytes::default())
+        rt.call::<Actor>(Method::Release as MethodNum, None)
             .unwrap();
         rt.verify();
 
@@ -425,7 +414,7 @@ impl Harness {
         nonce: u64,
         expected_circ_sup: &TokenAmount,
     ) -> Result<(), ActorError> {
-        rt.set_caller(*SYSTEM_ACTOR_CODE_ID, *SYSTEM_ACTOR_ADDR);
+        rt.set_caller(*SYSTEM_ACTOR_CODE_ID, SYSTEM_ACTOR_ADDR);
         rt.expect_validate_caller_not_type(SIG_TYPES.clone());
 
         // set value and include the cross_msg_fee
@@ -453,7 +442,7 @@ impl Harness {
                 code,
                 rt.call::<Actor>(
                     Method::SendCross as MethodNum,
-                    &RawBytes::serialize(params).unwrap(),
+                    IpldBlock::serialize_cbor(&params).unwrap(),
                 ),
             );
             rt.verify();
@@ -463,17 +452,17 @@ impl Harness {
         let is_bu = is_bottomup(&self.net_name, &dest);
         if is_bu {
             rt.expect_send(
-                *BURNT_FUNDS_ACTOR_ADDR,
+                BURNT_FUNDS_ACTOR_ADDR,
                 METHOD_SEND,
-                RawBytes::default(),
+                None,
                 value.clone(),
-                RawBytes::default(),
+                None,
                 ExitCode::OK,
             );
         }
         rt.call::<Actor>(
             Method::SendCross as MethodNum,
-            &RawBytes::serialize(params).unwrap(),
+            IpldBlock::serialize_cbor(&params).unwrap(),
         )
         .unwrap();
         rt.verify();
@@ -524,16 +513,16 @@ impl Harness {
         params: StorableMsg,
         append_expected_send: Option<Box<dyn Fn(&mut MockRuntime)>>,
     ) -> Result<Option<Cid>, ActorError> {
-        rt.set_caller(*SYSTEM_ACTOR_CODE_ID, *SYSTEM_ACTOR_ADDR);
+        rt.set_caller(*SYSTEM_ACTOR_CODE_ID, SYSTEM_ACTOR_ADDR);
         rt.expect_validate_caller_addr(vec![SYSTEM_ACTOR_ADDR.clone()]);
         rt.set_balance(balance);
 
         if let Some(f) = append_expected_send {
             f(rt)
         }
-        let cid = rt.call::<Actor>(
+        let cid_blk = rt.call::<Actor>(
             Method::ApplyMessage as MethodNum,
-            &RawBytes::serialize(ApplyMsgParams {
+            IpldBlock::serialize_cbor(&ApplyMsgParams {
                 cross_msg: CrossMsg {
                     msg: params.clone(),
                     wrapped: false,
@@ -542,6 +531,7 @@ impl Harness {
         )?;
         rt.verify();
 
+        let cid: RawBytes = deserialize_block(cid_blk).unwrap();
         if cid.is_empty() {
             Ok(None)
         } else {
@@ -563,19 +553,12 @@ impl Harness {
         rt.set_received(CROSS_MSG_FEE.clone() + excess.clone());
 
         if excess > TokenAmount::zero() {
-            rt.expect_send(
-                owner,
-                METHOD_SEND,
-                RawBytes::default(),
-                excess.clone(),
-                RawBytes::default(),
-                ExitCode::OK,
-            );
+            rt.expect_send(owner, METHOD_SEND, None, excess.clone(), None, ExitCode::OK);
         }
 
         rt.call::<Actor>(
             Method::Propagate as MethodNum,
-            &RawBytes::serialize(PropagateParams { postbox_cid: cid })?,
+            IpldBlock::serialize_cbor(&PropagateParams { postbox_cid: cid })?,
         )?;
         rt.verify();
 
@@ -592,7 +575,7 @@ impl Harness {
         td_nonce: u64,
         code: ExitCode,
     ) -> Result<(), ActorError> {
-        rt.set_caller(*SYSTEM_ACTOR_CODE_ID, *SYSTEM_ACTOR_ADDR);
+        rt.set_caller(*SYSTEM_ACTOR_CODE_ID, SYSTEM_ACTOR_ADDR);
         rt.expect_validate_caller_addr(vec![SYSTEM_ACTOR_ADDR.clone()]);
 
         rt.set_balance(value.clone());
@@ -615,7 +598,7 @@ impl Harness {
                 code,
                 rt.call::<Actor>(
                     Method::ApplyMessage as MethodNum,
-                    &RawBytes::serialize(ApplyMsgParams {
+                    IpldBlock::serialize_cbor(&ApplyMsgParams {
                         cross_msg: CrossMsg {
                             msg: params.clone(),
                             wrapped: false,
@@ -633,16 +616,16 @@ impl Harness {
                 rt.expect_send(
                     rto,
                     METHOD_SEND,
-                    RawBytes::default(),
+                    None,
                     params.value.clone(),
-                    RawBytes::default(),
+                    None,
                     ExitCode::OK,
                 );
             }
 
             rt.call::<Actor>(
                 Method::ApplyMessage as MethodNum,
-                &RawBytes::serialize(ApplyMsgParams {
+                IpldBlock::serialize_cbor(&ApplyMsgParams {
                     cross_msg: CrossMsg {
                         msg: params.clone(),
                         wrapped: false,
@@ -659,26 +642,26 @@ impl Harness {
                 value: params.value.clone(),
             };
             rt.expect_send(
-                *REWARD_ACTOR_ADDR,
+                REWARD_ACTOR_ADDR,
                 ext::reward::EXTERNAL_FUNDING_METHOD,
-                RawBytes::serialize(rew_params).unwrap(),
+                IpldBlock::serialize_cbor(&rew_params).unwrap(),
                 TokenAmount::zero(),
-                RawBytes::default(),
+                None,
                 ExitCode::OK,
             );
             if sto == st.network_name {
                 rt.expect_send(
                     rto,
                     METHOD_SEND,
-                    RawBytes::default(),
+                    None,
                     params.value.clone(),
-                    RawBytes::default(),
+                    None,
                     ExitCode::OK,
                 );
             }
-            let cid = rt.call::<Actor>(
+            let cid_blk = rt.call::<Actor>(
                 Method::ApplyMessage as MethodNum,
-                &RawBytes::serialize(ApplyMsgParams {
+                IpldBlock::serialize_cbor(&ApplyMsgParams {
                     cross_msg: CrossMsg {
                         msg: params.clone(),
                         wrapped: false,
@@ -698,6 +681,7 @@ impl Harness {
                 let msg = get_topdown_msg(&crossmsgs, td_nonce).unwrap();
                 assert_eq!(msg.is_none(), true);
 
+                let cid: RawBytes = deserialize_block(cid_blk).unwrap();
                 let cid_ref = cid.to_vec();
                 let item = st
                     .load_from_postbox(rt.store(), Cid::try_from(cid_ref.as_slice()).unwrap())

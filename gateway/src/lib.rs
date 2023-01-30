@@ -5,12 +5,14 @@ pub use self::cross::{is_bottomup, CrossMsg, CrossMsgs, IPCMsgType, StorableMsg}
 pub use self::state::*;
 pub use self::subnet::*;
 pub use self::types::*;
+use fil_actors_runtime::runtime::fvm::resolve_secp_bls;
 use fil_actors_runtime::runtime::{ActorCode, Runtime};
 use fil_actors_runtime::{
-    actor_error, cbor, ActorDowncast, ActorError, BURNT_FUNDS_ACTOR_ADDR, CALLER_TYPES_SIGNABLE,
-    INIT_ACTOR_ADDR, REWARD_ACTOR_ADDR, SYSTEM_ACTOR_ADDR,
+    actor_dispatch, actor_error, restrict_internal_api, ActorDowncast, ActorError,
+    BURNT_FUNDS_ACTOR_ADDR, CALLER_TYPES_SIGNABLE, INIT_ACTOR_ADDR, REWARD_ACTOR_ADDR,
+    SYSTEM_ACTOR_ADDR,
 };
-use fvm_ipld_blockstore::Blockstore;
+use fvm_ipld_encoding::ipld_block::IpldBlock;
 use fvm_ipld_encoding::RawBytes;
 use fvm_shared::address::Address;
 use fvm_shared::bigint::Zero;
@@ -48,30 +50,26 @@ lazy_static! {
 pub enum Method {
     /// Constructor for Storage Power Actor
     Constructor = METHOD_CONSTRUCTOR,
-    Register = 2,
-    AddStake = 3,
-    ReleaseStake = 4,
-    Kill = 5,
-    CommitChildCheckpoint = 6,
-    Fund = 7,
-    Release = 8,
-    SendCross = 9,
-    ApplyMessage = 10,
-    Propagate = 11,
-    WhitelistPropagator = 12,
+    Register = frc42_dispatch::method_hash!("Register"),
+    AddStake = frc42_dispatch::method_hash!("AddStake"),
+    ReleaseStake = frc42_dispatch::method_hash!("ReleaseStake"),
+    Kill = frc42_dispatch::method_hash!("Kill"),
+    CommitChildCheckpoint = frc42_dispatch::method_hash!("CommitChildCheckpoint"),
+    Fund = frc42_dispatch::method_hash!("Fund"),
+    Release = frc42_dispatch::method_hash!("Release"),
+    SendCross = frc42_dispatch::method_hash!("SendCross"),
+    ApplyMessage = frc42_dispatch::method_hash!("ApplyMessage"),
+    Propagate = frc42_dispatch::method_hash!("Propagate"),
+    WhiteListPropagator = frc42_dispatch::method_hash!("WhiteListPropagator"),
 }
 
 /// Gateway Actor
 pub struct Actor;
 
 impl Actor {
-    /// Constructor for SCA actor
-    fn constructor<BS, RT>(rt: &mut RT, params: ConstructorParams) -> Result<(), ActorError>
-    where
-        BS: Blockstore,
-        RT: Runtime<BS>,
-    {
-        rt.validate_immediate_caller_is(std::iter::once(&*INIT_ACTOR_ADDR))?;
+    /// Constructor for gateway actor
+    fn constructor(rt: &mut impl Runtime, params: ConstructorParams) -> Result<(), ActorError> {
+        rt.validate_immediate_caller_is(std::iter::once(&INIT_ACTOR_ADDR))?;
 
         let st = State::new(rt.store(), params).map_err(|e| {
             e.downcast_default(
@@ -85,11 +83,7 @@ impl Actor {
 
     /// Register is called by subnet actors to put the required collateral
     /// and register the subnet to the hierarchy.
-    fn register<BS, RT>(rt: &mut RT) -> Result<SubnetID, ActorError>
-    where
-        BS: Blockstore,
-        RT: Runtime<BS>,
-    {
+    fn register(rt: &mut impl Runtime) -> Result<SubnetID, ActorError> {
         rt.validate_immediate_caller_accept_any()?;
 
         let subnet_addr = rt.message().caller();
@@ -125,11 +119,7 @@ impl Actor {
     }
 
     /// Add stake adds stake to the collateral of a subnet.
-    fn add_stake<BS, RT>(rt: &mut RT) -> Result<(), ActorError>
-    where
-        BS: Blockstore,
-        RT: Runtime<BS>,
-    {
+    fn add_stake(rt: &mut impl Runtime) -> Result<(), ActorError> {
         rt.validate_immediate_caller_accept_any()?;
 
         let subnet_addr = rt.message().caller();
@@ -169,11 +159,7 @@ impl Actor {
     }
 
     /// Release stake recovers some collateral of the subnet
-    fn release_stake<BS, RT>(rt: &mut RT, params: FundParams) -> Result<(), ActorError>
-    where
-        BS: Blockstore,
-        RT: Runtime<BS>,
-    {
+    fn release_stake(rt: &mut impl Runtime, params: FundParams) -> Result<(), ActorError> {
         rt.validate_immediate_caller_accept_any()?;
 
         let subnet_addr = rt.message().caller();
@@ -226,22 +212,13 @@ impl Actor {
             Ok(())
         })?;
 
-        rt.send(
-            subnet_addr,
-            METHOD_SEND,
-            RawBytes::default(),
-            send_val.clone(),
-        )?;
+        rt.send(&subnet_addr, METHOD_SEND, None, send_val.clone())?;
         Ok(())
     }
 
     /// Kill propagates the kill signal from a subnet actor to unregister it from th
     /// hierarchy.
-    fn kill<BS, RT>(rt: &mut RT) -> Result<(), ActorError>
-    where
-        BS: Blockstore,
-        RT: Runtime<BS>,
-    {
+    fn kill(rt: &mut impl Runtime) -> Result<(), ActorError> {
         rt.validate_immediate_caller_accept_any()?;
 
         let subnet_addr = rt.message().caller();
@@ -284,22 +261,13 @@ impl Actor {
             Ok(())
         })?;
 
-        rt.send(
-            subnet_addr,
-            METHOD_SEND,
-            RawBytes::default(),
-            send_val.clone(),
-        )?;
+        rt.send(&subnet_addr, METHOD_SEND, None, send_val.clone())?;
         Ok(())
     }
 
     /// CommitChildCheck propagates the commitment of a checkpoint from a child subnet,
     /// process the cross-messages directed to the subnet.
-    fn commit_child_check<BS, RT>(rt: &mut RT, params: Checkpoint) -> Result<(), ActorError>
-    where
-        BS: Blockstore,
-        RT: Runtime<BS>,
-    {
+    fn commit_child_check(rt: &mut impl Runtime, params: Checkpoint) -> Result<(), ActorError> {
         rt.validate_immediate_caller_accept_any()?;
 
         let subnet_addr = rt.message().caller();
@@ -421,12 +389,7 @@ impl Actor {
 
         // distribute rewards
         if !fee.is_zero() {
-            rt.send(
-                subnet_actor,
-                SUBNET_ACTOR_REWARD_METHOD,
-                RawBytes::default(),
-                fee,
-            )?;
+            rt.send(&subnet_actor, SUBNET_ACTOR_REWARD_METHOD, None, fee)?;
         }
 
         Ok(())
@@ -439,11 +402,7 @@ impl Actor {
     /// - A new fund cross-message is created and stored to propagate it to the subnet. It will be
     /// picked up by miners to include it in the next possible block.
     /// - The cross-message nonce is updated.
-    fn fund<BS, RT>(rt: &mut RT, params: SubnetID) -> Result<(), ActorError>
-    where
-        BS: Blockstore,
-        RT: Runtime<BS>,
-    {
+    fn fund(rt: &mut impl Runtime, params: SubnetID) -> Result<(), ActorError> {
         // funds can only be moved between subnets by signable addresses
         rt.validate_immediate_caller_type(CALLER_TYPES_SIGNABLE.iter())?;
 
@@ -455,7 +414,7 @@ impl Actor {
             ));
         }
 
-        let sig_addr = resolve_secp_bls(rt, rt.message().caller())?;
+        let sig_addr = resolve_secp_bls(rt, &rt.message().caller())?;
 
         rt.transaction(|st: &mut State, rt| {
             let fee = &CROSS_MSG_FEE;
@@ -492,11 +451,7 @@ impl Actor {
     /// This function burns the funds that will be released in the current subnet
     /// and propagates a new checkpoint message to the parent chain to signal
     /// the amount of funds that can be released for a specific address.
-    fn release<BS, RT>(rt: &mut RT) -> Result<(), ActorError>
-    where
-        BS: Blockstore,
-        RT: Runtime<BS>,
-    {
+    fn release(rt: &mut impl Runtime) -> Result<(), ActorError> {
         // funds can only be moved between subnets by signable addresses
         rt.validate_immediate_caller_type(CALLER_TYPES_SIGNABLE.iter())?;
 
@@ -511,7 +466,7 @@ impl Actor {
             ));
         }
 
-        let sig_addr = resolve_secp_bls(rt, rt.message().caller())?;
+        let sig_addr = resolve_secp_bls(rt, &rt.message().caller())?;
 
         rt.transaction(|st: &mut State, rt| {
             let fee = &CROSS_MSG_FEE;
@@ -547,12 +502,7 @@ impl Actor {
         })?;
 
         // burn funds that are send as bottom-up
-        rt.send(
-            *BURNT_FUNDS_ACTOR_ADDR,
-            METHOD_SEND,
-            RawBytes::default(),
-            value,
-        )?;
+        rt.send(&BURNT_FUNDS_ACTOR_ADDR, METHOD_SEND, None, value)?;
 
         Ok(())
     }
@@ -567,11 +517,7 @@ impl Actor {
     /// included in the message by the actor). Only actors are allowed to send arbitrary
     /// cross-messages as a side-effect of their execution. For plain token exchanges
     /// fund and release have to be used.
-    fn send_cross<BS, RT>(rt: &mut RT, params: CrossMsgParams) -> Result<(), ActorError>
-    where
-        BS: Blockstore,
-        RT: Runtime<BS>,
-    {
+    fn send_cross(rt: &mut impl Runtime, params: CrossMsgParams) -> Result<(), ActorError> {
         // only actor are allowed to send cross-message
         rt.validate_immediate_caller_not_type(CALLER_TYPES_SIGNABLE.iter())?;
 
@@ -643,12 +589,7 @@ impl Actor {
         let msg = cross_msg.msg;
         if let Some(t) = tp {
             if t == IPCMsgType::BottomUp && msg.value > TokenAmount::zero() {
-                rt.send(
-                    *BURNT_FUNDS_ACTOR_ADDR,
-                    METHOD_SEND,
-                    RawBytes::default(),
-                    msg.value,
-                )?;
+                rt.send(&BURNT_FUNDS_ACTOR_ADDR, METHOD_SEND, None, msg.value)?;
             }
         }
 
@@ -663,11 +604,7 @@ impl Actor {
     /// - Determines the type of cross-message.
     /// - Performs the corresponding state changes.
     /// - And updated the latest nonce applied for future checks.
-    fn apply_msg<BS, RT>(rt: &mut RT, params: ApplyMsgParams) -> Result<RawBytes, ActorError>
-    where
-        BS: Blockstore,
-        RT: Runtime<BS>,
-    {
+    fn apply_msg(rt: &mut impl Runtime, params: ApplyMsgParams) -> Result<RawBytes, ActorError> {
         rt.validate_immediate_caller_is([&SYSTEM_ACTOR_ADDR as &Address])?;
 
         let ApplyMsgParams { cross_msg } = params;
@@ -708,7 +645,7 @@ impl Actor {
                         })?;
                         Ok(())
                     })?;
-                    return cross_msg.send(rt, rto);
+                    return cross_msg.send(rt, &rto);
                 }
             }
             Ok(IPCMsgType::TopDown) => {
@@ -720,11 +657,17 @@ impl Actor {
                     addr: rt.message().receiver(),
                     value: cross_msg.msg.value.clone(),
                 };
+                // FIXME: This assumes the ability to mint new FIL from
+                // the RewardActor. This is no longer needed,
+                // instead we can provide with the total
+                // circulating supply to the gateway in genesis (so we don't
+                // require changes to the RewardActor)
+                // See: https://github.com/consensus-shipyard/ipc-actors/issues/45
                 if cross_msg.msg.value > TokenAmount::zero() {
                     rt.send(
-                        *REWARD_ACTOR_ADDR,
+                        &REWARD_ACTOR_ADDR,
                         ext::reward::EXTERNAL_FUNDING_METHOD,
-                        RawBytes::serialize(params)?,
+                        IpldBlock::serialize_cbor(&params)?,
                         TokenAmount::zero(),
                     )?;
                 }
@@ -743,7 +686,7 @@ impl Actor {
                     })?;
 
                     // We can return the send result
-                    return cross_msg.send(rt, rto);
+                    return cross_msg.send(rt, &rto);
                 }
             }
             _ => {
@@ -775,14 +718,10 @@ impl Actor {
     /// Whitelist a series of addresses as propagator of a cross net message.
     /// This is basically adding this list of addresses to the `PostBoxItem::owners`.
     /// Only existing owners can perform this operation.
-    fn whitelist_propagator<BS, RT>(
-        rt: &mut RT,
+    fn whitelist_propagator(
+        rt: &mut impl Runtime,
         params: WhitelistPropagatorParams,
-    ) -> Result<RawBytes, ActorError>
-    where
-        BS: Blockstore,
-        RT: Runtime<BS>,
-    {
+    ) -> Result<(), ActorError> {
         // does not really need check as we are checking against the PostboxItem.owners
         rt.validate_immediate_caller_accept_any()?;
 
@@ -822,14 +761,10 @@ impl Actor {
             Ok(())
         })?;
 
-        Ok(RawBytes::default())
+        Ok(())
     }
 
-    fn propagate<BS, RT>(rt: &mut RT, params: PropagateParams) -> Result<RawBytes, ActorError>
-    where
-        BS: Blockstore,
-        RT: Runtime<BS>,
-    {
+    fn propagate(rt: &mut impl Runtime, params: PropagateParams) -> Result<(), ActorError> {
         // does not really need check as we are checking against the PostboxItem.owners
         rt.validate_immediate_caller_accept_any()?;
 
@@ -861,19 +796,19 @@ impl Actor {
         // if bottom_up message being committed.
         if do_burn {
             rt.send(
-                *BURNT_FUNDS_ACTOR_ADDR,
+                &BURNT_FUNDS_ACTOR_ADDR,
                 METHOD_SEND,
-                RawBytes::default(),
+                None,
                 cross_msg.msg.value.clone(),
             )?;
         }
 
         // send the remainder of the fee to the owner
         if value > TokenAmount::zero() {
-            rt.send(owner, METHOD_SEND, RawBytes::default(), value.clone())?;
+            rt.send(&owner, METHOD_SEND, None, value.clone())?;
         }
 
-        Ok(RawBytes::default())
+        Ok(())
     }
 
     /// Commit the cross message to storage. It outputs a flag signaling
@@ -881,16 +816,12 @@ impl Actor {
     /// burnt.
     ///
     /// NOTE: This function should always be called inside an `rt.transaction`
-    fn commit_cross_message<BS, RT>(
-        rt: &mut RT,
+    fn commit_cross_message(
+        rt: &mut impl Runtime,
         st: &mut State,
         mut cross_msg: &mut CrossMsg,
         fee: &TokenAmount,
-    ) -> Result<bool, ActorError>
-    where
-        BS: Blockstore,
-        RT: Runtime<BS>,
-    {
+    ) -> Result<bool, ActorError> {
         let mut do_burn = false;
         let sto = cross_msg
             .msg
@@ -954,82 +885,21 @@ impl Actor {
         }
     }
 }
-
 impl ActorCode for Actor {
-    fn invoke_method<BS, RT>(
-        rt: &mut RT,
-        method: MethodNum,
-        params: &RawBytes,
-    ) -> Result<RawBytes, ActorError>
-    where
-        BS: Blockstore,
-        RT: Runtime<BS>,
-    {
-        match FromPrimitive::from_u64(method) {
-            Some(Method::Constructor) => {
-                Self::constructor(rt, cbor::deserialize_params(params)?)?;
-                Ok(RawBytes::default())
-            }
-            Some(Method::Register) => {
-                let res = Self::register(rt)?;
-                Ok(RawBytes::serialize(res)?)
-            }
-            Some(Method::AddStake) => {
-                Self::add_stake(rt)?;
-                Ok(RawBytes::default())
-            }
-            Some(Method::ReleaseStake) => {
-                Self::release_stake(rt, cbor::deserialize_params(params)?)?;
-                Ok(RawBytes::default())
-            }
-            Some(Method::Kill) => {
-                Self::kill(rt)?;
-                Ok(RawBytes::default())
-            }
-            Some(Method::CommitChildCheckpoint) => {
-                Self::commit_child_check(rt, cbor::deserialize_params(params)?)?;
-                Ok(RawBytes::default())
-            }
-            Some(Method::Fund) => {
-                Self::fund(rt, cbor::deserialize_params(params)?)?;
-                Ok(RawBytes::default())
-            }
-            Some(Method::Release) => {
-                Self::release(rt)?;
-                Ok(RawBytes::default())
-            }
-            Some(Method::SendCross) => {
-                Self::send_cross(rt, cbor::deserialize_params(params)?)?;
-                Ok(RawBytes::default())
-            }
-            Some(Method::ApplyMessage) => Self::apply_msg(rt, cbor::deserialize_params(params)?),
-            Some(Method::Propagate) => {
-                Self::propagate(rt, cbor::deserialize_params(params)?)?;
-                Ok(RawBytes::default())
-            }
-            Some(Method::WhitelistPropagator) => {
-                Self::whitelist_propagator(rt, cbor::deserialize_params(params)?)?;
-                Ok(RawBytes::default())
-            }
-            None => Err(actor_error!(unhandled_message; "Invalid method")),
-        }
-    }
-}
+    type Methods = Method;
 
-fn resolve_secp_bls<BS, RT>(rt: &mut RT, raw: Address) -> Result<Address, ActorError>
-where
-    BS: Blockstore,
-    RT: Runtime<BS>,
-{
-    let resolved = rt
-        .resolve_address(&raw)
-        .ok_or_else(|| actor_error!(illegal_argument, "unable to resolve address: {}", raw))?;
-    let ret = rt.send(
-        resolved,
-        ext::account::PUBKEY_ADDRESS_METHOD,
-        RawBytes::default(),
-        TokenAmount::zero(),
-    )?;
-    let id: Address = cbor::deserialize(&ret, "address response")?;
-    Ok(id)
+    actor_dispatch! {
+        Constructor => constructor,
+        Register => register,
+        AddStake => add_stake,
+        ReleaseStake => release_stake,
+        Kill => kill,
+        CommitChildCheckpoint => commit_child_check,
+        Fund => fund,
+        Release => release,
+        SendCross => send_cross,
+        ApplyMessage => apply_msg,
+        Propagate => propagate,
+        WhiteListPropagator => whitelist_propagator,
+    }
 }

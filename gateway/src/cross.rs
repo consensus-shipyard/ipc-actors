@@ -3,9 +3,8 @@ use anyhow::anyhow;
 use fil_actors_runtime::runtime::Runtime;
 use fil_actors_runtime::ActorError;
 use fil_actors_runtime::BURNT_FUNDS_ACTOR_ADDR;
-use fvm_ipld_blockstore::Blockstore;
 use fvm_ipld_blockstore::MemoryBlockstore;
-use fvm_ipld_encoding::Cbor;
+use fvm_ipld_encoding::ipld_block::IpldBlock;
 use fvm_ipld_encoding::RawBytes;
 use fvm_shared::address::Address;
 use fvm_shared::econ::TokenAmount;
@@ -33,7 +32,6 @@ pub struct StorableMsg {
     pub value: TokenAmount,
     pub nonce: u64,
 }
-impl Cbor for StorableMsg {}
 
 #[derive(PartialEq, Eq, Clone, Debug, Serialize, Deserialize)]
 pub struct CrossMsg {
@@ -48,20 +46,21 @@ pub enum IPCMsgType {
 }
 
 impl CrossMsg {
-    pub fn send<BS, RT>(self, rt: &mut RT, rto: Address) -> Result<RawBytes, ActorError>
-    where
-        BS: Blockstore,
-        RT: Runtime<BS>,
-    {
-        if !self.wrapped {
+    pub fn send(self, rt: &mut impl Runtime, rto: &Address) -> Result<RawBytes, ActorError> {
+        let blk = if !self.wrapped {
             let msg = self.msg;
-            rt.send(rto, msg.method, msg.params, msg.value)
+            rt.send(rto, msg.method, msg.params.into(), msg.value)?
         } else {
             let method = self.msg.method;
             let value = self.msg.value.clone();
-            let params = RawBytes::serialize(ApplyMsgParams { cross_msg: self })?;
-            rt.send(rto, method, params, value)
-        }
+            let params = IpldBlock::serialize_cbor(&ApplyMsgParams { cross_msg: self })?;
+            rt.send(rto, method, params, value)?
+        };
+
+        Ok(match blk {
+            Some(b) => b.data.into(), // FIXME: this assumes cbor serialization. We should maybe return serialized IpldBlock
+            None => RawBytes::default(),
+        })
     }
 }
 
@@ -150,7 +149,6 @@ pub struct CrossMsgs {
     // a lot of cross-messages to be propagated.
     pub msgs: Vec<CrossMsg>,
 }
-impl Cbor for CrossMsgs {}
 
 impl CrossMsgs {
     pub fn new() -> Self {
