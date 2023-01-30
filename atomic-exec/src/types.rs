@@ -1,5 +1,5 @@
 use fvm_ipld_encoding::tuple::{Deserialize_tuple, Serialize_tuple};
-use fvm_ipld_encoding::{Cbor, RawBytes};
+use fvm_ipld_encoding::RawBytes;
 use fvm_shared::address::Address;
 use fvm_shared::MethodNum;
 use ipc_gateway::IPCAddress;
@@ -23,7 +23,6 @@ pub struct PreCommitParams {
     /// Method to call back to commit atomic execution.
     pub commit: MethodNum,
 }
-impl Cbor for PreCommitParams {}
 
 /// Parameters for [crate::Method::Revoke].
 #[derive(Clone, PartialEq, Eq, Serialize_tuple, Deserialize_tuple)]
@@ -36,4 +35,3 @@ pub struct RevokeParams {
     /// Method to call back to rollback atomic execution.
     pub rollback: MethodNum,
 }
-impl Cbor for RevokeParams {}

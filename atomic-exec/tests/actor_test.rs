@@ -1,9 +1,9 @@
 use cid::Cid;
 use fil_actors_runtime::{
-    test_utils::{expect_abort, MockRuntime},
+    test_utils::{expect_abort, MockRuntime, INIT_ACTOR_CODE_ID},
     INIT_ACTOR_ADDR,
 };
-use fvm_ipld_encoding::RawBytes;
+use fvm_ipld_encoding::{ipld_block::IpldBlock, RawBytes};
 use fvm_shared::{address::Address, econ::TokenAmount, error::ExitCode, MethodNum};
 use ipc_atomic_execution::{Actor, AtomicExecID, ConstructorParams, Method, PreCommitParams};
 use ipc_gateway::{ApplyMsgParams, CrossMsg, IPCAddress, StorableMsg, SubnetID};
@@ -19,7 +19,7 @@ fn test_pre_commit_wrong_origin() {
         ExitCode::USR_ILLEGAL_ARGUMENT,
         runtime.call::<Actor>(
             Method::PreCommit as u64,
-            &pre_commit_params(
+            pre_commit_params(
                 ACTOR_B2.clone(),
                 [&*ACTOR_A1, &*ACTOR_B1],
                 AtomicExecID::default(),
@@ -47,7 +47,7 @@ fn test_pre_commit_works() {
                     ipc_gateway::Method::SendCross as MethodNum,
                     commit_params(to.clone(), exec_id.clone()),
                     TokenAmount::default(),
-                    RawBytes::default(),
+                    None,
                     ExitCode::OK,
                 );
             }
@@ -57,8 +57,9 @@ fn test_pre_commit_works() {
         let res: bool = runtime
             .call::<Actor>(
                 Method::PreCommit as u64,
-                &pre_commit_params(from.clone(), actors.iter().cloned(), exec_id.clone()),
+                pre_commit_params(from.clone(), actors.iter().cloned(), exec_id.clone()),
             )
+            .unwrap()
             .unwrap()
             .deserialize()
             .unwrap();
@@ -93,15 +94,25 @@ lazy_static::lazy_static! {
 
 const COMMIT_METHOD: MethodNum = 2;
 
-fn construct_runtime_with_receiver(receiver: Address) -> MockRuntime {
-    let caller = *INIT_ACTOR_ADDR;
-    let mut runtime = MockRuntime::new(receiver, caller);
+pub fn new_runtime(receiver: Address) -> MockRuntime {
+    MockRuntime {
+        receiver,
+        caller: INIT_ACTOR_ADDR,
+        caller_type: *INIT_ACTOR_CODE_ID,
+        ..Default::default()
+    }
+}
 
-    runtime.expect_validate_caller_addr(vec![caller]);
+fn construct_runtime_with_receiver(receiver: Address) -> MockRuntime {
+    let mut runtime = new_runtime(receiver);
+    runtime.set_caller(*INIT_ACTOR_CODE_ID, INIT_ACTOR_ADDR);
+
+    runtime.expect_validate_caller_addr(vec![INIT_ACTOR_ADDR]);
+
     runtime
         .call::<Actor>(
             Method::Constructor as u64,
-            &RawBytes::serialize(&*CONSTRUCTOR_PARAMS).unwrap(),
+            IpldBlock::serialize_cbor(&*CONSTRUCTOR_PARAMS).unwrap(),
         )
         .unwrap();
 
@@ -117,15 +128,15 @@ fn pre_commit_params<'a>(
     from: IPCAddress,
     actors: impl IntoIterator<Item = &'a IPCAddress>,
     exec_id: AtomicExecID,
-) -> RawBytes {
+) -> Option<IpldBlock> {
     let actors = actors.into_iter().cloned().collect();
-    RawBytes::serialize(ApplyMsgParams {
+    IpldBlock::serialize_cbor(&ApplyMsgParams {
         cross_msg: wrap_cross_msg(
             from,
             COORD_ACTOR.clone(),
             Method::PreCommit as MethodNum,
             RawBytes::serialize(&PreCommitParams {
-                actors: actors,
+                actors,
                 exec_id,
                 commit: COMMIT_METHOD,
             })
@@ -135,8 +146,8 @@ fn pre_commit_params<'a>(
     .unwrap()
 }
 
-fn commit_params(to: IPCAddress, exec_id: AtomicExecID) -> RawBytes {
-    RawBytes::serialize(wrap_cross_msg(
+fn commit_params(to: IPCAddress, exec_id: AtomicExecID) -> Option<IpldBlock> {
+    IpldBlock::serialize_cbor(&wrap_cross_msg(
         IPC_ADDR_PLACEHOLDER.clone(),
         to,
         COMMIT_METHOD,

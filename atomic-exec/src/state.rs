@@ -3,7 +3,7 @@
 use cid::multihash::Blake2b256;
 use cid::multihash::Hasher;
 use fvm_ipld_blockstore::Blockstore;
-use fvm_ipld_encoding::{Cbor, RawBytes};
+use fvm_ipld_encoding::RawBytes;
 use fvm_ipld_hamt::BytesKey;
 use fvm_shared::address::Address;
 use fvm_shared::MethodNum;
@@ -20,7 +20,6 @@ pub struct State {
     pub registry: RegistryCid, // H(exec_id, actors) -> pre-commitments
     pub ipc_gateway_address: Address,
 }
-impl Cbor for State {}
 
 type RegistryCid = TCid<THamt<RegistryKey, RegistryEntry>>;
 type RegistryKey = BytesKey;
