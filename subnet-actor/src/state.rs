@@ -283,10 +283,8 @@ impl State {
     }
 
     /// Do not call this function in transaction
-    pub fn verify_checkpoint<BS, RT>(&self, rt: &mut RT, ch: &Checkpoint) -> anyhow::Result<()>
-    where
-        BS: Blockstore,
-        RT: Runtime<BS>,
+    pub fn verify_checkpoint(&self, rt: &mut impl Runtime, ch: &Checkpoint) -> anyhow::Result<()>
+
     {
         // check that subnet is active
         if self.status != Status::Active {

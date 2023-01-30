@@ -1,6 +1,6 @@
+use fvm_ipld_encoding::ipld_block::IpldBlock;
 use fvm_ipld_encoding::repr::*;
 use fvm_ipld_encoding::tuple::{Deserialize_tuple, Serialize_tuple};
-use fvm_ipld_encoding::RawBytes;
 use fvm_shared::address::Address;
 use fvm_shared::clock::ChainEpoch;
 use fvm_shared::econ::TokenAmount;
@@ -72,12 +72,17 @@ pub struct JoinParams {
 pub(crate) struct CrossActorPayload {
     pub to: Address,
     pub method: MethodNum,
-    pub params: RawBytes,
+    pub params: Option<IpldBlock>,
     pub value: TokenAmount,
 }
 
 impl CrossActorPayload {
-    pub fn new(to: Address, method: MethodNum, params: RawBytes, value: TokenAmount) -> Self {
+    pub fn new(
+        to: Address,
+        method: MethodNum,
+        params: Option<IpldBlock>,
+        value: TokenAmount,
+    ) -> Self {
         Self {
             to,
             method,

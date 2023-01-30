@@ -4,10 +4,11 @@ pub mod state;
 pub mod types;
 
 use fil_actors_runtime::runtime::{ActorCode, Runtime};
-use fil_actors_runtime::{actor_error, cbor, ActorDowncast, ActorError, INIT_ACTOR_ADDR};
-use fvm_ipld_blockstore::Blockstore;
+use fil_actors_runtime::{
+    actor_dispatch, actor_error, restrict_internal_api, ActorDowncast, ActorError, INIT_ACTOR_ADDR,
+};
+use fvm_ipld_encoding::ipld_block::IpldBlock;
 use fvm_ipld_encoding::RawBytes;
-
 use fvm_shared::econ::TokenAmount;
 use fvm_shared::error::ExitCode;
 use fvm_shared::{MethodNum, METHOD_CONSTRUCTOR, METHOD_SEND};
@@ -18,7 +19,6 @@ use num_traits::{FromPrimitive, Zero};
 
 pub use crate::state::State;
 pub use crate::types::*;
-
 fil_actors_runtime::wasm_trampoline!(Actor);
 
 /// Atomic execution coordinator actor methods available
@@ -26,58 +26,46 @@ fil_actors_runtime::wasm_trampoline!(Actor);
 #[repr(u64)]
 pub enum Method {
     Constructor = METHOD_CONSTRUCTOR,
-    Join = 2,
-    Leave = 3,
-    Kill = 4,
-    SubmitCheckpoint = 5,
-    Reward = 6,
+    Join = frc42_dispatch::method_hash!("Join"),
+    Leave = frc42_dispatch::method_hash!("Leave"),
+    Kill = frc42_dispatch::method_hash!("Kill"),
+    SubmitCheckpoint = frc42_dispatch::method_hash!("SubmitCheckpoint"),
+    Reward = frc42_dispatch::method_hash!("Reward"),
 }
 
 /// SubnetActor trait. Custom subnet actors need to implement this trait
 /// in order to be used as part of hierarchical consensus.
 ///
 /// Subnet actors are responsible for the governing policies of HC subnets.
+// TODO: Instead of `RawBytes` we should consider returning a generic type for
+// the subnet actor interface
 pub trait SubnetActor {
     /// Deploys subnet actor with the corresponding parameters.
-    fn constructor<BS, RT>(rt: &mut RT, params: ConstructParams) -> Result<(), ActorError>
-    where
-        BS: Blockstore,
-        RT: Runtime<BS>;
+    fn constructor(rt: &mut impl Runtime, params: ConstructParams) -> Result<(), ActorError>;
+
     /// Logic for new peers to join a subnet.
-    fn join<BS, RT>(rt: &mut RT, params: JoinParams) -> Result<Option<RawBytes>, ActorError>
-    where
-        BS: Blockstore,
-        RT: Runtime<BS>;
+    fn join(rt: &mut impl Runtime, params: JoinParams) -> Result<Option<RawBytes>, ActorError>;
+
     /// Called by peers to leave a subnet.
-    fn leave<BS, RT>(rt: &mut RT) -> Result<Option<RawBytes>, ActorError>
-    where
-        BS: Blockstore,
-        RT: Runtime<BS>;
-    /// Sends a kill signal for the subnet to the SCA.
-    fn kill<BS, RT>(rt: &mut RT) -> Result<Option<RawBytes>, ActorError>
-    where
-        BS: Blockstore,
-        RT: Runtime<BS>;
+    fn leave(rt: &mut impl Runtime) -> Result<Option<RawBytes>, ActorError>;
+
+    /// Sends a kill signal for the subnet to the gateway.
+    fn kill(rt: &mut impl Runtime) -> Result<Option<RawBytes>, ActorError>;
+
     /// Submits a new checkpoint for the subnet.
-    fn submit_checkpoint<BS, RT>(
-        rt: &mut RT,
+    fn submit_checkpoint(
+        rt: &mut impl Runtime,
         ch: Checkpoint,
-    ) -> Result<Option<RawBytes>, ActorError>
-    where
-        BS: Blockstore,
-        RT: Runtime<BS>;
+    ) -> Result<Option<RawBytes>, ActorError>;
 
     /// Distributes the rewards for the subnet to validators.
-    fn reward<BS, RT>(rt: &mut RT) -> Result<Option<RawBytes>, ActorError>
-    where
-        BS: Blockstore,
-        RT: Runtime<BS>;
+    fn reward(rt: &mut impl Runtime) -> Result<Option<RawBytes>, ActorError>;
 }
 
 /// SubnetActor trait. Custom subnet actors need to implement this trait
 /// in order to be used as part of hierarchical consensus.
 ///
-/// Subnet actors are responsible for the governing policies of HC subnets.
+/// Subnet actors are responsible for the governing policies of IPC subnets.
 pub struct Actor;
 
 impl SubnetActor for Actor {
@@ -85,12 +73,8 @@ impl SubnetActor for Actor {
     ///
     /// Method num 1. This is part of the Filecoin calling convention.
     /// InitActor#Exec will call the constructor on method_num = 1.
-    fn constructor<BS, RT>(rt: &mut RT, params: ConstructParams) -> Result<(), ActorError>
-    where
-        BS: Blockstore,
-        RT: Runtime<BS>,
-    {
-        rt.validate_immediate_caller_is(std::iter::once(&*INIT_ACTOR_ADDR))?;
+    fn constructor(rt: &mut impl Runtime, params: ConstructParams) -> Result<(), ActorError> {
+        rt.validate_immediate_caller_is(std::iter::once(&INIT_ACTOR_ADDR))?;
 
         let st = State::new(rt.store(), params).map_err(|e| {
             e.downcast_default(ExitCode::USR_ILLEGAL_STATE, "Failed to create actor state")
@@ -104,16 +88,10 @@ impl SubnetActor for Actor {
     /// Called by peers looking to join a subnet.
     ///
     /// It implements the basic logic to onboard new peers to the subnet.
-    fn join<BS, RT>(rt: &mut RT, params: JoinParams) -> Result<Option<RawBytes>, ActorError>
-    where
-        BS: Blockstore,
-        RT: Runtime<BS>,
-    {
+    fn join(rt: &mut impl Runtime, params: JoinParams) -> Result<Option<RawBytes>, ActorError> {
         rt.validate_immediate_caller_accept_any()?;
 
         let caller = rt.message().caller();
-        // TODO: shall we check caller interface instead here?
-
         let amount = rt.message().value_received();
         if amount == TokenAmount::zero() {
             return Err(actor_error!(
@@ -137,7 +115,7 @@ impl SubnetActor for Actor {
                     msg = Some(CrossActorPayload::new(
                         st.ipc_gateway_addr,
                         ipc_gateway::Method::Register as u64,
-                        RawBytes::default(),
+                        None,
                         total_stake,
                     ));
                 }
@@ -145,7 +123,7 @@ impl SubnetActor for Actor {
                 msg = Some(CrossActorPayload::new(
                     st.ipc_gateway_addr,
                     ipc_gateway::Method::AddStake as u64,
-                    RawBytes::default(),
+                    None,
                     amount,
                 ));
             }
@@ -156,28 +134,17 @@ impl SubnetActor for Actor {
         })?;
 
         if let Some(p) = msg {
-            rt.send(p.to, p.method, p.params, p.value)?;
+            rt.send(&p.to, p.method, p.params, p.value)?;
         }
 
         Ok(None)
     }
 
     /// Called by peers looking to leave a subnet.
-    fn leave<BS, RT>(rt: &mut RT) -> Result<Option<RawBytes>, ActorError>
-    where
-        BS: Blockstore,
-        RT: Runtime<BS>,
-    {
+    fn leave(rt: &mut impl Runtime) -> Result<Option<RawBytes>, ActorError> {
         rt.validate_immediate_caller_accept_any()?;
 
         let caller = rt.message().caller();
-
-        // TODO: shall we check caller interface instead here?
-        // let code_cid = get_actor_code_cid(&caller).unwrap_or(Cid::default());
-        // if sdk::actor::get_builtin_actor_type(&code_cid) != Some(Type::Account) {
-        //     abort!(USR_FORBIDDEN, "caller not account actor type");
-        // }
-
         let mut msg = None;
         rt.transaction(|st: &mut State, rt| {
             let stake = st.get_stake(rt.store(), &caller).map_err(|e| {
@@ -193,7 +160,7 @@ impl SubnetActor for Actor {
                 msg = Some(CrossActorPayload::new(
                     st.ipc_gateway_addr,
                     ipc_gateway::Method::ReleaseStake as u64,
-                    RawBytes::serialize(FundParams {
+                    IpldBlock::serialize_cbor(&FundParams {
                         value: stake.clone(),
                     })?,
                     TokenAmount::zero(),
@@ -211,17 +178,13 @@ impl SubnetActor for Actor {
         })?;
 
         if let Some(p) = msg {
-            rt.send(p.to, p.method, p.params, p.value)?;
+            rt.send(&p.to, p.method, p.params, p.value)?;
         }
 
         Ok(None)
     }
 
-    fn kill<BS, RT>(rt: &mut RT) -> Result<Option<RawBytes>, ActorError>
-    where
-        BS: Blockstore,
-        RT: Runtime<BS>,
-    {
+    fn kill(rt: &mut impl Runtime) -> Result<Option<RawBytes>, ActorError> {
         rt.validate_immediate_caller_accept_any()?;
 
         // prevent a subnet from being killed until all its locked balance has been withdrawn
@@ -256,7 +219,7 @@ impl SubnetActor for Actor {
             msg = Some(CrossActorPayload::new(
                 st.ipc_gateway_addr,
                 ipc_gateway::Method::Kill as u64,
-                RawBytes::default(),
+                None,
                 TokenAmount::zero(),
             ));
 
@@ -265,7 +228,7 @@ impl SubnetActor for Actor {
 
         // unregister subnet
         if let Some(p) = msg {
-            rt.send(p.to, p.method, p.params, p.value)?;
+            rt.send(&p.to, p.method, p.params, p.value)?;
         }
 
         Ok(None)
@@ -276,14 +239,10 @@ impl SubnetActor for Actor {
     /// This functions verifies that the checkpoint is valid before
     /// propagating it for commitment to the IPC gateway. It expects at least
     /// votes from 2/3 of miners with collateral.
-    fn submit_checkpoint<BS, RT>(
-        rt: &mut RT,
+    fn submit_checkpoint(
+        rt: &mut impl Runtime,
         ch: Checkpoint,
-    ) -> Result<Option<RawBytes>, ActorError>
-    where
-        BS: Blockstore,
-        RT: Runtime<BS>,
-    {
+    ) -> Result<Option<RawBytes>, ActorError> {
         rt.validate_immediate_caller_accept_any()?;
 
         let state: State = rt.state()?;
@@ -333,7 +292,7 @@ impl SubnetActor for Actor {
                 msg = Some(CrossActorPayload::new(
                     st.ipc_gateway_addr,
                     ipc_gateway::Method::CommitChildCheckpoint as u64,
-                    RawBytes::serialize(ch)?,
+                    IpldBlock::serialize_cbor(&ch)?,
                     TokenAmount::zero(),
                 ));
 
@@ -351,18 +310,14 @@ impl SubnetActor for Actor {
 
         // propagate to sca
         if let Some(p) = msg {
-            rt.send(p.to, p.method, p.params, p.value)?;
+            rt.send(&p.to, p.method, p.params, p.value)?;
         }
 
         Ok(None)
     }
 
     /// Distributes the rewards for the subnet to validators.
-    fn reward<BS, RT>(rt: &mut RT) -> Result<Option<RawBytes>, ActorError>
-    where
-        BS: Blockstore,
-        RT: Runtime<BS>,
-    {
+    fn reward(rt: &mut impl Runtime) -> Result<Option<RawBytes>, ActorError> {
         let st: State = rt.state()?;
         // the ipc-gateway must trigger the reward distribution
         rt.validate_immediate_caller_is(vec![&st.ipc_gateway_addr])?;
@@ -391,48 +346,21 @@ impl SubnetActor for Actor {
         };
         let rew_amount = amount.div_floor(div);
         for v in st.validator_set.into_iter() {
-            rt.send(v.addr, METHOD_SEND, RawBytes::default(), rew_amount.clone())?;
+            rt.send(&v.addr, METHOD_SEND, None, rew_amount.clone())?;
         }
         Ok(None)
     }
 }
 
 impl ActorCode for Actor {
-    fn invoke_method<BS, RT>(
-        rt: &mut RT,
-        method: MethodNum,
-        params: &RawBytes,
-    ) -> Result<RawBytes, ActorError>
-    where
-        BS: Blockstore,
-        RT: Runtime<BS>,
-    {
-        match FromPrimitive::from_u64(method) {
-            Some(Method::Constructor) => {
-                Self::constructor(rt, cbor::deserialize_params(params)?)?;
-                Ok(RawBytes::default())
-            }
-            Some(Method::Join) => {
-                let res = Self::join(rt, cbor::deserialize_params(params)?)?;
-                Ok(RawBytes::serialize(res)?)
-            }
-            Some(Method::Leave) => {
-                let res = Self::leave(rt)?;
-                Ok(RawBytes::serialize(res)?)
-            }
-            Some(Method::Kill) => {
-                let res = Self::kill(rt)?;
-                Ok(RawBytes::serialize(res)?)
-            }
-            Some(Method::SubmitCheckpoint) => {
-                let res = Self::submit_checkpoint(rt, cbor::deserialize_params(params)?)?;
-                Ok(RawBytes::serialize(res)?)
-            }
-            Some(Method::Reward) => {
-                let res = Self::reward(rt)?;
-                Ok(RawBytes::serialize(res)?)
-            }
-            None => Err(actor_error!(unhandled_message; "Invalid method")),
-        }
+    type Methods = Method;
+
+    actor_dispatch! {
+        Constructor => constructor,
+        Join => join,
+        Leave => leave,
+        Kill => kill,
+        SubmitCheckpoint => submit_checkpoint,
+        Reward => reward,
     }
 }
