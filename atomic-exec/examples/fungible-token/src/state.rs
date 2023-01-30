@@ -1,6 +1,5 @@
 use fvm_actors_runtime::Map;
 use fvm_ipld_blockstore::Blockstore;
-use fvm_ipld_encoding::Cbor;
 use fvm_ipld_hamt::BytesKey;
 use fvm_primitives::{TCid, THamt};
 use fvm_shared::{address::Address, bigint::Zero, econ::TokenAmount, ActorID, HAMT_BIT_WIDTH};
@@ -32,7 +31,6 @@ pub struct State {
     /// Atomic execution registry.
     atomic_registry: AtomicExecRegistry,
 }
-impl Cbor for State {}
 
 impl State {
     /// Creates a new actor state instance.

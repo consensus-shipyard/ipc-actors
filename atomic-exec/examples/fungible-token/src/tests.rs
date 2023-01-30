@@ -4,10 +4,12 @@ use crate::{
 };
 use cid::Cid;
 use fvm_actors_runtime::{
-    test_utils::{expect_abort_contains_message, MockRuntime, ACCOUNT_ACTOR_CODE_ID},
+    test_utils::{
+        expect_abort_contains_message, MockRuntime, ACCOUNT_ACTOR_CODE_ID, INIT_ACTOR_CODE_ID,
+    },
     ActorError, INIT_ACTOR_ADDR,
 };
-use fvm_ipld_encoding::RawBytes;
+use fvm_ipld_encoding::{ipld_block::IpldBlock, RawBytes};
 use fvm_shared::{address::Address, econ::TokenAmount, error::ExitCode, MethodNum};
 use ipc_atomic_execution::AtomicExecID;
 use ipc_atomic_execution_primitives::{AtomicExecRegistry, AtomicInputID};
@@ -335,15 +337,25 @@ lazy_static::lazy_static! {
     static ref TOKEN_ACTOR_B: IPCAddress = IPCAddress::new(&*SUBNET_B, &Address::new_id(100)).unwrap();
 }
 
-fn construct_runtime_with_receiver(receiver: Address) -> MockRuntime {
-    let caller = *INIT_ACTOR_ADDR;
-    let mut runtime = MockRuntime::new(receiver, caller);
+pub fn new_runtime(receiver: Address) -> MockRuntime {
+    MockRuntime {
+        receiver,
+        caller: INIT_ACTOR_ADDR,
+        caller_type: *INIT_ACTOR_CODE_ID,
+        ..Default::default()
+    }
+}
 
-    runtime.expect_validate_caller_addr(vec![caller]);
+fn construct_runtime_with_receiver(receiver: Address) -> MockRuntime {
+    let mut runtime = new_runtime(receiver);
+    runtime.set_caller(*INIT_ACTOR_CODE_ID, INIT_ACTOR_ADDR);
+
+    runtime.expect_validate_caller_addr(vec![INIT_ACTOR_ADDR]);
+
     runtime
         .call::<Actor>(
             Method::Constructor as u64,
-            &RawBytes::serialize(&*CONSTRUCTOR_PARAMS).unwrap(),
+            IpldBlock::serialize_cbor(&*CONSTRUCTOR_PARAMS).unwrap(),
         )
         .unwrap();
 
@@ -365,27 +377,27 @@ fn balance(runtime: &mut MockRuntime, address: &Address) -> Result<TokenAmount, 
     runtime
         .call::<Actor>(
             Method::Balance as u64,
-            &RawBytes::serialize(address).unwrap(),
+            IpldBlock::serialize_cbor(&address).unwrap(),
         )
-        .map(|ret| ret.deserialize().unwrap())
+        .map(|ret| ret.unwrap().deserialize().unwrap())
 }
 
 fn name(runtime: &mut MockRuntime) -> Result<String, ActorError> {
     runtime
-        .call::<Actor>(Method::Name as u64, &RawBytes::default())
-        .map(|ret| ret.deserialize().unwrap())
+        .call::<Actor>(Method::Name as u64, None)
+        .map(|ret| ret.unwrap().deserialize().unwrap())
 }
 
 fn symbol(runtime: &mut MockRuntime) -> Result<String, ActorError> {
     runtime
-        .call::<Actor>(Method::Symbol as u64, &RawBytes::default())
-        .map(|ret| ret.deserialize().unwrap())
+        .call::<Actor>(Method::Symbol as u64, None)
+        .map(|ret| ret.unwrap().deserialize().unwrap())
 }
 
 fn total_supply(runtime: &mut MockRuntime) -> Result<TokenAmount, ActorError> {
     runtime
-        .call::<Actor>(Method::TotalSupply as u64, &RawBytes::default())
-        .map(|ret| ret.deserialize().unwrap())
+        .call::<Actor>(Method::TotalSupply as u64, None)
+        .map(|ret| ret.unwrap().deserialize().unwrap())
 }
 
 fn transfer(
@@ -398,13 +410,13 @@ fn transfer(
     runtime
         .call::<Actor>(
             Method::Transfer as u64,
-            &RawBytes::serialize(TransferParams { to, amount }).unwrap(),
+            IpldBlock::serialize_cbor(&TransferParams { to, amount }).unwrap(),
         )
         .map(|ret| {
             let TransferReturn {
                 from_balance,
                 to_balance,
-            } = ret.deserialize().unwrap();
+            } = ret.unwrap().deserialize().unwrap();
             (from_balance, to_balance)
         })
 }
@@ -419,13 +431,13 @@ fn init_atomic_transfer(
     runtime
         .call::<Actor>(
             Method::InitAtomicTransfer as u64,
-            &RawBytes::serialize(InitAtomicTransferParams {
+            IpldBlock::serialize_cbor(&InitAtomicTransferParams {
                 coordinator: COORD_ACTOR.clone(),
                 transfer: TransferParams { to, amount },
             })
             .unwrap(),
         )
-        .map(|ret| ret.deserialize().unwrap())
+        .map(|ret| ret.unwrap().deserialize().unwrap())
 }
 
 fn cancel_atomic_transfer(
@@ -437,9 +449,9 @@ fn cancel_atomic_transfer(
     runtime
         .call::<Actor>(
             Method::CancelAtomicTransfer as u64,
-            &RawBytes::serialize(input_id).unwrap(),
+            IpldBlock::serialize_cbor(&input_id).unwrap(),
         )
-        .map(|ret| assert_eq!(ret, RawBytes::default()))
+        .map(|ret| assert_eq!(ret, None))
 }
 
 fn prepare_atomic_transfer(
@@ -459,7 +471,7 @@ fn prepare_atomic_transfer(
                 Method::CommitAtomicTransfer as MethodNum,
             ),
             TokenAmount::default(),
-            RawBytes::default(),
+            None,
             ExitCode::OK,
         );
     }
@@ -468,9 +480,9 @@ fn prepare_atomic_transfer(
     runtime
         .call::<Actor>(
             Method::PrepareAtomicTransfer as u64,
-            &RawBytes::serialize(PrepareAtomicTransferParams { input_ids }).unwrap(),
+            IpldBlock::serialize_cbor(&PrepareAtomicTransferParams { input_ids }).unwrap(),
         )
-        .map(|ret| ret.deserialize().unwrap())
+        .map(|ret| ret.unwrap().deserialize().unwrap())
 }
 
 fn abort_atomic_transfer(
@@ -492,7 +504,7 @@ fn abort_atomic_transfer(
                 Method::RollbackAtomicTransfer as MethodNum,
             ),
             TokenAmount::default(),
-            RawBytes::default(),
+            None,
             ExitCode::OK,
         );
     }
@@ -501,9 +513,9 @@ fn abort_atomic_transfer(
     runtime
         .call::<Actor>(
             Method::AbortAtomicTransfer as u64,
-            &RawBytes::serialize(AbortAtomicTransferParams { actors, exec_id }).unwrap(),
+            IpldBlock::serialize_cbor(&AbortAtomicTransferParams { actors, exec_id }).unwrap(),
         )
-        .map(|ret| assert_eq!(ret, RawBytes::default()))
+        .map(|ret| assert_eq!(ret, None))
 }
 
 fn commit_atomic_transfer(
@@ -516,9 +528,9 @@ fn commit_atomic_transfer(
     runtime
         .call::<Actor>(
             Method::CommitAtomicTransfer as u64,
-            &commit_params(from, OWN_IPC_ADDR.clone(), exec_id),
+            commit_params(from, OWN_IPC_ADDR.clone(), exec_id),
         )
-        .map(|ret| assert_eq!(ret, RawBytes::default()))
+        .map(|ret| assert_eq!(ret, None))
 }
 
 fn rollback_atomic_transfer(
@@ -531,17 +543,17 @@ fn rollback_atomic_transfer(
     runtime
         .call::<Actor>(
             Method::RollbackAtomicTransfer as u64,
-            &rollback_params(from, OWN_IPC_ADDR.clone(), exec_id),
+            rollback_params(from, OWN_IPC_ADDR.clone(), exec_id),
         )
-        .map(|ret| assert_eq!(ret, RawBytes::default()))
+        .map(|ret| assert_eq!(ret, None))
 }
 
 fn pre_commit_params(
     actors: Vec<IPCAddress>,
     exec_id: AtomicExecID,
     commit: MethodNum,
-) -> RawBytes {
-    RawBytes::serialize(wrap_cross_msg(
+) -> Option<IpldBlock> {
+    IpldBlock::serialize_cbor(&wrap_cross_msg(
         IPC_ADDR_PLACEHOLDER.clone(),
         COORD_ACTOR.clone(),
         ipc_atomic_execution::Method::PreCommit as MethodNum,
@@ -557,8 +569,12 @@ fn pre_commit_params(
     .unwrap()
 }
 
-fn revoke_params(actors: Vec<IPCAddress>, exec_id: AtomicExecID, rollback: MethodNum) -> RawBytes {
-    RawBytes::serialize(wrap_cross_msg(
+fn revoke_params(
+    actors: Vec<IPCAddress>,
+    exec_id: AtomicExecID,
+    rollback: MethodNum,
+) -> Option<IpldBlock> {
+    IpldBlock::serialize_cbor(&wrap_cross_msg(
         IPC_ADDR_PLACEHOLDER.clone(),
         COORD_ACTOR.clone(),
         ipc_atomic_execution::Method::Revoke as MethodNum,
@@ -574,8 +590,8 @@ fn revoke_params(actors: Vec<IPCAddress>, exec_id: AtomicExecID, rollback: Metho
     .unwrap()
 }
 
-fn rollback_params(from: IPCAddress, to: IPCAddress, exec_id: AtomicExecID) -> RawBytes {
-    RawBytes::serialize(ipc_gateway::ApplyMsgParams {
+fn rollback_params(from: IPCAddress, to: IPCAddress, exec_id: AtomicExecID) -> Option<IpldBlock> {
+    IpldBlock::serialize_cbor(&ipc_gateway::ApplyMsgParams {
         cross_msg: wrap_cross_msg(
             from,
             to,
@@ -586,8 +602,8 @@ fn rollback_params(from: IPCAddress, to: IPCAddress, exec_id: AtomicExecID) -> R
     .unwrap()
 }
 
-fn commit_params(from: IPCAddress, to: IPCAddress, exec_id: AtomicExecID) -> RawBytes {
-    RawBytes::serialize(ipc_gateway::ApplyMsgParams {
+fn commit_params(from: IPCAddress, to: IPCAddress, exec_id: AtomicExecID) -> Option<IpldBlock> {
+    IpldBlock::serialize_cbor(&ipc_gateway::ApplyMsgParams {
         cross_msg: wrap_cross_msg(from, to, Method::CommitAtomicTransfer as MethodNum, exec_id),
     })
     .unwrap()

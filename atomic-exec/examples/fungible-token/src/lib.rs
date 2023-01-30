@@ -6,8 +6,10 @@
 
 use frc42_dispatch::method_hash;
 use fvm_actors_runtime::runtime::{ActorCode, Runtime};
-use fvm_actors_runtime::{actor_error, cbor, ActorDowncast, ActorError, INIT_ACTOR_ADDR};
-use fvm_ipld_blockstore::Blockstore;
+use fvm_actors_runtime::{
+    actor_dispatch, actor_error, restrict_internal_api, ActorDowncast, ActorError, INIT_ACTOR_ADDR,
+};
+use fvm_ipld_encoding::ipld_block::IpldBlock;
 use fvm_ipld_encoding::RawBytes;
 use fvm_shared::address::Address;
 use fvm_shared::econ::TokenAmount;
@@ -149,13 +151,9 @@ pub struct AbortAtomicTransferParams {
 
 impl Actor {
     // Handles Constructor method.
-    fn constructor<BS, RT>(rt: &mut RT, params: ConstructorParams) -> Result<(), ActorError>
-    where
-        BS: Blockstore + Clone,
-        RT: Runtime<BS>,
-    {
+    fn constructor(rt: &mut impl Runtime, params: ConstructorParams) -> Result<(), ActorError> {
         // Ensure the constructor is called by the Init system actor.
-        rt.validate_immediate_caller_is(std::iter::once(&*INIT_ACTOR_ADDR))?;
+        rt.validate_immediate_caller_is(std::iter::once(&INIT_ACTOR_ADDR))?;
 
         let ConstructorParams {
             ipc_gateway,
@@ -191,41 +189,25 @@ impl Actor {
     }
 
     // Handles Name method.
-    fn name<BS, RT>(rt: &mut RT) -> Result<String, ActorError>
-    where
-        BS: Blockstore + Clone,
-        RT: Runtime<BS>,
-    {
+    fn name(rt: &mut impl Runtime) -> Result<String, ActorError> {
         let st: State = rt.state()?;
         Ok(st.name().to_string())
     }
 
     // Handles Symbol method.
-    fn symbol<BS, RT>(rt: &mut RT) -> Result<String, ActorError>
-    where
-        BS: Blockstore + Clone,
-        RT: Runtime<BS>,
-    {
+    fn symbol(rt: &mut impl Runtime) -> Result<String, ActorError> {
         let st: State = rt.state()?;
         Ok(st.symbol().to_string())
     }
 
     // Handles TotalSupply method.
-    fn total_supply<BS, RT>(rt: &mut RT) -> Result<TokenAmount, ActorError>
-    where
-        BS: Blockstore + Clone,
-        RT: Runtime<BS>,
-    {
+    fn total_supply(rt: &mut impl Runtime) -> Result<TokenAmount, ActorError> {
         let st: State = rt.state()?;
         Ok(st.total_supply().clone())
     }
 
     // Handles Balance method.
-    fn balance<BS, RT>(rt: &mut RT, addr: Address) -> Result<TokenAmount, ActorError>
-    where
-        BS: Blockstore + Clone,
-        RT: Runtime<BS>,
-    {
+    fn balance(rt: &mut impl Runtime, addr: Address) -> Result<TokenAmount, ActorError> {
         let id = rt
             .resolve_address(&addr)
             .ok_or_else(|| actor_error!(illegal_argument; "cannot resolve account address"))?
@@ -242,11 +224,10 @@ impl Actor {
     }
 
     // Handles Transfer method.
-    fn transfer<BS, RT>(rt: &mut RT, params: TransferParams) -> Result<TransferReturn, ActorError>
-    where
-        BS: Blockstore + Clone,
-        RT: Runtime<BS>,
-    {
+    fn transfer(
+        rt: &mut impl Runtime,
+        params: TransferParams,
+    ) -> Result<TransferReturn, ActorError> {
         let TransferParams { to, amount } = params;
 
         // Resolve sender's and recipient's addresses to ID addresses.
@@ -274,14 +255,10 @@ impl Actor {
     }
 
     // Handles InitAtomicTransfer method.
-    fn init_atomic_transfer<BS, RT>(
-        rt: &mut RT,
+    fn init_atomic_transfer(
+        rt: &mut impl Runtime,
         params: InitAtomicTransferParams,
-    ) -> Result<AtomicInputID, ActorError>
-    where
-        BS: Blockstore + Clone,
-        RT: Runtime<BS>,
-    {
+    ) -> Result<AtomicInputID, ActorError> {
         let InitAtomicTransferParams {
             coordinator,
             transfer: TransferParams { to, amount },
@@ -308,14 +285,10 @@ impl Actor {
     }
 
     // Handles CancelAtomicTransfer method.
-    fn cancel_atomic_transfer<BS, RT>(
-        rt: &mut RT,
+    fn cancel_atomic_transfer(
+        rt: &mut impl Runtime,
         input_id: AtomicInputID,
-    ) -> Result<(), ActorError>
-    where
-        BS: Blockstore + Clone,
-        RT: Runtime<BS>,
-    {
+    ) -> Result<(), ActorError> {
         // Resolve sender's address to ID addresses.
         let from_id = rt.message().caller().id().unwrap();
 
@@ -329,14 +302,10 @@ impl Actor {
     }
 
     // Handles PrepareAtomicTransfer method.
-    fn prepare_atomic_transfer<BS, RT>(
-        rt: &mut RT,
+    fn prepare_atomic_transfer(
+        rt: &mut impl Runtime,
         params: PrepareAtomicTransferParams,
-    ) -> Result<AtomicExecID, ActorError>
-    where
-        BS: Blockstore + Clone,
-        RT: Runtime<BS>,
-    {
+    ) -> Result<AtomicExecID, ActorError> {
         let PrepareAtomicTransferParams { input_ids } = params;
 
         // Resolve sender's address to ID addresses.
@@ -371,9 +340,9 @@ impl Actor {
             wrapped: true,
         };
         rt.send(
-            st.ipc_gateway(),
+            &st.ipc_gateway(),
             ipc_gateway::Method::SendCross as MethodNum,
-            RawBytes::serialize(msg)?,
+            IpldBlock::serialize_cbor(&msg)?,
             TokenAmount::default(),
         )?;
 
@@ -381,11 +350,10 @@ impl Actor {
     }
 
     // Handles CommitAtomicTransfer method.
-    fn commit_atomic_transfer<BS, RT>(rt: &mut RT, params: ApplyMsgParams) -> Result<(), ActorError>
-    where
-        BS: Blockstore + Clone,
-        RT: Runtime<BS>,
-    {
+    fn commit_atomic_transfer(
+        rt: &mut impl Runtime,
+        params: ApplyMsgParams,
+    ) -> Result<(), ActorError> {
         let st: State = rt.state()?;
 
         // Check if the cross-message comes from the IPC gateway.
@@ -414,14 +382,10 @@ impl Actor {
     }
 
     // Handles AbortAtomicTransfer method.
-    fn abort_atomic_transfer<BS, RT>(
-        rt: &mut RT,
+    fn abort_atomic_transfer(
+        rt: &mut impl Runtime,
         params: AbortAtomicTransferParams,
-    ) -> Result<(), ActorError>
-    where
-        BS: Blockstore + Clone,
-        RT: Runtime<BS>,
-    {
+    ) -> Result<(), ActorError> {
         let AbortAtomicTransferParams { actors, exec_id } = params;
 
         // Resolve sender's address to ID addresses.
@@ -466,23 +430,19 @@ impl Actor {
             wrapped: true,
         };
         rt.send(
-            st.ipc_gateway(),
+            &st.ipc_gateway(),
             ipc_gateway::Method::SendCross as MethodNum,
-            RawBytes::serialize(msg)?,
+            IpldBlock::serialize_cbor(&msg)?,
             TokenAmount::default(),
         )?;
         Ok(())
     }
 
     // Handles RollbackAtomicTransfer method.
-    fn rollback_atomic_transfer<BS, RT>(
-        rt: &mut RT,
+    fn rollback_atomic_transfer(
+        rt: &mut impl Runtime,
         params: ApplyMsgParams,
-    ) -> Result<(), ActorError>
-    where
-        BS: Blockstore + Clone,
-        RT: Runtime<BS>,
-    {
+    ) -> Result<(), ActorError> {
         let st: State = rt.state()?;
 
         // Check if the cross-message comes from the IPC gateway actor
@@ -512,65 +472,20 @@ impl Actor {
 }
 
 impl ActorCode for Actor {
-    fn invoke_method<BS, RT>(
-        rt: &mut RT,
-        method: MethodNum,
-        params: &RawBytes,
-    ) -> Result<RawBytes, ActorError>
-    where
-        BS: Blockstore + Clone,
-        RT: Runtime<BS>,
-    {
-        match FromPrimitive::from_u64(method) {
-            Some(Method::Constructor) => {
-                Self::constructor(rt, cbor::deserialize_params(params)?)?;
-                Ok(RawBytes::default())
-            }
-            Some(Method::Name) => {
-                let res = Self::name(rt)?;
-                Ok(RawBytes::serialize(res)?)
-            }
-            Some(Method::Symbol) => {
-                let res = Self::symbol(rt)?;
-                Ok(RawBytes::serialize(res)?)
-            }
-            Some(Method::TotalSupply) => {
-                let res = Self::total_supply(rt)?;
-                Ok(RawBytes::serialize(res)?)
-            }
-            Some(Method::Balance) => {
-                let res = Self::balance(rt, cbor::deserialize_params(params)?)?;
-                Ok(RawBytes::serialize(res)?)
-            }
-            Some(Method::Transfer) => {
-                let res = Self::transfer(rt, cbor::deserialize_params(params)?)?;
-                Ok(RawBytes::serialize(res)?)
-            }
-            Some(Method::InitAtomicTransfer) => {
-                let res = Self::init_atomic_transfer(rt, cbor::deserialize_params(params)?)?;
-                Ok(RawBytes::serialize(res)?)
-            }
-            Some(Method::PrepareAtomicTransfer) => {
-                let res = Self::prepare_atomic_transfer(rt, cbor::deserialize_params(params)?)?;
-                Ok(RawBytes::serialize(res)?)
-            }
-            Some(Method::CancelAtomicTransfer) => {
-                Self::cancel_atomic_transfer(rt, cbor::deserialize_params(params)?)?;
-                Ok(RawBytes::default())
-            }
-            Some(Method::CommitAtomicTransfer) => {
-                Self::commit_atomic_transfer(rt, cbor::deserialize_params(params)?)?;
-                Ok(RawBytes::default())
-            }
-            Some(Method::AbortAtomicTransfer) => {
-                Self::abort_atomic_transfer(rt, cbor::deserialize_params(params)?)?;
-                Ok(RawBytes::default())
-            }
-            Some(Method::RollbackAtomicTransfer) => {
-                Self::rollback_atomic_transfer(rt, cbor::deserialize_params(params)?)?;
-                Ok(RawBytes::default())
-            }
-            None => Err(actor_error!(unhandled_message; "Invalid method")),
-        }
+    type Methods = Method;
+
+    actor_dispatch! {
+        Constructor => constructor,
+        Name => name,
+        Symbol => symbol,
+        TotalSupply => total_supply,
+        Balance => balance,
+        Transfer => transfer,
+        InitAtomicTransfer => init_atomic_transfer,
+        PrepareAtomicTransfer => prepare_atomic_transfer,
+        CancelAtomicTransfer => cancel_atomic_transfer,
+        CommitAtomicTransfer => commit_atomic_transfer,
+        AbortAtomicTransfer => abort_atomic_transfer,
+        RollbackAtomicTransfer => rollback_atomic_transfer,
     }
 }
