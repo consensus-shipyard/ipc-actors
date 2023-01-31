@@ -42,7 +42,7 @@ pub struct State {
     pub genesis: Vec<u8>,
     pub finality_threshold: ChainEpoch,
     pub check_period: ChainEpoch,
-    pub checkpoints: TCid<THamt<Cid, Checkpoint>>,
+    pub checkpoints: TCid<THamt<ChainEpoch, Checkpoint>>,
     pub window_checks: TCid<THamt<Cid, Votes>>,
     pub validator_set: Vec<Validator>,
     pub min_validators: u64,
