@@ -1,8 +1,10 @@
 use crate::state::State;
 use fil_actors_runtime::runtime::{ActorCode, Runtime};
-use fil_actors_runtime::{actor_error, cbor, ActorDowncast, ActorError, INIT_ACTOR_ADDR};
-use fvm_ipld_blockstore::Blockstore;
-use fvm_ipld_encoding::RawBytes;
+use fil_actors_runtime::{
+    actor_dispatch, actor_error, cbor, restrict_internal_api, ActorDowncast, ActorError,
+    INIT_ACTOR_ADDR,
+};
+use fvm_ipld_encoding::ipld_block::IpldBlock;
 use fvm_shared::address::Address;
 use fvm_shared::econ::TokenAmount;
 use fvm_shared::error::ExitCode;
@@ -24,8 +26,8 @@ fil_actors_runtime::wasm_trampoline!(Actor);
 #[repr(u64)]
 pub enum Method {
     Constructor = METHOD_CONSTRUCTOR,
-    PreCommit = 2,
-    Revoke = 3,
+    PreCommit = frc42_dispatch::method_hash!("PreCommit"),
+    Revoke = frc42_dispatch::method_hash!("Revoke"),
 }
 
 /// Atomic execution coordinator actor
@@ -40,12 +42,8 @@ lazy_static::lazy_static! {
 }
 
 impl Actor {
-    fn constructor<BS, RT>(rt: &mut RT, params: ConstructorParams) -> Result<(), ActorError>
-    where
-        BS: Blockstore,
-        RT: Runtime<BS>,
-    {
-        rt.validate_immediate_caller_is(std::iter::once(&*INIT_ACTOR_ADDR))?;
+    fn constructor(rt: &mut impl Runtime, params: ConstructorParams) -> Result<(), ActorError> {
+        rt.validate_immediate_caller_is(std::iter::once(&INIT_ACTOR_ADDR))?;
 
         let st = State::new(rt.store(), params).map_err(|e| {
             e.downcast_default(ExitCode::USR_ILLEGAL_STATE, "Failed to create actor state")
@@ -61,11 +59,7 @@ impl Actor {
     /// pre-commitments from all the execution actors, it emits for
     /// each of the execution actors a crossnet message triggering the
     /// specified method to commit the atomic execution.
-    fn pre_commit<BS, RT>(rt: &mut RT, params: ApplyMsgParams) -> Result<bool, ActorError>
-    where
-        BS: Blockstore,
-        RT: Runtime<BS>,
-    {
+    fn pre_commit(rt: &mut impl Runtime, params: ApplyMsgParams) -> Result<bool, ActorError> {
         let st: State = rt.state()?;
 
         // Check if the cross-message comes from the IPC gateway actor
@@ -130,9 +124,9 @@ impl Actor {
                 // Send the messages to commit the atomic execution
                 for msg in msgs {
                     rt.send(
-                        st.ipc_gateway_address,
+                        &st.ipc_gateway_address,
                         ipc_gateway::Method::SendCross as MethodNum,
-                        RawBytes::serialize(msg)?,
+                        IpldBlock::serialize_cbor(&msg)?,
                         TokenAmount::zero(),
                     )?;
                 }
@@ -158,11 +152,7 @@ impl Actor {
     /// execution. This method is to be invoked by a wrapped crossnet
     /// message originating in one of the execution actors involved in
     /// the atomic execution.
-    fn revoke<BS, RT>(rt: &mut RT, params: ApplyMsgParams) -> Result<(), ActorError>
-    where
-        BS: Blockstore,
-        RT: Runtime<BS>,
-    {
+    fn revoke(rt: &mut impl Runtime, params: ApplyMsgParams) -> Result<(), ActorError> {
         let st: State = rt.state()?;
 
         // Check if the cross-message comes from the IPC gateway actor
@@ -213,9 +203,9 @@ impl Actor {
         if let Some(msg) = msg {
             // Send the message to rollback the atomic execution
             rt.send(
-                st.ipc_gateway_address,
+                &st.ipc_gateway_address,
                 ipc_gateway::Method::SendCross as MethodNum,
-                RawBytes::serialize(msg)?,
+                IpldBlock::serialize_cbor(&msg)?,
                 TokenAmount::zero(),
             )?;
         }
@@ -225,29 +215,11 @@ impl Actor {
 }
 
 impl ActorCode for Actor {
-    fn invoke_method<BS, RT>(
-        rt: &mut RT,
-        method: MethodNum,
-        params: &RawBytes,
-    ) -> Result<RawBytes, ActorError>
-    where
-        BS: Blockstore,
-        RT: Runtime<BS>,
-    {
-        match FromPrimitive::from_u64(method) {
-            Some(Method::Constructor) => {
-                Self::constructor(rt, cbor::deserialize_params(params)?)?;
-                Ok(RawBytes::default())
-            }
-            Some(Method::PreCommit) => {
-                let res = Self::pre_commit(rt, cbor::deserialize_params(params)?)?;
-                Ok(RawBytes::serialize(res)?)
-            }
-            Some(Method::Revoke) => {
-                Self::revoke(rt, cbor::deserialize_params(params)?)?;
-                Ok(RawBytes::default())
-            }
-            None => Err(actor_error!(unhandled_message; "Invalid method")),
-        }
+    type Methods = Method;
+
+    actor_dispatch! {
+        Constructor => constructor,
+        PreCommit => pre_commit,
+        Revoke => revoke,
     }
 }

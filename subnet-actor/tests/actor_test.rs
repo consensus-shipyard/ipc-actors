@@ -2,8 +2,11 @@
 mod test {
     use cid::Cid;
     use fil_actors_runtime::runtime::Runtime;
-    use fil_actors_runtime::test_utils::{expect_abort, ExpectedVerifySig, MockRuntime};
-    use fil_actors_runtime::{cbor, ActorError, INIT_ACTOR_ADDR};
+    use fil_actors_runtime::test_utils::{
+        expect_abort, ExpectedVerifySig, MockRuntime, INIT_ACTOR_CODE_ID,
+    };
+    use fil_actors_runtime::{ActorError, INIT_ACTOR_ADDR};
+    use fvm_ipld_encoding::ipld_block::IpldBlock;
     use fvm_ipld_encoding::RawBytes;
     use fvm_shared::address::Address;
     use fvm_shared::crypto::signature::Signature;
@@ -38,18 +41,27 @@ mod test {
         }
     }
 
+    pub fn new_runtime(receiver: Address) -> MockRuntime {
+        MockRuntime {
+            receiver,
+            caller: INIT_ACTOR_ADDR,
+            caller_type: *INIT_ACTOR_CODE_ID,
+            ..Default::default()
+        }
+    }
+
     fn construct_runtime_with_receiver(receiver: Address) -> MockRuntime {
-        let caller = *INIT_ACTOR_ADDR;
-        let mut runtime = MockRuntime::new(receiver, caller);
+        let mut runtime = new_runtime(receiver);
+        runtime.set_caller(*INIT_ACTOR_CODE_ID, INIT_ACTOR_ADDR);
 
         let params = std_construct_param();
 
-        runtime.expect_validate_caller_addr(vec![caller]);
+        runtime.expect_validate_caller_addr(vec![INIT_ACTOR_ADDR]);
 
         runtime
             .call::<Actor>(
                 Method::Constructor as u64,
-                &cbor::serialize(&params, "test").unwrap(),
+                IpldBlock::serialize_cbor(&params).unwrap(),
             )
             .unwrap();
 
@@ -87,7 +99,7 @@ mod test {
             ExitCode::USR_ILLEGAL_ARGUMENT,
             runtime.call::<Actor>(
                 Method::Join as u64,
-                &cbor::serialize(&params, "test").unwrap(),
+                IpldBlock::serialize_cbor(&params).unwrap(),
             ),
         );
     }
@@ -114,7 +126,7 @@ mod test {
         runtime
             .call::<Actor>(
                 Method::Join as u64,
-                &cbor::serialize(&params, "test").unwrap(),
+                IpldBlock::serialize_cbor(&params).unwrap(),
             )
             .unwrap();
 
@@ -124,7 +136,7 @@ mod test {
         runtime.expect_validate_caller_addr(vec![gateway.clone()]);
         expect_abort(
             ExitCode::USR_ILLEGAL_STATE,
-            runtime.call::<Actor>(Method::Reward as u64, &RawBytes::default()),
+            runtime.call::<Actor>(Method::Reward as u64, None),
         );
 
         // verify state.
@@ -145,15 +157,15 @@ mod test {
         runtime.expect_send(
             gateway.clone(),
             ipc_gateway::Method::Register as u64,
-            RawBytes::default(),
+            None,
             TokenAmount::from_atto(MIN_COLLATERAL_AMOUNT),
-            RawBytes::default(),
+            None,
             ExitCode::new(0),
         );
         runtime
             .call::<Actor>(
                 Method::Join as u64,
-                &cbor::serialize(&params, "test").unwrap(),
+                IpldBlock::serialize_cbor(&params).unwrap(),
             )
             .unwrap();
 
@@ -183,15 +195,15 @@ mod test {
         runtime.expect_send(
             gateway.clone(),
             ipc_gateway::Method::AddStake as u64,
-            RawBytes::default(),
+            None,
             TokenAmount::from_atto(MIN_COLLATERAL_AMOUNT),
-            RawBytes::default(),
+            None,
             ExitCode::new(0),
         );
         runtime
             .call::<Actor>(
                 Method::Join as u64,
-                &cbor::serialize(&params, "test").unwrap(),
+                IpldBlock::serialize_cbor(&params).unwrap(),
             )
             .unwrap();
 
@@ -218,7 +230,7 @@ mod test {
         runtime.expect_validate_caller_addr(vec![gateway.clone()]);
         expect_abort(
             ExitCode::USR_ILLEGAL_ARGUMENT,
-            runtime.call::<Actor>(Method::Reward as u64, &RawBytes::default()),
+            runtime.call::<Actor>(Method::Reward as u64, None),
         );
 
         let total_reward = TokenAmount::from_atto(2);
@@ -233,15 +245,13 @@ mod test {
             runtime.expect_send(
                 v.addr,
                 METHOD_SEND,
-                RawBytes::default(),
+                None,
                 rew_amount.clone(),
-                RawBytes::default(),
+                None,
                 ExitCode::new(0),
             );
         }
-        runtime
-            .call::<Actor>(Method::Reward as u64, &RawBytes::default())
-            .unwrap();
+        runtime.call::<Actor>(Method::Reward as u64, None).unwrap();
         runtime.verify();
     }
 
@@ -266,15 +276,15 @@ mod test {
         runtime.expect_send(
             Address::new_id(IPC_GATEWAY_ADDR),
             ipc_gateway::Method::Register as u64,
-            RawBytes::default(),
+            None,
             TokenAmount::from_atto(MIN_COLLATERAL_AMOUNT),
-            RawBytes::default(),
+            None,
             ExitCode::new(0),
         );
         runtime
             .call::<Actor>(
                 Method::Join as u64,
-                &cbor::serialize(&params, "test").unwrap(),
+                IpldBlock::serialize_cbor(&params).unwrap(),
             )
             .unwrap();
 
@@ -300,15 +310,15 @@ mod test {
         runtime.expect_send(
             Address::new_id(IPC_GATEWAY_ADDR),
             ipc_gateway::Method::AddStake as u64,
-            RawBytes::default(),
+            None,
             TokenAmount::from_atto(MIN_COLLATERAL_AMOUNT),
-            RawBytes::default(),
+            None,
             ExitCode::new(0),
         );
         runtime
             .call::<Actor>(
                 Method::Join as u64,
-                &cbor::serialize(&params, "test").unwrap(),
+                IpldBlock::serialize_cbor(&params).unwrap(),
             )
             .unwrap();
 
@@ -335,15 +345,15 @@ mod test {
         runtime.expect_send(
             Address::new_id(IPC_GATEWAY_ADDR),
             ipc_gateway::Method::AddStake as u64,
-            RawBytes::default(),
+            None,
             value.clone(),
-            RawBytes::default(),
+            None,
             ExitCode::new(0),
         );
         runtime
             .call::<Actor>(
                 Method::Join as u64,
-                &cbor::serialize(&params, "test").unwrap(),
+                IpldBlock::serialize_cbor(&params).unwrap(),
             )
             .unwrap();
         let st: State = runtime.get_state();
@@ -364,17 +374,15 @@ mod test {
         runtime.expect_send(
             Address::new_id(IPC_GATEWAY_ADDR),
             ipc_gateway::Method::ReleaseStake as u64,
-            RawBytes::serialize(FundParams {
+            IpldBlock::serialize_cbor(&FundParams {
                 value: value.clone(),
             })
             .unwrap(),
             TokenAmount::zero(),
-            RawBytes::default(),
+            None,
             ExitCode::new(0),
         );
-        runtime
-            .call::<Actor>(Method::Leave as u64, &RawBytes::default())
-            .unwrap();
+        runtime.call::<Actor>(Method::Leave as u64, None).unwrap();
 
         let st: State = runtime.get_state();
         assert_eq!(st.validator_set.len(), 1);
@@ -389,7 +397,7 @@ mod test {
         runtime.expect_validate_caller_any();
         expect_abort(
             ExitCode::USR_ILLEGAL_STATE,
-            runtime.call::<Actor>(Method::Kill as u64, &RawBytes::default()),
+            runtime.call::<Actor>(Method::Kill as u64, None),
         );
 
         // // next miner inactivates the subnet
@@ -402,17 +410,15 @@ mod test {
         runtime.expect_send(
             Address::new_id(IPC_GATEWAY_ADDR),
             ipc_gateway::Method::ReleaseStake as u64,
-            RawBytes::serialize(FundParams {
+            IpldBlock::serialize_cbor(&FundParams {
                 value: value.clone(),
             })
             .unwrap(),
             TokenAmount::zero(),
-            RawBytes::default(),
+            None,
             ExitCode::new(0),
         );
-        runtime
-            .call::<Actor>(Method::Leave as u64, &RawBytes::default())
-            .unwrap();
+        runtime.call::<Actor>(Method::Leave as u64, None).unwrap();
 
         let st: State = runtime.get_state();
         assert_eq!(st.validator_set.len(), 0);
@@ -433,17 +439,15 @@ mod test {
         runtime.expect_send(
             Address::new_id(IPC_GATEWAY_ADDR),
             ipc_gateway::Method::ReleaseStake as u64,
-            RawBytes::serialize(FundParams {
+            IpldBlock::serialize_cbor(&FundParams {
                 value: value.clone(),
             })
             .unwrap(),
             TokenAmount::zero(),
-            RawBytes::default(),
+            None,
             ExitCode::new(0),
         );
-        runtime
-            .call::<Actor>(Method::Leave as u64, &RawBytes::default())
-            .unwrap();
+        runtime.call::<Actor>(Method::Leave as u64, None).unwrap();
         let st: State = runtime.get_state();
         assert_eq!(st.validator_set.len(), 0);
         assert_eq!(st.status, Status::Inactive);
@@ -460,14 +464,12 @@ mod test {
         runtime.expect_send(
             Address::new_id(IPC_GATEWAY_ADDR),
             ipc_gateway::Method::Kill as u64,
-            RawBytes::default(),
+            None,
             TokenAmount::zero(),
-            RawBytes::default(),
+            None,
             ExitCode::new(0),
         );
-        runtime
-            .call::<Actor>(Method::Kill as u64, &RawBytes::default())
-            .unwrap();
+        runtime.call::<Actor>(Method::Kill as u64, None).unwrap();
         let st: State = runtime.get_state();
         assert_eq!(st.total_stake, TokenAmount::zero());
         assert_eq!(st.status, Status::Killed);
@@ -501,18 +503,18 @@ mod test {
                 runtime.expect_send(
                     Address::new_id(IPC_GATEWAY_ADDR),
                     ipc_gateway::Method::Register as u64,
-                    RawBytes::default(),
+                    None,
                     TokenAmount::from_atto(MIN_COLLATERAL_AMOUNT),
-                    RawBytes::default(),
+                    None,
                     ExitCode::new(0),
                 );
             } else {
                 runtime.expect_send(
                     Address::new_id(IPC_GATEWAY_ADDR),
                     ipc_gateway::Method::AddStake as u64,
-                    RawBytes::default(),
+                    None,
                     TokenAmount::from_atto(MIN_COLLATERAL_AMOUNT),
-                    RawBytes::default(),
+                    None,
                     ExitCode::new(0),
                 );
             }
@@ -520,7 +522,7 @@ mod test {
             runtime
                 .call::<Actor>(
                     Method::Join as u64,
-                    &cbor::serialize(&params, "test").unwrap(),
+                    IpldBlock::serialize_cbor(&params).unwrap(),
                 )
                 .unwrap();
 
@@ -552,7 +554,7 @@ mod test {
             ExitCode::USR_ILLEGAL_STATE,
             runtime.call::<Actor>(
                 Method::SubmitCheckpoint as u64,
-                &cbor::serialize(&checkpoint_0, "test").unwrap(),
+                IpldBlock::serialize_cbor(&checkpoint_0).unwrap(),
             ),
         );
 
@@ -587,7 +589,7 @@ mod test {
             ExitCode::USR_ILLEGAL_STATE,
             runtime.call::<Actor>(
                 Method::SubmitCheckpoint as u64,
-                &cbor::serialize(&checkpoint_0, "test").unwrap(),
+                IpldBlock::serialize_cbor(&checkpoint_0).unwrap(),
             ),
         );
 
@@ -601,7 +603,7 @@ mod test {
             ExitCode::USR_ILLEGAL_STATE,
             runtime.call::<Actor>(
                 Method::SubmitCheckpoint as u64,
-                &cbor::serialize(&checkpoint_1, "test").unwrap(),
+                IpldBlock::serialize_cbor(&checkpoint_1).unwrap(),
             ),
         );
 
@@ -615,7 +617,7 @@ mod test {
             ExitCode::USR_ILLEGAL_STATE,
             runtime.call::<Actor>(
                 Method::SubmitCheckpoint as u64,
-                &cbor::serialize(&checkpoint_3, "test").unwrap(),
+                IpldBlock::serialize_cbor(&checkpoint_3).unwrap(),
             ),
         );
 
@@ -644,14 +646,14 @@ mod test {
         sender: Address,
         checkpoint: &Checkpoint,
         is_commit: bool,
-    ) -> Result<RawBytes, ActorError> {
+    ) -> Result<Option<IpldBlock>, ActorError> {
         runtime.set_caller(Cid::default(), sender.clone());
         runtime.expect_send(
             sender.clone(),
             ipc_sdk::account::PUBKEY_ADDRESS_METHOD as u64,
-            RawBytes::default(),
+            None,
             TokenAmount::zero(),
-            cbor::serialize(&sender.clone(), "test").unwrap(),
+            IpldBlock::serialize_cbor(&sender).unwrap(),
             ExitCode::new(0),
         );
         runtime.expect_validate_caller_any();
@@ -666,15 +668,15 @@ mod test {
             runtime.expect_send(
                 Address::new_id(IPC_GATEWAY_ADDR),
                 ipc_gateway::Method::CommitChildCheckpoint as u64,
-                RawBytes::serialize(checkpoint)?,
+                IpldBlock::serialize_cbor(&checkpoint).unwrap(),
                 TokenAmount::zero(),
-                cbor::serialize(&sender.clone(), "test").unwrap(),
+                IpldBlock::serialize_cbor(&sender).unwrap(),
                 ExitCode::new(0),
             )
         }
         runtime.call::<Actor>(
             Method::SubmitCheckpoint as u64,
-            &cbor::serialize(checkpoint, "test").unwrap(),
+            IpldBlock::serialize_cbor(&checkpoint).unwrap(),
         )
     }
 }

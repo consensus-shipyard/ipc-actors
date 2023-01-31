@@ -2,7 +2,7 @@ use anyhow::anyhow;
 use cid::multihash::Code;
 use cid::multihash::MultihashDigest;
 use cid::Cid;
-use fvm_ipld_encoding::{serde_bytes, to_vec, Cbor};
+use fvm_ipld_encoding::{serde_bytes, to_vec};
 use fvm_shared::clock::ChainEpoch;
 use fvm_shared::econ::TokenAmount;
 use ipc_sdk::subnet_id::SubnetID;
@@ -17,8 +17,6 @@ pub struct Checkpoint {
     #[serde(with = "serde_bytes")]
     sig: Vec<u8>,
 }
-
-impl Cbor for Checkpoint {}
 
 impl Checkpoint {
     pub fn new(id: SubnetID, epoch: ChainEpoch) -> Self {
@@ -135,7 +133,6 @@ impl CheckData {
         }
     }
 }
-impl Cbor for CheckData {}
 
 // CrossMsgMeta sends an aggregate of all messages being propagated up in
 // the checkpoint.
@@ -146,7 +143,6 @@ pub struct CrossMsgMeta {
     pub value: TokenAmount,
     pub fee: TokenAmount,
 }
-impl Cbor for CrossMsgMeta {}
 
 impl CrossMsgMeta {
     pub fn new() -> Self {
@@ -163,7 +159,6 @@ pub struct ChildCheck {
     pub source: SubnetID,
     pub checks: Vec<TCid<TLink<Checkpoint>>>,
 }
-impl Cbor for ChildCheck {}
 
 /// CheckpointEpoch returns the epoch of the next checkpoint
 /// that needs to be signed

@@ -1,4 +1,3 @@
-use fvm_ipld_encoding::Cbor;
 use fvm_shared::address::Address;
 use lazy_static::lazy_static;
 use serde::{Deserialize, Serialize};
@@ -13,7 +12,6 @@ pub struct SubnetID {
     parent: String,
     actor: Address,
 }
-impl Cbor for SubnetID {}
 
 lazy_static! {
     pub static ref ROOTNET_ID: SubnetID = SubnetID {

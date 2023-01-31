@@ -17,3 +17,8 @@ members = [
     "atomic-exec/primitives",
     "atomic-exec/examples/fungible-token",
 ]
+
+# Uncomment to point to you local versions
+# [patch."https://github.com/consensus-shipyard/fvm-utils"]
+# primitives = { path = "../fvm-utils/primitives" }
+# fil_actors_runtime = { path = "../fvm-utils/runtime" }

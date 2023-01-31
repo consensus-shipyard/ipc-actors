@@ -7,7 +7,7 @@ use std::ops::Deref;
 use cid::Cid;
 use fvm_ipld_blockstore::Blockstore;
 use fvm_ipld_encoding::tuple::Deserialize_tuple;
-use fvm_ipld_encoding::{Cbor, CborStore, RawBytes, DAG_CBOR};
+use fvm_ipld_encoding::{CborStore, RawBytes, DAG_CBOR};
 use fvm_primitives::{TCid, THamt};
 use serde::Deserialize;
 use serde::{self, de::DeserializeOwned, Serialize};
@@ -16,7 +16,7 @@ use serde_tuple::Serialize_tuple;
 pub use ipc_atomic_execution::AtomicExecID;
 
 /// State that supports locking, as well as computing its CID.
-pub trait LockableState: Cbor {
+pub trait LockableState: Serialize {
     /// Locks the state so that it cannot be changed until unlocked.
     fn lock(&mut self) -> anyhow::Result<()>;
 
@@ -33,10 +33,10 @@ pub trait LockableState: Cbor {
 }
 
 /// Computes the CID of a CBOR object.
-fn cid_from_cbor(obj: &impl Cbor) -> Cid {
+fn cid_from_cbor<T: Serialize + ?Sized>(obj: &T) -> Cid {
     Cid::new_v1(
         DAG_CBOR,
-        Code::Blake2b256.digest(&obj.marshal_cbor().unwrap()),
+        Code::Blake2b256.digest(&RawBytes::serialize(obj).unwrap().to_vec()),
     )
 }
 
@@ -57,7 +57,6 @@ where
     // Arbitrary piece of state.
     state: T,
 }
-impl<T: Serialize + DeserializeOwned> Cbor for AtomicInputState<T> {}
 
 impl<T: Serialize + DeserializeOwned> AtomicInputState<T> {
     /// Converts some state into a lockable piece of state.
@@ -170,7 +169,6 @@ struct AtomicInputEntry {
     unlocked_state_cids: Vec<Cid>,
     input: RawBytes,
 }
-impl Cbor for AtomicInputEntry {}
 
 /// Internal state associated with an atomic execution ID.
 #[derive(Debug, PartialEq, Serialize_tuple, Deserialize_tuple)]
@@ -191,7 +189,6 @@ pub struct AtomicExecRegistry {
     input_ids: TCid<THamt<AtomicInputID, AtomicInputEntry>>,
     exec_ids: TCid<THamt<AtomicExecID, AtomicOutputEntry>>,
 }
-impl Cbor for AtomicExecRegistry {}
 
 impl AtomicExecRegistry {
     /// Constructs a new instance of the atomic execution registry.

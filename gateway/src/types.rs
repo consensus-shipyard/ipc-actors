@@ -2,7 +2,7 @@ use cid::multihash::Code;
 use cid::{multihash, Cid};
 use fil_actors_runtime::{cbor, ActorError, Array};
 use fvm_ipld_encoding::tuple::{Deserialize_tuple, Serialize_tuple};
-use fvm_ipld_encoding::{Cbor, RawBytes, DAG_CBOR};
+use fvm_ipld_encoding::{RawBytes, DAG_CBOR};
 use fvm_shared::address::Address;
 use fvm_shared::clock::ChainEpoch;
 use fvm_shared::econ::TokenAmount;
@@ -71,8 +71,6 @@ pub struct PostBoxItem {
     pub cross_msg: CrossMsg,
     pub owners: Option<Vec<Address>>,
 }
-
-impl Cbor for PostBoxItem {}
 
 // The implementation does not matter, we just need to extract the cid
 impl CodeType for PostBoxItem {

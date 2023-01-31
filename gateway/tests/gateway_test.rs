@@ -1,6 +1,7 @@
 use cid::Cid;
 use fil_actors_runtime::runtime::Runtime;
 use fil_actors_runtime::{BURNT_FUNDS_ACTOR_ADDR, REWARD_ACTOR_ADDR};
+use fvm_ipld_encoding::ipld_block::IpldBlock;
 use fvm_ipld_encoding::RawBytes;
 use fvm_shared::address::Address;
 use fvm_shared::bigint::Zero;
@@ -347,9 +348,9 @@ fn checkpoint_crossmsgs() {
     rt.expect_send(
         shid.subnet_actor(),
         SUBNET_ACTOR_REWARD_METHOD,
-        RawBytes::default(),
+        None,
         fee,
-        RawBytes::default(),
+        None,
         ExitCode::OK,
     );
     h.commit_child_check(&mut rt, &shid, &ch, ExitCode::OK)
@@ -619,9 +620,9 @@ fn test_apply_msg_bu_target_subnet() {
                 rt.expect_send(
                     sto.clone(),
                     METHOD_SEND,
-                    RawBytes::default(),
+                    None,
                     value.clone(),
-                    RawBytes::default(),
+                    None,
                     ExitCode::OK,
                 );
             })),
@@ -685,11 +686,11 @@ fn test_apply_msg_bu_not_target_subnet() {
     // propagating a bottom-up message triggers the
     // funds included in the message to be burnt.
     rt.expect_send(
-        *BURNT_FUNDS_ACTOR_ADDR,
+        BURNT_FUNDS_ACTOR_ADDR,
         METHOD_SEND,
-        RawBytes::default(),
+        None,
         params.clone().value,
-        RawBytes::default(),
+        None,
         ExitCode::OK,
     );
     h.propagate(
@@ -770,11 +771,11 @@ fn test_propagate_with_remainder() {
     // propagating a bottom-up message triggers the
     // funds included in the message to be burnt.
     rt.expect_send(
-        *BURNT_FUNDS_ACTOR_ADDR,
+        BURNT_FUNDS_ACTOR_ADDR,
         METHOD_SEND,
-        RawBytes::default(),
+        None,
         params.clone().value,
-        RawBytes::default(),
+        None,
         ExitCode::OK,
     );
     h.propagate(&mut rt, caller, cid.clone(), &params.value, value.clone())
@@ -926,23 +927,23 @@ fn test_apply_msg_tp_target_subnet() {
             Some(Box::new(move |rt| {
                 // expect to send reward message
                 rt.expect_send(
-                    *REWARD_ACTOR_ADDR,
+                    REWARD_ACTOR_ADDR,
                     ext::reward::EXTERNAL_FUNDING_METHOD,
-                    RawBytes::serialize(ext::reward::FundingParams {
+                    IpldBlock::serialize_cbor(&ext::reward::FundingParams {
                         addr: *ACTOR,
                         value: v.clone(),
                     })
                     .unwrap(),
                     TokenAmount::zero(),
-                    RawBytes::default(),
+                    None,
                     ExitCode::OK,
                 );
                 rt.expect_send(
                     sto.clone(),
                     METHOD_SEND,
-                    RawBytes::default(),
+                    None,
                     v.clone(),
-                    RawBytes::default(),
+                    None,
                     ExitCode::OK,
                 );
             })),
@@ -1009,15 +1010,15 @@ fn test_apply_msg_tp_not_target_subnet() {
             Some(Box::new(move |rt| {
                 // expect to send reward message
                 rt.expect_send(
-                    *REWARD_ACTOR_ADDR,
+                    REWARD_ACTOR_ADDR,
                     ext::reward::EXTERNAL_FUNDING_METHOD,
-                    RawBytes::serialize(ext::reward::FundingParams {
+                    IpldBlock::serialize_cbor(&ext::reward::FundingParams {
                         addr: *ACTOR,
                         value: v.clone(),
                     })
                     .unwrap(),
                     TokenAmount::zero(),
-                    RawBytes::default(),
+                    None,
                     ExitCode::OK,
                 );
             })),

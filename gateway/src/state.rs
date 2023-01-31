@@ -5,7 +5,6 @@ use cid::Cid;
 use fil_actors_runtime::runtime::Runtime;
 use fil_actors_runtime::{actor_error, ActorDowncast, ActorError, Map};
 use fvm_ipld_blockstore::Blockstore;
-use fvm_ipld_encoding::Cbor;
 use fvm_ipld_hamt::BytesKey;
 use fvm_shared::address::Address;
 use fvm_shared::clock::ChainEpoch;
@@ -53,8 +52,6 @@ lazy_static! {
     static ref MIN_SUBNET_COLLATERAL: TokenAmount = TokenAmount::from_atto(MIN_COLLATERAL_AMOUNT);
 }
 
-impl Cbor for State {}
-
 impl State {
     pub fn new<BS: Blockstore>(store: &BS, params: ConstructorParams) -> anyhow::Result<State> {
         Ok(State {
@@ -91,11 +88,11 @@ impl State {
     }
 
     /// Register a subnet in the map of subnets and flush.
-    pub(crate) fn register_subnet<BS, RT>(&mut self, rt: &RT, id: &SubnetID) -> anyhow::Result<()>
-    where
-        BS: Blockstore,
-        RT: Runtime<BS>,
-    {
+    pub(crate) fn register_subnet(
+        &mut self,
+        rt: &impl Runtime,
+        id: &SubnetID,
+    ) -> anyhow::Result<()> {
         let val = rt.message().value_received();
         if val < self.min_stake {
             return Err(anyhow!("call to register doesn't include enough funds"));
