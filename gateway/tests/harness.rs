@@ -26,6 +26,7 @@ use fvm_shared::error::ExitCode;
 use fvm_shared::MethodNum;
 use fvm_shared::METHOD_SEND;
 use ipc_gateway::checkpoint::ChildCheck;
+use ipc_gateway::SUBNET_ACTOR_REWARD_METHOD;
 use ipc_gateway::{
     ext, get_topdown_msg, is_bottomup, Actor, ApplyMsgParams, Checkpoint, ConstructorParams,
     CrossMsg, CrossMsgMeta, CrossMsgParams, CrossMsgs, FundParams, IPCAddress, IPCMsgType, Method,
@@ -304,6 +305,14 @@ impl Harness {
             IpldBlock::serialize_cbor(&*TEST_BLS).unwrap(),
             ExitCode::OK,
         );
+        rt.expect_send(
+            id.subnet_actor(),
+            SUBNET_ACTOR_REWARD_METHOD,
+            None,
+            CROSS_MSG_FEE.clone(),
+            None,
+            ExitCode::OK,
+        );
         rt.call::<Actor>(
             Method::Fund as MethodNum,
             IpldBlock::serialize_cbor(&id).unwrap(),
@@ -456,6 +465,16 @@ impl Harness {
                 METHOD_SEND,
                 None,
                 value.clone(),
+                None,
+                ExitCode::OK,
+            );
+        } else {
+            // if top-down, reward is distributed
+            rt.expect_send(
+                dest.down(&self.net_name).unwrap().subnet_actor(),
+                SUBNET_ACTOR_REWARD_METHOD,
+                None,
+                CROSS_MSG_FEE.clone(),
                 None,
                 ExitCode::OK,
             );

@@ -855,6 +855,20 @@ fn test_apply_msg_bu_switch_td() {
         .unwrap()
         .nonce;
 
+    // propagated as top-down, so it should distribute a fee in this subnet
+    rt.expect_send(
+        tt.subnet()
+            .unwrap()
+            .down(&h.net_name)
+            .unwrap()
+            .subnet_actor(),
+        SUBNET_ACTOR_REWARD_METHOD,
+        None,
+        CROSS_MSG_FEE.clone(),
+        None,
+        ExitCode::OK,
+    );
+
     // now we propagate
     h.propagate(
         &mut rt,
@@ -1045,6 +1059,21 @@ fn test_apply_msg_tp_not_target_subnet() {
         .unwrap()
         .nonce;
     let caller = ff.clone().raw_addr().unwrap();
+
+    // propagated as top-down, so it should distribute a fee in this subnet
+    rt.expect_send(
+        tt.subnet()
+            .unwrap()
+            .down(&h.net_name)
+            .unwrap()
+            .subnet_actor(),
+        SUBNET_ACTOR_REWARD_METHOD,
+        None,
+        CROSS_MSG_FEE.clone(),
+        None,
+        ExitCode::OK,
+    );
+
     h.propagate(
         &mut rt,
         caller,
