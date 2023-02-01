@@ -16,7 +16,7 @@ use primitives::{TAmt, TCid, THamt, TLink};
 use serde::{Deserialize, Serialize};
 use std::str::FromStr;
 
-use ipc_sdk::subnet_id::{self, SubnetID};
+use ipc_sdk::subnet_id::SubnetID;
 
 use super::checkpoint::*;
 use super::cross::*;
@@ -217,36 +217,6 @@ impl State {
         Ok(())
     }
 
-    /// store a cross-fee in a checkpoint
-    pub(crate) fn store_fee_in_checkpoint<BS: Blockstore>(
-        &mut self,
-        store: &BS,
-        fee: &TokenAmount,
-        curr_epoch: ChainEpoch,
-    ) -> anyhow::Result<()> {
-        let mut ch = self.get_window_checkpoint(store, curr_epoch)?;
-
-        match ch.cross_msgs_mut() {
-            Some(msgmeta) => {
-                msgmeta.value += fee;
-                msgmeta.fee += fee;
-            }
-            None => {
-                let mut msgmeta = CrossMsgMeta::default();
-                msgmeta.value += fee;
-                msgmeta.fee += fee;
-                ch.set_cross_msgs(msgmeta);
-            }
-        };
-
-        // flush checkpoint
-        self.flush_checkpoint(store, &ch).map_err(|e| {
-            e.downcast_default(ExitCode::USR_ILLEGAL_STATE, "error flushing checkpoint")
-        })?;
-
-        Ok(())
-    }
-
     /// append cross-msg and/or fee reward to a specific message meta.
     pub(crate) fn append_msg_to_meta<BS: Blockstore>(
         &mut self,
@@ -301,8 +271,6 @@ impl State {
         &mut self,
         store: &BS,
         cross_msg: &mut CrossMsg,
-        fee: &TokenAmount,
-        curr_epoch: ChainEpoch,
     ) -> anyhow::Result<()> {
         let msg = &cross_msg.msg;
         let sto = msg.to.subnet()?;
@@ -325,14 +293,6 @@ impl State {
                 sub.nonce += 1;
                 sub.circ_supply += &cross_msg.msg.value;
                 self.flush_subnet(store, &sub)?;
-
-                // store fee in checkpoint as long as we are not the root
-                // (the root should distribute the reward immediately to
-                // all validators)
-                // FIXME: Figure out how to distribute cross-fees in root.
-                if self.network_name != *subnet_id::ROOTNET_ID {
-                    self.store_fee_in_checkpoint(store, fee, curr_epoch)?;
-                }
             }
             None => {
                 return Err(anyhow!(
@@ -357,23 +317,6 @@ impl State {
         self.nonce += 1;
 
         Ok(())
-    }
-
-    /// commits a cross-msg for propagation
-    pub(crate) fn send_cross<BS: Blockstore>(
-        &mut self,
-        store: &BS,
-        cross_msg: &mut CrossMsg,
-        fee: &TokenAmount,
-        curr_epoch: ChainEpoch,
-    ) -> anyhow::Result<IPCMsgType> {
-        let msg = &cross_msg.msg;
-        let tp = msg.ipc_type()?;
-        match tp {
-            IPCMsgType::TopDown => self.commit_topdown_msg(store, cross_msg, fee, curr_epoch)?,
-            IPCMsgType::BottomUp => self.commit_bottomup_msg(store, cross_msg, fee, curr_epoch)?,
-        };
-        Ok(tp)
     }
 
     pub fn bottomup_state_transition(&mut self, msg: &StorableMsg) -> anyhow::Result<()> {

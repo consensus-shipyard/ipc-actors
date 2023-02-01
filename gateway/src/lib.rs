@@ -5,12 +5,12 @@ pub use self::cross::{is_bottomup, CrossMsg, CrossMsgs, IPCMsgType, StorableMsg}
 pub use self::state::*;
 pub use self::subnet::*;
 pub use self::types::*;
+use cross::{burn_bu_funds, cross_msg_side_effects, distribute_crossmsg_fee};
 use fil_actors_runtime::runtime::fvm::resolve_secp_bls;
 use fil_actors_runtime::runtime::{ActorCode, Runtime};
 use fil_actors_runtime::{
     actor_dispatch, actor_error, restrict_internal_api, ActorDowncast, ActorError,
-    BURNT_FUNDS_ACTOR_ADDR, CALLER_TYPES_SIGNABLE, INIT_ACTOR_ADDR, REWARD_ACTOR_ADDR,
-    SYSTEM_ACTOR_ADDR,
+    CALLER_TYPES_SIGNABLE, INIT_ACTOR_ADDR, REWARD_ACTOR_ADDR, SYSTEM_ACTOR_ADDR,
 };
 use fvm_ipld_encoding::ipld_block::IpldBlock;
 use fvm_ipld_encoding::RawBytes;
@@ -388,11 +388,7 @@ impl Actor {
         })?;
 
         // distribute rewards
-        if !fee.is_zero() {
-            rt.send(&subnet_actor, SUBNET_ACTOR_REWARD_METHOD, None, fee)?;
-        }
-
-        Ok(())
+        distribute_crossmsg_fee(rt, &subnet_actor, fee)
     }
 
     /// Fund injects new funds from an account of the parent chain to a subnet.
@@ -416,8 +412,8 @@ impl Actor {
 
         let sig_addr = resolve_secp_bls(rt, &rt.message().caller())?;
 
+        let fee = CROSS_MSG_FEE.clone();
         rt.transaction(|st: &mut State, rt| {
-            let fee = &CROSS_MSG_FEE;
             st.collect_cross_fee(&mut value, &fee)?;
             // Create fund message
             let mut f_msg = CrossMsg {
@@ -433,17 +429,17 @@ impl Actor {
             log::debug!("fund cross msg is: {:?}", f_msg);
 
             // Commit top-down message.
-            st.commit_topdown_msg(rt.store(), &mut f_msg, &fee, rt.curr_epoch())
-                .map_err(|e| {
-                    e.downcast_default(
-                        ExitCode::USR_ILLEGAL_STATE,
-                        "error committing top-down message",
-                    )
-                })?;
+            st.commit_topdown_msg(rt.store(), &mut f_msg).map_err(|e| {
+                e.downcast_default(
+                    ExitCode::USR_ILLEGAL_STATE,
+                    "error committing top-down message",
+                )
+            })?;
             Ok(())
         })?;
 
-        Ok(())
+        // distribute top-down message fee to validators.
+        distribute_crossmsg_fee(rt, &params.subnet_actor(), fee)
     }
 
     /// Release creates a new check message to release funds in parent chain
@@ -502,9 +498,7 @@ impl Actor {
         })?;
 
         // burn funds that are send as bottom-up
-        rt.send(&BURNT_FUNDS_ACTOR_ADDR, METHOD_SEND, None, value)?;
-
-        Ok(())
+        burn_bu_funds(rt, value)
     }
 
     /// SendCross sends an arbitrary cross-message to other subnet in the hierarchy.
@@ -535,7 +529,7 @@ impl Actor {
             mut cross_msg,
             destination,
         } = params;
-        let mut tp = None;
+        let (mut do_burn, mut top_down_fee) = (false, TokenAmount::zero());
 
         rt.transaction(|st: &mut State, rt| {
             if destination == st.network_name {
@@ -568,6 +562,10 @@ impl Actor {
             };
 
             // check that the right funds were sent in message
+            // TODO: The cross_message fee will be deducted from the value of the
+            // cross-message. Should we deduct it before this check? Or should we even
+            // remove this check and return the remainder of the value sent in the message
+            // and the cross-fee to the originating contract?
             if rt.message().value_received() != msg.value {
                 return Err(actor_error!(
                     illegal_argument,
@@ -576,22 +574,16 @@ impl Actor {
             }
 
             // collect cross-fee
-            let fee = &CROSS_MSG_FEE;
+            let fee = CROSS_MSG_FEE.clone();
             st.collect_cross_fee(&mut msg.value, &fee)?;
 
-            tp = Some(st.send_cross(rt.store(), &mut cross_msg, &fee, rt.curr_epoch()).map_err(|e| {
-                e.downcast_default(ExitCode::USR_ILLEGAL_STATE, "error committing cross message")
-            })?);
-
+            // commit cross-message for propagation
+            (do_burn, top_down_fee) = Self::commit_cross_message(rt, st, &mut cross_msg, fee)?;
             Ok(())
         })?;
 
-        let msg = cross_msg.msg;
-        if let Some(t) = tp {
-            if t == IPCMsgType::BottomUp && msg.value > TokenAmount::zero() {
-                rt.send(&BURNT_FUNDS_ACTOR_ADDR, METHOD_SEND, None, msg.value)?;
-            }
-        }
+        // side-effects sent without any remainders
+        cross_msg_side_effects(rt, &cross_msg, do_burn, &top_down_fee)?;
 
         Ok(())
     }
@@ -771,7 +763,7 @@ impl Actor {
         let PropagateParams { postbox_cid } = params;
         let owner = rt.message().caller();
         let mut value = rt.message().value_received();
-        let mut do_burn = false;
+        let (mut do_burn, mut top_down_fee) = (false, TokenAmount::zero());
 
         let cross_msg = rt.transaction(|st: &mut State, rt| {
             let postbox_item = st.load_from_postbox(rt.store(), postbox_cid).map_err(|e| {
@@ -784,45 +776,38 @@ impl Actor {
             }
 
             // collect cross-fee
-            let fee = &CROSS_MSG_FEE;
+            let fee = CROSS_MSG_FEE.clone();
             st.collect_cross_fee(&mut value, &fee)?;
 
             let PostBoxItem { mut cross_msg, .. } = postbox_item;
-            do_burn = Self::commit_cross_message(rt, st, &mut cross_msg, &fee)?;
+            (do_burn, top_down_fee) = Self::commit_cross_message(rt, st, &mut cross_msg, fee)?;
             st.remove_from_postbox(rt.store(), postbox_cid)?;
             Ok(cross_msg)
         })?;
 
-        // if bottom_up message being committed.
-        if do_burn {
-            rt.send(
-                &BURNT_FUNDS_ACTOR_ADDR,
-                METHOD_SEND,
-                None,
-                cross_msg.msg.value.clone(),
-            )?;
-        }
-
-        // send the remainder of the fee to the owner
-        if value > TokenAmount::zero() {
+        // trigger cross-message side-effects returning the remainder of the fee
+        // to the source.
+        cross_msg_side_effects(rt, &cross_msg, do_burn, &top_down_fee)?;
+        // return fee remainder to owner
+        if !value.is_zero() {
             rt.send(&owner, METHOD_SEND, None, value.clone())?;
         }
-
         Ok(())
     }
 
     /// Commit the cross message to storage. It outputs a flag signaling
     /// if the committed messages was bottom-up and some funds need to be
-    /// burnt.
+    /// burnt or if a top-down message fee needs to be distributed.
     ///
     /// NOTE: This function should always be called inside an `rt.transaction`
     fn commit_cross_message(
         rt: &mut impl Runtime,
         st: &mut State,
-        mut cross_msg: &mut CrossMsg,
-        fee: &TokenAmount,
-    ) -> Result<bool, ActorError> {
+        cross_msg: &mut CrossMsg,
+        fee: TokenAmount,
+    ) -> Result<(bool, TokenAmount), ActorError> {
         let mut do_burn = false;
+
         let sto = cross_msg
             .msg
             .to
@@ -839,6 +824,7 @@ impl Actor {
             )
         })? {
             IPCMsgType::BottomUp => {
+                let mut top_down_fee = TokenAmount::zero();
                 let sfrom =
                     cross_msg.msg.from.subnet().map_err(|_| {
                         actor_error!(illegal_argument, "error getting subnet from msg")
@@ -854,12 +840,13 @@ impl Actor {
                 // if the message is a bottom-up message and it reached the common-parent
                 // then we need to start propagating it down to the destination.
                 let r = if nearest_common_parent == st.network_name {
-                    st.commit_topdown_msg(rt.store(), cross_msg, fee, rt.curr_epoch())
+                    top_down_fee = fee;
+                    st.commit_topdown_msg(rt.store(), cross_msg)
                 } else {
                     if cross_msg.msg.value > TokenAmount::zero() {
                         do_burn = true;
                     }
-                    st.commit_bottomup_msg(rt.store(), cross_msg, fee, rt.curr_epoch())
+                    st.commit_bottomup_msg(rt.store(), cross_msg, &fee, rt.curr_epoch())
                 };
 
                 r.map_err(|e| {
@@ -869,22 +856,22 @@ impl Actor {
                     )
                 })?;
 
-                Ok(do_burn)
+                Ok((do_burn, top_down_fee))
             }
             IPCMsgType::TopDown => {
                 st.applied_topdown_nonce += 1;
-                st.commit_topdown_msg(rt.store(), &mut cross_msg, fee, rt.curr_epoch())
-                    .map_err(|e| {
-                        e.downcast_default(
-                            ExitCode::USR_ILLEGAL_STATE,
-                            "error committing top-down message while applying it",
-                        )
-                    })?;
-                Ok(do_burn)
+                st.commit_topdown_msg(rt.store(), cross_msg).map_err(|e| {
+                    e.downcast_default(
+                        ExitCode::USR_ILLEGAL_STATE,
+                        "error committing top-down message while applying it",
+                    )
+                })?;
+                Ok((do_burn, fee))
             }
         }
     }
 }
+
 impl ActorCode for Actor {
     type Methods = Method;
 
