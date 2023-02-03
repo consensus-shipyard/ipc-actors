@@ -22,3 +22,14 @@ members = [
 # [patch."https://github.com/consensus-shipyard/fvm-utils"]
 # primitives = { path = "../fvm-utils/primitives" }
 # fil_actors_runtime = { path = "../fvm-utils/runtime" }
+
+[profile.wasm]
+inherits = "release"
+# This needs to be unwind, not abort, so that we can handle panics within our panic hook.
+panic = "unwind"
+overflow-checks = true
+lto = "thin"
+opt-level = 3
+strip = true
+codegen-units = 1
+incremental = false

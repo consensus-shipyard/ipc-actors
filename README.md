@@ -23,7 +23,7 @@ git checkout next
 # by the builtin-actors bundling script
 export IPC_ACTORS_PATH="<path_to>/ipc-actors/output"
 # Build the bundle
-cargo build
+BUILD_FIL_NETWORK="devnet" cargo build
 ```
 The build command should return a similar output to the following, indicating all the actors that have been bundled and the path of the resulting `.car` file with the bundle.
 ```

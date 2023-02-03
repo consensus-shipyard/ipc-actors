@@ -13,7 +13,7 @@ keywords = ["filecoin", "web3", "wasm"]
 crate-type = ["cdylib", "lib"]
 
 [dependencies]
-ipc_gateway = { path = "../gateway", package = "ipc-gateway" }
+ipc_gateway = { path = "../gateway", package = "ipc-gateway", features = [] }
 
 fil_actors_runtime = { git = "https://github.com/consensus-shipyard/fvm-utils", features = ["fil-actor"] }
 primitives = { git = "https://github.com/consensus-shipyard/fvm-utils" }
