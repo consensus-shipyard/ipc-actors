@@ -34,7 +34,7 @@ pub struct State {
     pub network_name: SubnetID,
     pub total_subnets: u64,
     pub min_stake: TokenAmount,
-    pub subnets: TCid<THamt<Cid, Subnet>>,
+    pub subnets: TCid<THamt<SubnetID, Subnet>>,
     pub check_period: ChainEpoch,
     pub checkpoints: TCid<THamt<ChainEpoch, Checkpoint>>,
     pub check_msg_registry: TCid<THamt<TCid<TLink<CrossMsgs>>, CrossMsgs>>,
