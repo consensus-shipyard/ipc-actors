@@ -46,4 +46,4 @@ wasm-builder = "3.0.1"
 wasmtime = "0.35.2"
 
 [features]
-fil-actor = []
+fil-gateway-actor = []

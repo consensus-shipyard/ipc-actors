@@ -27,7 +27,7 @@ use num_derive::FromPrimitive;
 use num_traits::FromPrimitive;
 use primitives::TCid;
 
-#[cfg(feature = "fil-actor")]
+#[cfg(feature = "fil-gateway-actor")]
 fil_actors_runtime::wasm_trampoline!(Actor);
 
 pub mod checkpoint;

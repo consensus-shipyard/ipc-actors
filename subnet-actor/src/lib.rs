@@ -19,6 +19,8 @@ use num_traits::{FromPrimitive, Zero};
 
 pub use crate::state::State;
 pub use crate::types::*;
+
+#[cfg(feature = "fil-actor")]
 fil_actors_runtime::wasm_trampoline!(Actor);
 
 /// Atomic execution coordinator actor methods available
