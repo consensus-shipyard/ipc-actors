@@ -11,7 +11,7 @@ This repository includes the reference implementation of all the actors responsi
 Building the actors in wasm is as simple as running `make build`. This command outputs the wasm bytecode for all of the actors in the `output/` directory.
 
 ### Bundling into the builtin-actors bundle
-The FVM does not currently support the deployment of user-defined native actors, so in order to deploy thse native IPC actors, they need to be conveniently bundled into the builtin-actors bundle. To create a builtin-actors bundle including the IPC actors you can follow these steps: 
+The FVM does not currently support the deployment of user-defined native actors, so in order to deploy these native IPC actors, they need to be conveniently bundled into the builtin-actors bundle. To create a builtin-actors bundle including the IPC actors you can follow these steps: 
 ```bash
 # Compile IPC actors
 make build
