@@ -1,13 +1,13 @@
 use fvm_shared::address::Address;
 use lazy_static::lazy_static;
-use serde::{Deserialize, Serialize};
+use serde_tuple::{Deserialize_tuple, Serialize_tuple};
 use std::fmt;
 use std::path::{Path, PathBuf};
 use std::str::FromStr;
 
 use crate::error::Error;
 
-#[derive(PartialEq, Eq, Hash, Clone, Debug, Serialize, Deserialize)]
+#[derive(PartialEq, Eq, Hash, Clone, Debug, Serialize_tuple, Deserialize_tuple)]
 pub struct SubnetID {
     parent: String,
     actor: Address,
