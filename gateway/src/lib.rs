@@ -10,9 +10,8 @@ use fil_actors_runtime::runtime::fvm::resolve_secp_bls;
 use fil_actors_runtime::runtime::{ActorCode, Runtime};
 use fil_actors_runtime::{
     actor_dispatch, actor_error, restrict_internal_api, ActorDowncast, ActorError,
-    CALLER_TYPES_SIGNABLE, INIT_ACTOR_ADDR, REWARD_ACTOR_ADDR, SYSTEM_ACTOR_ADDR,
+    CALLER_TYPES_SIGNABLE, INIT_ACTOR_ADDR, SYSTEM_ACTOR_ADDR,
 };
-use fvm_ipld_encoding::ipld_block::IpldBlock;
 use fvm_ipld_encoding::RawBytes;
 use fvm_shared::address::Address;
 use fvm_shared::bigint::Zero;
@@ -642,26 +641,22 @@ impl Actor {
             }
             Ok(IPCMsgType::TopDown) => {
                 // Mint funds for the gateway, as any topdown message
-                // including tokens traversing the subnet will provide
-                // the gateway with additional balance (circ_supply).
-                let params = ext::reward::FundingParams {
-                    // curr gateway address
-                    addr: rt.message().receiver(),
-                    value: cross_msg.msg.value.clone(),
-                };
-                // FIXME: This assumes the ability to mint new FIL from
-                // the RewardActor. This is no longer needed,
-                // instead we can provide with the total
-                // circulating supply to the gateway in genesis (so we don't
-                // require changes to the RewardActor)
-                // See: https://github.com/consensus-shipyard/ipc-actors/issues/45
-                if cross_msg.msg.value > TokenAmount::zero() {
-                    rt.send(
-                        &REWARD_ACTOR_ADDR,
-                        ext::reward::EXTERNAL_FUNDING_METHOD,
-                        IpldBlock::serialize_cbor(&params)?,
-                        TokenAmount::zero(),
-                    )?;
+                // including tokens traversing the subnet will use
+                // some balance from the gateway to increase the circ_supply.
+                // check if the gateway has enough funds to mint new FIL,
+                // if not fail right-away and do not allow the execution of
+                // the message.
+                // TODO: It may be a good idea in the future to decouple the
+                // balance provisioned in the gateway to mint new circulating supply
+                // in an independent actor. Minting tokens would require a call to the new actor actor to unlock
+                // additional circulating supply. This prevents an attacker from being able token
+                // vulnerabilities in the gateway
+                // from draining the whole balance.
+                if rt.current_balance() < cross_msg.msg.value {
+                    return Err(actor_error!(
+                        illegal_state,
+                        "not enough balance to mint new tokens as part of the cross-message"
+                    ));
                 }
 
                 if sto == st.network_name {

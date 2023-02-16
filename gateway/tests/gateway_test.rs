@@ -1,7 +1,6 @@
 use cid::Cid;
 use fil_actors_runtime::runtime::Runtime;
-use fil_actors_runtime::{BURNT_FUNDS_ACTOR_ADDR, REWARD_ACTOR_ADDR};
-use fvm_ipld_encoding::ipld_block::IpldBlock;
+use fil_actors_runtime::BURNT_FUNDS_ACTOR_ADDR;
 use fvm_ipld_encoding::RawBytes;
 use fvm_shared::address::Address;
 use fvm_shared::bigint::Zero;
@@ -11,7 +10,7 @@ use fvm_shared::error::ExitCode;
 use fvm_shared::METHOD_SEND;
 use ipc_gateway::Status::{Active, Inactive};
 use ipc_gateway::{
-    ext, get_topdown_msg, Checkpoint, CrossMsg, IPCAddress, State, StorableMsg, CROSS_MSG_FEE,
+    get_topdown_msg, Checkpoint, CrossMsg, IPCAddress, State, StorableMsg, CROSS_MSG_FEE,
     DEFAULT_CHECKPOINT_PERIOD, SUBNET_ACTOR_REWARD_METHOD,
 };
 use ipc_sdk::subnet_id::SubnetID;
@@ -939,19 +938,6 @@ fn test_apply_msg_tp_target_subnet() {
             value.clone(),
             params,
             Some(Box::new(move |rt| {
-                // expect to send reward message
-                rt.expect_send(
-                    REWARD_ACTOR_ADDR,
-                    ext::reward::EXTERNAL_FUNDING_METHOD,
-                    IpldBlock::serialize_cbor(&ext::reward::FundingParams {
-                        addr: *ACTOR,
-                        value: v.clone(),
-                    })
-                    .unwrap(),
-                    TokenAmount::zero(),
-                    None,
-                    ExitCode::OK,
-                );
                 rt.expect_send(
                     sto.clone(),
                     METHOD_SEND,
@@ -1014,29 +1000,9 @@ fn test_apply_msg_tp_not_target_subnet() {
         params: RawBytes::default(),
         nonce: msg_nonce,
     };
-    let v = value.clone();
     // cid is expected, should not be None
     let cid = h
-        .apply_cross_execute_only(
-            &mut rt,
-            value.clone(),
-            params.clone(),
-            Some(Box::new(move |rt| {
-                // expect to send reward message
-                rt.expect_send(
-                    REWARD_ACTOR_ADDR,
-                    ext::reward::EXTERNAL_FUNDING_METHOD,
-                    IpldBlock::serialize_cbor(&ext::reward::FundingParams {
-                        addr: *ACTOR,
-                        value: v.clone(),
-                    })
-                    .unwrap(),
-                    TokenAmount::zero(),
-                    None,
-                    ExitCode::OK,
-                );
-            })),
-        )
+        .apply_cross_execute_only(&mut rt, value.clone(), params.clone(), None)
         .unwrap()
         .unwrap();
 

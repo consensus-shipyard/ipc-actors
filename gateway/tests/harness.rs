@@ -11,8 +11,7 @@ use fil_actors_runtime::test_utils::{
     SUBNET_ACTOR_CODE_ID, SYSTEM_ACTOR_CODE_ID,
 };
 use fil_actors_runtime::{
-    make_map_with_root_and_bitwidth, ActorError, Map, BURNT_FUNDS_ACTOR_ADDR, REWARD_ACTOR_ADDR,
-    SYSTEM_ACTOR_ADDR,
+    make_map_with_root_and_bitwidth, ActorError, Map, BURNT_FUNDS_ACTOR_ADDR, SYSTEM_ACTOR_ADDR,
 };
 use fil_actors_runtime::{Array, INIT_ACTOR_ADDR};
 use fvm_ipld_blockstore::Blockstore;
@@ -656,18 +655,6 @@ impl Harness {
             let st: State = rt.get_state();
             assert_eq!(st.applied_bottomup_nonce, msg_nonce);
         } else {
-            let rew_params = ext::reward::FundingParams {
-                addr: *ACTOR,
-                value: params.value.clone(),
-            };
-            rt.expect_send(
-                REWARD_ACTOR_ADDR,
-                ext::reward::EXTERNAL_FUNDING_METHOD,
-                IpldBlock::serialize_cbor(&rew_params).unwrap(),
-                TokenAmount::zero(),
-                None,
-                ExitCode::OK,
-            );
             if sto == st.network_name {
                 rt.expect_send(
                     rto,
