@@ -14,6 +14,9 @@ use serde::{Deserialize, Serialize};
 use crate::checkpoint::{Checkpoint, CrossMsgMeta};
 use crate::cross::CrossMsg;
 
+/// ID used in the builtin-actors bundle manifest
+pub const MANIFEST_ID: &str = "ipc_gateway";
+
 pub const CROSSMSG_AMT_BITWIDTH: u32 = 3;
 pub const DEFAULT_CHECKPOINT_PERIOD: ChainEpoch = 10;
 pub const MAX_NONCE: u64 = u64::MAX;

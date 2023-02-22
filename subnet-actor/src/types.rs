@@ -8,6 +8,9 @@ use fvm_shared::econ::TokenAmount;
 use fvm_shared::MethodNum;
 use ipc_gateway::SubnetID;
 
+/// ID used in the builtin-actors bundle manifest
+pub const MANIFEST_ID: &str = "ipc_subnet_actor";
+
 /// Optional leaving coefficient to penalize
 /// validators leaving the subnet.
 // It should be a float between 0-1 but
