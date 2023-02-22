@@ -8,13 +8,12 @@ use ipc_atomic_execution_primitives::{
     AtomicExecID, AtomicExecRegistry, AtomicInputID, AtomicInputState,
 };
 use ipc_gateway::IPCAddress;
-use serde::{Deserialize, Serialize};
 use serde_tuple::{Deserialize_tuple, Serialize_tuple};
 
 pub type AccountState = AtomicInputState<TokenAmount>;
 
 /// Represents the state of the actor.
-#[derive(Serialize, Deserialize)]
+#[derive(Serialize_tuple, Deserialize_tuple)]
 pub struct State {
     /// Address of the IPC gateway actor.
     ipc_gateway: Address,

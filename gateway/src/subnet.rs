@@ -1,9 +1,10 @@
 use anyhow::anyhow;
 use fil_actors_runtime::runtime::Runtime;
 use fvm_ipld_blockstore::Blockstore;
+use fvm_ipld_encoding::repr::{Deserialize_repr, Serialize_repr};
 use fvm_shared::econ::TokenAmount;
 use primitives::{TAmt, TCid};
-use serde::{Deserialize, Serialize};
+use serde_tuple::{Deserialize_tuple, Serialize_tuple};
 
 use crate::CROSSMSG_AMT_BITWIDTH;
 use ipc_sdk::subnet_id::SubnetID;
@@ -12,7 +13,7 @@ use super::checkpoint::*;
 use super::cross::CrossMsg;
 use super::state::State;
 
-#[derive(PartialEq, Eq, Clone, Copy, Debug, Deserialize, Serialize)]
+#[derive(PartialEq, Eq, Clone, Copy, Debug, Deserialize_repr, Serialize_repr)]
 #[repr(i32)]
 pub enum Status {
     Active,
@@ -20,7 +21,7 @@ pub enum Status {
     Killed,
 }
 
-#[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq)]
+#[derive(Clone, Debug, Serialize_tuple, Deserialize_tuple, PartialEq, Eq)]
 pub struct Subnet {
     pub id: SubnetID,
     pub stake: TokenAmount,

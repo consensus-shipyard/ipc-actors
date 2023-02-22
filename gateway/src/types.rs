@@ -9,7 +9,6 @@ use fvm_shared::econ::TokenAmount;
 use ipc_sdk::subnet_id::SubnetID;
 use multihash::MultihashDigest;
 use primitives::CodeType;
-use serde::{Deserialize, Serialize};
 
 use crate::checkpoint::{Checkpoint, CrossMsgMeta};
 use crate::cross::CrossMsg;
@@ -33,7 +32,7 @@ pub struct ConstructorParams {
     pub checkpoint_period: ChainEpoch,
 }
 
-#[derive(Serialize, Deserialize, Clone)]
+#[derive(Serialize_tuple, Deserialize_tuple, Clone)]
 pub struct FundParams {
     pub value: TokenAmount,
 }
