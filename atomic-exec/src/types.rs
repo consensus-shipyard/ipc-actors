@@ -4,6 +4,9 @@ use fvm_shared::address::Address;
 use fvm_shared::MethodNum;
 use ipc_gateway::IPCAddress;
 
+/// ID used in the builtin-actors bundle manifest
+pub const MANIFEST_ID: &str = "ipc_atomic_execution";
+
 /// Concise identifier of an atomic execution instance.
 pub type AtomicExecID = RawBytes;
 

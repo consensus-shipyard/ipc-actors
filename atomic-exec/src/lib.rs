@@ -13,7 +13,9 @@ use ipc_gateway::{ApplyMsgParams, CrossMsg, IPCAddress, StorableMsg, SubnetID};
 use num_derive::FromPrimitive;
 use num_traits::{FromPrimitive, Zero};
 
-pub use crate::types::{AtomicExecID, ConstructorParams, PreCommitParams, RevokeParams};
+pub use crate::types::{
+    AtomicExecID, ConstructorParams, PreCommitParams, RevokeParams, MANIFEST_ID,
+};
 
 mod state;
 mod types;
