@@ -148,7 +148,7 @@ impl SubnetActor for Actor {
 
         let caller = rt.message().caller();
         let mut msg = None;
-        rt.transaction(|st: &mut State, rt| {
+        let value = rt.transaction(|st: &mut State, rt| {
             let stake = st.get_stake(rt.store(), &caller).map_err(|e| {
                 e.downcast_default(ExitCode::USR_ILLEGAL_STATE, "failed to load stake")
             })?;
@@ -170,17 +170,20 @@ impl SubnetActor for Actor {
             }
 
             // remove stake from balance table
-            st.rm_stake(&rt.store(), &caller, &stake).map_err(|e| {
+            let ret_amount = st.rm_stake(&rt.store(), &caller, &stake).map_err(|e| {
                 e.downcast_default(ExitCode::USR_ILLEGAL_STATE, "cannot remove stake")
             })?;
 
             st.mutate_state();
 
-            Ok(())
+            Ok(ret_amount)
         })?;
 
         if let Some(p) = msg {
+            // release the stake
             rt.send(&p.to, p.method, p.params, p.value)?;
+            // return stake to caller
+            rt.send(&caller, METHOD_SEND, None, value)?;
         }
 
         Ok(None)

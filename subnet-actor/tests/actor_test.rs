@@ -367,6 +367,7 @@ mod test {
         // one miner leaves the subnet
         let caller = Address::new_id(10);
         let value = TokenAmount::from_atto(MIN_COLLATERAL_AMOUNT);
+        runtime.set_balance(total_stake.clone());
         total_stake = total_stake - &value;
         runtime.set_value(value.clone());
         runtime.set_caller(Cid::default(), caller.clone());
@@ -379,6 +380,14 @@ mod test {
             })
             .unwrap(),
             TokenAmount::zero(),
+            None,
+            ExitCode::new(0),
+        );
+        runtime.expect_send(
+            caller,
+            METHOD_SEND,
+            None,
+            value.clone(),
             None,
             ExitCode::new(0),
         );
@@ -418,6 +427,14 @@ mod test {
             None,
             ExitCode::new(0),
         );
+        runtime.expect_send(
+            caller,
+            METHOD_SEND,
+            None,
+            value.clone(),
+            None,
+            ExitCode::new(0),
+        );
         runtime.call::<Actor>(Method::Leave as u64, None).unwrap();
 
         let st: State = runtime.get_state();
@@ -444,6 +461,14 @@ mod test {
             })
             .unwrap(),
             TokenAmount::zero(),
+            None,
+            ExitCode::new(0),
+        );
+        runtime.expect_send(
+            caller,
+            METHOD_SEND,
+            None,
+            value.clone(),
             None,
             ExitCode::new(0),
         );

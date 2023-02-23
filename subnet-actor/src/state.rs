@@ -187,37 +187,34 @@ impl State {
         store: &BS,
         addr: &Address,
         amount: &TokenAmount,
-    ) -> anyhow::Result<()> {
+    ) -> anyhow::Result<TokenAmount> {
         // update miner stake
         self.stake.modify(store, |hamt| {
-            // Note that when trying to get stake, if it is not found in the
-            // hamt, that means it's the first time adding stake and we just
-            // give default stake amount 0.
             let key = BytesKey::from(addr.to_bytes());
-            let mut stake = hamt.get(&key)?.unwrap_or(&TokenAmount::zero()).clone();
-            stake = stake.div_floor(LEAVING_COEFF);
+            let stake = hamt.get(&key)?.unwrap_or(&TokenAmount::zero()).clone();
+            // return amount corrected by an optional leaving coefficient
+            let ret_amount = amount.clone().div_floor(LEAVING_COEFF);
 
-            if stake.lt(amount) {
+            if stake.lt(&ret_amount) {
                 return Err(anyhow!(format!(
                     "address not enough stake to withdraw: {:?}",
                     addr
                 )));
             }
 
+            // set updated stake for user
             hamt.set(key, stake - amount)?;
 
-            // update total collateral
-            self.total_stake -= amount;
+            // update total collateral in subnet actor
+            self.total_stake -= &ret_amount;
 
             // remove miner from list of validators
             // NOTE: We currently only support full recovery of collateral.
             // And additional check will be needed here if we consider part-recoveries.
             self.validator_set.retain(|x| x.addr != *addr);
 
-            Ok(true)
-        })?;
-
-        Ok(())
+            Ok(ret_amount)
+        })
     }
 
     pub fn has_majority_vote<BS: Blockstore>(
