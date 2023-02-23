@@ -4,6 +4,7 @@ use fil_actors_runtime::runtime::fvm::resolve_secp_bls;
 use fil_actors_runtime::runtime::Runtime;
 use fil_actors_runtime::{actor_error, ActorError};
 use fvm_ipld_blockstore::Blockstore;
+use fvm_ipld_encoding::serde_bytes;
 use fvm_ipld_encoding::RawBytes;
 use fvm_ipld_hamt::BytesKey;
 use fvm_shared::address::Address;
@@ -15,7 +16,7 @@ use lazy_static::lazy_static;
 use num::rational::Ratio;
 use num::BigInt;
 use primitives::{TCid, THamt};
-use serde::{Deserialize, Serialize};
+use serde_tuple::{Deserialize_tuple, Serialize_tuple};
 
 use crate::types::*;
 
@@ -27,7 +28,7 @@ lazy_static! {
 }
 
 /// The state object.
-#[derive(Serialize, Deserialize, Clone, Debug)]
+#[derive(Serialize_tuple, Deserialize_tuple, Clone, Debug)]
 pub struct State {
     pub name: String,
     /// The parent id of the subnet actor, it should be the same as the
@@ -39,6 +40,7 @@ pub struct State {
     pub total_stake: TokenAmount,
     pub stake: TCid<THamt<Cid, TokenAmount>>,
     pub status: Status,
+    #[serde(with = "serde_bytes")]
     pub genesis: Vec<u8>,
     pub finality_threshold: ChainEpoch,
     pub check_period: ChainEpoch,

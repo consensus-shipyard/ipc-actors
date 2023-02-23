@@ -9,13 +9,13 @@ use fvm_shared::address::Address;
 use fvm_shared::MethodNum;
 use ipc_gateway::IPCAddress;
 use primitives::{TCid, THamt};
-use serde::{Deserialize, Serialize};
+use serde_tuple::{Deserialize_tuple, Serialize_tuple};
 use std::collections::HashMap;
 
 use crate::types::AtomicExecID;
 use crate::ConstructorParams;
 
-#[derive(Serialize, Deserialize)]
+#[derive(Serialize_tuple, Deserialize_tuple)]
 pub struct State {
     pub registry: RegistryCid, // H(exec_id, actors) -> pre-commitments
     pub ipc_gateway_address: Address,

@@ -7,11 +7,11 @@ use fvm_shared::clock::ChainEpoch;
 use fvm_shared::econ::TokenAmount;
 use ipc_sdk::subnet_id::SubnetID;
 use primitives::{TCid, TLink};
-use serde::{Deserialize, Serialize};
+use serde_tuple::{Deserialize_tuple, Serialize_tuple};
 
 use crate::CrossMsgs;
 
-#[derive(PartialEq, Eq, Clone, Debug, Serialize, Deserialize)]
+#[derive(PartialEq, Eq, Clone, Debug, Serialize_tuple, Deserialize_tuple)]
 pub struct Checkpoint {
     pub data: CheckData,
     #[serde(with = "serde_bytes")]
@@ -111,7 +111,7 @@ impl Checkpoint {
     }
 }
 
-#[derive(PartialEq, Eq, Clone, Debug, Serialize, Deserialize)]
+#[derive(PartialEq, Eq, Clone, Debug, Serialize_tuple, Deserialize_tuple)]
 pub struct CheckData {
     pub source: SubnetID,
     #[serde(with = "serde_bytes")]
@@ -136,7 +136,7 @@ impl CheckData {
 
 // CrossMsgMeta sends an aggregate of all messages being propagated up in
 // the checkpoint.
-#[derive(PartialEq, Eq, Clone, Debug, Default, Serialize, Deserialize)]
+#[derive(PartialEq, Eq, Clone, Debug, Default, Serialize_tuple, Deserialize_tuple)]
 pub struct CrossMsgMeta {
     pub msgs_cid: TCid<TLink<CrossMsgs>>,
     pub nonce: u64,
@@ -154,7 +154,7 @@ impl CrossMsgMeta {
     }
 }
 
-#[derive(PartialEq, Eq, Clone, Debug, Serialize, Deserialize)]
+#[derive(PartialEq, Eq, Clone, Debug, Serialize_tuple, Deserialize_tuple)]
 pub struct ChildCheck {
     pub source: SubnetID,
     pub checks: Vec<TCid<TLink<Checkpoint>>>,

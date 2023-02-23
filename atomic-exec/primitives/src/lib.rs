@@ -9,7 +9,6 @@ use fvm_ipld_blockstore::Blockstore;
 use fvm_ipld_encoding::tuple::Deserialize_tuple;
 use fvm_ipld_encoding::{CborStore, RawBytes, DAG_CBOR};
 use fvm_primitives::{TCid, THamt};
-use serde::Deserialize;
 use serde::{self, de::DeserializeOwned, Serialize};
 use serde_tuple::Serialize_tuple;
 
@@ -183,7 +182,7 @@ struct AtomicOutputEntry {
 /// bigger data structure, or referred to by its CID. In the latter
 /// case, it is user's responsibility to flush to and load from the
 /// blockstore.
-#[derive(Debug, Serialize, Deserialize)]
+#[derive(Debug, Serialize_tuple, Deserialize_tuple)]
 pub struct AtomicExecRegistry {
     nonce: AtomicExecNonce,
     input_ids: TCid<THamt<AtomicInputID, AtomicInputEntry>>,

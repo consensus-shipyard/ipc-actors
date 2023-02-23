@@ -15,7 +15,7 @@ use fvm_shared::METHOD_SEND;
 use ipc_sdk::address::IPCAddress;
 use ipc_sdk::subnet_id::SubnetID;
 use primitives::{TCid, TLink};
-use serde::{Deserialize, Serialize};
+use serde_tuple::{Deserialize_tuple, Serialize_tuple};
 use std::path::Path;
 
 /// StorableMsg stores all the relevant information required
@@ -25,7 +25,7 @@ use std::path::Path;
 /// as we did in the actor's Go counter-part. Instead we just persist the
 /// information required to create the cross-messages and execute in the
 /// corresponding node implementation.
-#[derive(PartialEq, Eq, Clone, Debug, Serialize, Deserialize)]
+#[derive(PartialEq, Eq, Clone, Debug, Serialize_tuple, Deserialize_tuple)]
 pub struct StorableMsg {
     pub from: IPCAddress,
     pub to: IPCAddress,
@@ -35,7 +35,7 @@ pub struct StorableMsg {
     pub nonce: u64,
 }
 
-#[derive(PartialEq, Eq, Clone, Debug, Serialize, Deserialize)]
+#[derive(PartialEq, Eq, Clone, Debug, Serialize_tuple, Deserialize_tuple)]
 pub struct CrossMsg {
     pub msg: StorableMsg,
     pub wrapped: bool,
@@ -145,7 +145,7 @@ pub fn is_bottomup(from: &SubnetID, to: &SubnetID) -> bool {
     Path::new(&a).components().count() - 1 > index
 }
 
-#[derive(PartialEq, Eq, Clone, Debug, Default, Serialize, Deserialize)]
+#[derive(PartialEq, Eq, Clone, Debug, Default, Serialize_tuple, Deserialize_tuple)]
 pub struct CrossMsgs {
     // FIXME: Consider to make this an AMT if we expect
     // a lot of cross-messages to be propagated.

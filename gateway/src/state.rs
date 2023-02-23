@@ -13,7 +13,7 @@ use fvm_shared::error::ExitCode;
 use lazy_static::lazy_static;
 use num_traits::Zero;
 use primitives::{TAmt, TCid, THamt, TLink};
-use serde::{Deserialize, Serialize};
+use serde_tuple::{Deserialize_tuple, Serialize_tuple};
 use std::str::FromStr;
 
 use ipc_sdk::subnet_id::SubnetID;
@@ -29,7 +29,7 @@ use super::types::*;
 type PostBox = TCid<THamt<Cid, Vec<u8>>>;
 
 /// Storage power actor state
-#[derive(Serialize, Deserialize)]
+#[derive(Serialize_tuple, Deserialize_tuple)]
 pub struct State {
     pub network_name: SubnetID,
     pub total_subnets: u64,
