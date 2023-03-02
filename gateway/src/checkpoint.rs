@@ -114,8 +114,10 @@ impl Checkpoint {
 #[derive(PartialEq, Eq, Clone, Debug, Serialize_tuple, Deserialize_tuple)]
 pub struct CheckData {
     pub source: SubnetID,
+    // subnet-specific proof propagated as part of the checkpoint (initially we propagate)
+    // a pointer to the tipset at the specific epoch of  the checkpoint.
     #[serde(with = "serde_bytes")]
-    pub tip_set: Vec<u8>,
+    pub proof: Vec<u8>,
     pub epoch: ChainEpoch,
     pub prev_check: TCid<TLink<Checkpoint>>,
     pub children: Vec<ChildCheck>,
@@ -125,7 +127,7 @@ impl CheckData {
     pub fn new(id: SubnetID, epoch: ChainEpoch) -> Self {
         Self {
             source: id,
-            tip_set: Vec::new(),
+            proof: Vec::new(),
             epoch,
             prev_check: TCid::default(),
             children: Vec::new(),

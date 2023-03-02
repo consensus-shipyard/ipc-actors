@@ -2,9 +2,7 @@
 mod test {
     use cid::Cid;
     use fil_actors_runtime::runtime::Runtime;
-    use fil_actors_runtime::test_utils::{
-        expect_abort, ExpectedVerifySig, MockRuntime, INIT_ACTOR_CODE_ID,
-    };
+    use fil_actors_runtime::test_utils::{expect_abort, MockRuntime, INIT_ACTOR_CODE_ID};
     use fil_actors_runtime::{ActorError, INIT_ACTOR_ADDR};
     use fvm_ipld_encoding::ipld_block::IpldBlock;
     use fvm_ipld_encoding::RawBytes;
@@ -673,21 +671,23 @@ mod test {
         is_commit: bool,
     ) -> Result<Option<IpldBlock>, ActorError> {
         runtime.set_caller(Cid::default(), sender.clone());
-        runtime.expect_send(
-            sender.clone(),
-            ipc_sdk::account::PUBKEY_ADDRESS_METHOD as u64,
-            None,
-            TokenAmount::zero(),
-            IpldBlock::serialize_cbor(&sender).unwrap(),
-            ExitCode::new(0),
-        );
         runtime.expect_validate_caller_any();
-        runtime.expect_verify_signature(ExpectedVerifySig {
-            sig: Signature::new_secp256k1(vec![1, 2, 3, 4]),
-            signer: sender.clone(),
-            plaintext: checkpoint.cid().to_bytes(),
-            result: Ok(()),
-        });
+        // runtime.expect_send(
+        //     sender.clone(),
+        //     ipc_sdk::account::PUBKEY_ADDRESS_METHOD as u64,
+        //     None,
+        //     TokenAmount::zero(),
+        //     IpldBlock::serialize_cbor(&sender).unwrap(),
+        //     ExitCode::new(0),
+        // );
+        // NOTE: For M2 we are removing the explicit signature
+        // verification from checkpoints.
+        // runtime.expect_verify_signature(ExpectedVerifySig {
+        //     sig: Signature::new_secp256k1(vec![1, 2, 3, 4]),
+        //     signer: sender.clone(),
+        //     plaintext: checkpoint.cid().to_bytes(),
+        //     result: Ok(()),
+        // });
 
         if is_commit {
             runtime.expect_send(
