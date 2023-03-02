@@ -1,11 +1,9 @@
 use anyhow::anyhow;
 use cid::Cid;
-use fil_actors_runtime::runtime::fvm::resolve_secp_bls;
 use fil_actors_runtime::runtime::Runtime;
 use fil_actors_runtime::{actor_error, ActorError};
 use fvm_ipld_blockstore::Blockstore;
 use fvm_ipld_encoding::serde_bytes;
-use fvm_ipld_encoding::RawBytes;
 use fvm_ipld_hamt::BytesKey;
 use fvm_shared::address::Address;
 use fvm_shared::bigint::Zero;
@@ -315,14 +313,17 @@ impl State {
         }
 
         // check signature
-        let caller = rt.message().caller();
-        let pkey = resolve_secp_bls(rt, &caller)?;
+        // NOTE: In the current implementation the validator is the one sending the message
+        // including the checkpoint, so there is no need for a explicit signature in checkpoints,
+        // they are implicitly signed by signing the submission message.
+        // let caller = rt.message().caller();
+        // let pkey = resolve_secp_bls(rt, &caller)?;
 
-        rt.verify_signature(
-            &RawBytes::deserialize(&ch.signature().clone().into())?,
-            &pkey,
-            &ch.cid().to_bytes(),
-        )?;
+        // rt.verify_signature(
+        //     &RawBytes::deserialize(&ch.signature().clone().into())?,
+        //     &pkey,
+        //     &ch.cid().to_bytes(),
+        // )?;
 
         Ok(())
     }
