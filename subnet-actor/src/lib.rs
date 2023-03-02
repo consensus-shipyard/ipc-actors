@@ -5,7 +5,8 @@ pub mod types;
 
 use fil_actors_runtime::runtime::{ActorCode, Runtime};
 use fil_actors_runtime::{
-    actor_dispatch, actor_error, restrict_internal_api, ActorDowncast, ActorError, INIT_ACTOR_ADDR, CALLER_TYPES_SIGNABLE,
+    actor_dispatch, actor_error, restrict_internal_api, ActorDowncast, ActorError,
+    CALLER_TYPES_SIGNABLE, INIT_ACTOR_ADDR,
 };
 use fvm_ipld_encoding::ipld_block::IpldBlock;
 use fvm_ipld_encoding::RawBytes;

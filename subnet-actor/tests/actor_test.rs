@@ -2,7 +2,10 @@
 mod test {
     use cid::Cid;
     use fil_actors_runtime::runtime::Runtime;
-    use fil_actors_runtime::test_utils::{expect_abort, MockRuntime, INIT_ACTOR_CODE_ID, ACCOUNT_ACTOR_CODE_ID, MULTISIG_ACTOR_CODE_ID};
+    use fil_actors_runtime::test_utils::{
+        expect_abort, MockRuntime, ACCOUNT_ACTOR_CODE_ID, INIT_ACTOR_CODE_ID,
+        MULTISIG_ACTOR_CODE_ID,
+    };
     use fil_actors_runtime::{ActorError, INIT_ACTOR_ADDR};
     use fvm_ipld_encoding::ipld_block::IpldBlock;
     use fvm_ipld_encoding::RawBytes;
