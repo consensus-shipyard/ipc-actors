@@ -5,7 +5,7 @@ pub mod types;
 
 use fil_actors_runtime::runtime::{ActorCode, Runtime};
 use fil_actors_runtime::{
-    actor_dispatch, actor_error, restrict_internal_api, ActorDowncast, ActorError, INIT_ACTOR_ADDR,
+    actor_dispatch, actor_error, restrict_internal_api, ActorDowncast, ActorError, INIT_ACTOR_ADDR, CALLER_TYPES_SIGNABLE,
 };
 use fvm_ipld_encoding::ipld_block::IpldBlock;
 use fvm_ipld_encoding::RawBytes;
@@ -91,7 +91,7 @@ impl SubnetActor for Actor {
     ///
     /// It implements the basic logic to onboard new peers to the subnet.
     fn join(rt: &mut impl Runtime, params: JoinParams) -> Result<Option<RawBytes>, ActorError> {
-        rt.validate_immediate_caller_accept_any()?;
+        rt.validate_immediate_caller_type(CALLER_TYPES_SIGNABLE.iter())?;
 
         let caller = rt.message().caller();
         let amount = rt.message().value_received();
@@ -144,7 +144,7 @@ impl SubnetActor for Actor {
 
     /// Called by peers looking to leave a subnet.
     fn leave(rt: &mut impl Runtime) -> Result<Option<RawBytes>, ActorError> {
-        rt.validate_immediate_caller_accept_any()?;
+        rt.validate_immediate_caller_type(CALLER_TYPES_SIGNABLE.iter())?;
 
         let caller = rt.message().caller();
         let mut msg = None;
@@ -190,7 +190,7 @@ impl SubnetActor for Actor {
     }
 
     fn kill(rt: &mut impl Runtime) -> Result<Option<RawBytes>, ActorError> {
-        rt.validate_immediate_caller_accept_any()?;
+        rt.validate_immediate_caller_type(CALLER_TYPES_SIGNABLE.iter())?;
 
         // prevent a subnet from being killed until all its locked balance has been withdrawn
         if rt.current_balance() != TokenAmount::zero() {
@@ -248,7 +248,7 @@ impl SubnetActor for Actor {
         rt: &mut impl Runtime,
         ch: Checkpoint,
     ) -> Result<Option<RawBytes>, ActorError> {
-        rt.validate_immediate_caller_accept_any()?;
+        rt.validate_immediate_caller_type(CALLER_TYPES_SIGNABLE.iter())?;
 
         let state: State = rt.state()?;
         let caller = rt.message().caller();
