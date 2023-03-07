@@ -23,6 +23,9 @@ pub const TESTING_ID: u64 = 339;
 pub struct Validator {
     pub addr: Address,
     pub net_addr: String,
+    // voting power for the validator determined by its stake in the
+    // network.
+    pub weight: TokenAmount,
 }
 
 #[derive(Clone, Debug, Serialize_tuple, Deserialize_tuple, PartialEq, Eq)]
@@ -44,6 +47,10 @@ impl ValidatorSet {
         &self.validators
     }
 
+    pub fn validators_mut(&mut self) -> &mut Vec<Validator> {
+        &mut self.validators
+    }
+
     pub fn config_number(&self) -> u64 {
         self.config_number
     }
@@ -61,6 +68,15 @@ impl ValidatorSet {
         self.validators.retain(|x| x.addr != *val);
         // update the config_number with every update
         // we allow config_number to overflow if that scenario ever comes.
+        self.config_number += 1;
+    }
+
+    pub fn update_weight(&mut self, val: &Address, weight: &TokenAmount) {
+        self.validators_mut()
+            .iter_mut()
+            .filter(|x| x.addr == *val)
+            .for_each(|x| x.weight = weight.clone());
+
         self.config_number += 1;
     }
 }
