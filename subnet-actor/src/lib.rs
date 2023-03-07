@@ -210,7 +210,7 @@ impl SubnetActor for Actor {
                 ));
             }
 
-            if !st.validator_set.is_empty() || st.total_stake != TokenAmount::zero() {
+            if !st.validator_set.validators().is_empty() || st.total_stake != TokenAmount::zero() {
                 return Err(actor_error!(
                     illegal_state,
                     "this subnet can only be killed when all validators have left"
@@ -340,10 +340,10 @@ impl SubnetActor for Actor {
         // complex and fair policies to incentivize certain behaviors.
         // we may even have a default one for IPC.
         let div = {
-            if st.validator_set.len() == 0 {
+            if st.validator_set.validators().len() == 0 {
                 return Err(actor_error!(illegal_state, "no validators in subnet"));
             };
-            match BigInt::from_usize(st.validator_set.len()) {
+            match BigInt::from_usize(st.validator_set.validators().len()) {
                 None => {
                     return Err(actor_error!(illegal_state, "couldn't convert into BigInt"));
                 }
@@ -351,7 +351,7 @@ impl SubnetActor for Actor {
             }
         };
         let rew_amount = amount.div_floor(div);
-        for v in st.validator_set.into_iter() {
+        for v in st.validator_set.validators().into_iter() {
             rt.send(&v.addr, METHOD_SEND, None, rew_amount.clone())?;
         }
         Ok(None)

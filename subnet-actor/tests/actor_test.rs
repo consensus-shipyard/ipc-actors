@@ -87,7 +87,7 @@ mod test {
         assert_eq!(state.name, NETWORK_NAME);
         assert_eq!(state.ipc_gateway_addr, Address::new_id(IPC_GATEWAY_ADDR));
         assert_eq!(state.total_stake, TokenAmount::zero());
-        assert_eq!(state.validator_set.is_empty(), true);
+        assert_eq!(state.validator_set.validators().is_empty(), true);
     }
 
     #[test]
@@ -148,7 +148,8 @@ mod test {
         // verify state.
         // as the value is less than min collateral, state is initiated
         let st: State = runtime.get_state();
-        assert_eq!(st.validator_set.len(), 0);
+        assert_eq!(st.validator_set.validators().len(), 0);
+        assert_eq!(st.validator_set.config_number(), 0);
         assert_eq!(st.status, Status::Instantiated);
         assert_eq!(st.total_stake, value);
         let stake = st.get_stake(runtime.store(), &caller).unwrap();
@@ -178,7 +179,8 @@ mod test {
         // verify state.
         // as the value is less than min collateral, state is active
         let st: State = runtime.get_state();
-        assert_eq!(st.validator_set.len(), 1);
+        assert_eq!(st.validator_set.validators().len(), 1);
+        assert_eq!(st.validator_set.config_number(), 1);
         assert_eq!(st.status, Status::Active);
         assert_eq!(
             st.total_stake,
@@ -216,7 +218,8 @@ mod test {
         // verify state.
         // as the value is less than min collateral, state is active
         let st: State = runtime.get_state();
-        assert_eq!(st.validator_set.len(), 2);
+        assert_eq!(st.validator_set.validators().len(), 2);
+        assert_eq!(st.validator_set.config_number(), 2);
         assert_eq!(st.status, Status::Active);
         assert_eq!(
             st.total_stake,
@@ -245,9 +248,9 @@ mod test {
         runtime.expect_validate_caller_addr(vec![gateway.clone()]);
         runtime.set_balance(TokenAmount::from_atto(3));
         let st: State = runtime.get_state();
-        let rew_amount =
-            total_reward.div_floor(BigInt::from_usize(st.validator_set.len()).unwrap());
-        for v in st.validator_set.into_iter() {
+        let rew_amount = total_reward
+            .div_floor(BigInt::from_usize(st.validator_set.validators().len()).unwrap());
+        for v in st.validator_set.validators().into_iter() {
             runtime.expect_send(
                 v.addr,
                 METHOD_SEND,
@@ -330,7 +333,8 @@ mod test {
 
         let st: State = runtime.get_state();
         assert_eq!(st.total_stake, total_stake);
-        assert_eq!(st.validator_set.len(), 2);
+        assert_eq!(st.validator_set.validators().len(), 2);
+        assert_eq!(st.validator_set.config_number(), 2);
         assert_eq!(
             st.get_stake(runtime.store(), &caller).unwrap().unwrap(),
             TokenAmount::from_atto(MIN_COLLATERAL_AMOUNT)
@@ -364,7 +368,7 @@ mod test {
             .unwrap();
         let st: State = runtime.get_state();
         assert_eq!(st.total_stake, total_stake);
-        assert_eq!(st.validator_set.len(), 2);
+        assert_eq!(st.validator_set.validators().len(), 2);
         assert_eq!(
             st.get_stake(runtime.store(), &caller).unwrap().unwrap(),
             value
@@ -400,7 +404,8 @@ mod test {
         runtime.call::<Actor>(Method::Leave as u64, None).unwrap();
 
         let st: State = runtime.get_state();
-        assert_eq!(st.validator_set.len(), 1);
+        assert_eq!(st.validator_set.validators().len(), 1);
+        assert_eq!(st.validator_set.config_number(), 3);
         assert_eq!(st.status, Status::Active);
         assert_eq!(st.total_stake, total_stake);
         assert_eq!(
@@ -445,7 +450,8 @@ mod test {
         runtime.call::<Actor>(Method::Leave as u64, None).unwrap();
 
         let st: State = runtime.get_state();
-        assert_eq!(st.validator_set.len(), 0);
+        assert_eq!(st.validator_set.validators().len(), 0);
+        assert_eq!(st.validator_set.config_number(), 4);
         assert_eq!(st.status, Status::Inactive);
         assert_eq!(st.total_stake, total_stake);
         assert_eq!(
@@ -481,7 +487,7 @@ mod test {
         );
         runtime.call::<Actor>(Method::Leave as u64, None).unwrap();
         let st: State = runtime.get_state();
-        assert_eq!(st.validator_set.len(), 0);
+        assert_eq!(st.validator_set.validators().len(), 0);
         assert_eq!(st.status, Status::Inactive);
         assert_eq!(st.total_stake, total_stake);
         assert_eq!(
@@ -563,7 +569,7 @@ mod test {
 
         // verify that we have an active subnet with 3 validators.
         let st: State = runtime.get_state();
-        assert_eq!(st.validator_set.len(), 3);
+        assert_eq!(st.validator_set.validators().len(), 3);
         assert_eq!(st.status, Status::Active);
 
         // Generate the check point
