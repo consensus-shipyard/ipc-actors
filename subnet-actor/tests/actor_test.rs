@@ -232,6 +232,55 @@ mod test {
         );
         runtime.verify();
 
+        // Part 4. miner tries to join twice
+        let caller = Address::new_id(11);
+        let value = TokenAmount::from_atto(MIN_COLLATERAL_AMOUNT);
+        runtime.set_value(value.clone());
+        runtime.set_balance(TokenAmount::from_atto(MIN_COLLATERAL_AMOUNT));
+        runtime.set_caller(*ACCOUNT_ACTOR_CODE_ID, caller.clone());
+        runtime.expect_validate_caller_type(SIG_TYPES.clone());
+        runtime.expect_send(
+            gateway.clone(),
+            ipc_gateway::Method::AddStake as u64,
+            None,
+            TokenAmount::from_atto(MIN_COLLATERAL_AMOUNT),
+            None,
+            ExitCode::new(0),
+        );
+        runtime
+            .call::<Actor>(
+                Method::Join as u64,
+                IpldBlock::serialize_cbor(&params).unwrap(),
+            )
+            .unwrap();
+
+        // verify state.
+        // as the value is less than min collateral, state is active
+        let st: State = runtime.get_state();
+        assert_eq!(st.validator_set.validators().len(), 2);
+        assert_eq!(st.validator_set.config_number(), 3);
+        assert_eq!(st.status, Status::Active);
+        assert_eq!(
+            st.total_stake,
+            TokenAmount::from_atto(MIN_COLLATERAL_AMOUNT * 3)
+        );
+        let stake = st.get_stake(runtime.store(), &caller).unwrap();
+        assert_eq!(
+            stake.unwrap(),
+            TokenAmount::from_atto(MIN_COLLATERAL_AMOUNT * 2)
+        );
+        assert_eq!(
+            st.validator_set
+                .validators()
+                .iter()
+                .filter(|x| x.addr == caller)
+                .next()
+                .unwrap()
+                .weight,
+            TokenAmount::from_atto(MIN_COLLATERAL_AMOUNT * 2)
+        );
+        runtime.verify();
+
         // reward is fairly distribute among all validators,
         // and fails if no tokens are sent.
         runtime.set_value(TokenAmount::zero());
