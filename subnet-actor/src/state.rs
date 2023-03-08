@@ -44,7 +44,7 @@ pub struct State {
     pub check_period: ChainEpoch,
     pub checkpoints: TCid<THamt<ChainEpoch, Checkpoint>>,
     pub window_checks: TCid<THamt<Cid, Votes>>,
-    pub validator_set: Vec<Validator>,
+    pub validator_set: ValidatorSet,
     pub min_validators: u64,
 }
 
@@ -78,7 +78,7 @@ impl State {
             checkpoints: TCid::new_hamt(store)?,
             stake: TCid::new_hamt(store)?,
             window_checks: TCid::new_hamt(store)?,
-            validator_set: Vec::new(),
+            validator_set: ValidatorSet::new(),
         };
 
         Ok(state)
@@ -165,13 +165,25 @@ impl State {
             self.total_stake += amount;
 
             // check if the miner has collateral to become a validator
-            if updated_stake >= self.min_validator_stake
-                && (self.consensus != ConsensusType::Delegated || self.validator_set.is_empty())
-            {
-                self.validator_set.push(Validator {
-                    addr: *addr,
-                    net_addr: String::from(net_addr),
-                });
+            if updated_stake >= self.min_validator_stake {
+                // check if it is already a validator
+                if !self
+                    .validator_set
+                    .validators()
+                    .iter()
+                    .any(|x| x.addr == *addr)
+                    && (self.consensus != ConsensusType::Delegated
+                        || self.validator_set.validators().is_empty())
+                {
+                    self.validator_set.push(Validator {
+                        addr: *addr,
+                        net_addr: String::from(net_addr),
+                        weight: updated_stake,
+                    });
+                } else {
+                    // update the weight if it is already a validator
+                    self.validator_set.update_weight(addr, &updated_stake)
+                }
             }
 
             Ok(true)
@@ -209,7 +221,7 @@ impl State {
             // remove miner from list of validators
             // NOTE: We currently only support full recovery of collateral.
             // And additional check will be needed here if we consider part-recoveries.
-            self.validator_set.retain(|x| x.addr != *addr);
+            self.validator_set.rm(addr);
 
             Ok(ret_amount)
         })
@@ -276,7 +288,10 @@ impl State {
     }
 
     pub fn is_validator(&self, addr: &Address) -> bool {
-        self.validator_set.iter().any(|x| x.addr == *addr)
+        self.validator_set
+            .validators()
+            .iter()
+            .any(|x| x.addr == *addr)
     }
 
     /// Do not call this function in transaction
@@ -376,7 +391,7 @@ impl Default for State {
             checkpoints: TCid::default(),
             stake: TCid::default(),
             window_checks: TCid::default(),
-            validator_set: Vec::new(),
+            validator_set: ValidatorSet::new(),
             min_validators: 0,
         }
     }
