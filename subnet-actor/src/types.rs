@@ -32,14 +32,14 @@ pub struct Validator {
 pub struct ValidatorSet {
     validators: Vec<Validator>,
     // sequence number that uniquely identifies a validator set
-    config_number: u64,
+    configuration_number: u64,
 }
 
 impl ValidatorSet {
     pub fn new() -> Self {
         Self {
             validators: Vec::new(),
-            config_number: 0,
+            configuration_number: 0,
         }
     }
 
@@ -52,7 +52,7 @@ impl ValidatorSet {
     }
 
     pub fn config_number(&self) -> u64 {
-        self.config_number
+        self.configuration_number
     }
 
     /// Push a new validator to the validator set.
@@ -60,7 +60,7 @@ impl ValidatorSet {
         self.validators.push(val);
         // update the config_number with every update
         // we allow config_number to overflow if that scenario ever comes.
-        self.config_number += 1;
+        self.configuration_number += 1;
     }
 
     /// Remove a validator from validator set by address
@@ -68,7 +68,7 @@ impl ValidatorSet {
         self.validators.retain(|x| x.addr != *val);
         // update the config_number with every update
         // we allow config_number to overflow if that scenario ever comes.
-        self.config_number += 1;
+        self.configuration_number += 1;
     }
 
     pub fn update_weight(&mut self, val: &Address, weight: &TokenAmount) {
@@ -77,7 +77,7 @@ impl ValidatorSet {
             .filter(|x| x.addr == *val)
             .for_each(|x| x.weight = weight.clone());
 
-        self.config_number += 1;
+        self.configuration_number += 1;
     }
 }
 
