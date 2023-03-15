@@ -104,7 +104,7 @@ impl PostBoxItem {
 }
 
 /// Checkpoints propagated from parent to child to signal the "final view" of the parent chain
-/// from the different validators in the subnet. 
+/// from the different validators in the subnet.
 #[derive(Clone, Debug, Serialize_tuple, Deserialize_tuple, PartialEq, Eq)]
 pub struct CronCheckpoint {
     pub epoch: ChainEpoch,
