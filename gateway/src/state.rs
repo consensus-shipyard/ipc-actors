@@ -46,7 +46,7 @@ pub struct State {
     pub bottomup_msg_meta: TCid<TAmt<CrossMsgMeta, CROSSMSG_AMT_BITWIDTH>>,
     pub applied_bottomup_nonce: u64,
     pub applied_topdown_nonce: u64,
-    /// The epoch that this actor is deployed
+    /// The epoch that the subnet actor is deployed
     pub genesis_epoch: ChainEpoch,
     /// How often cron checkpoints will be submitted by validator in the child subnet
     pub cron_period: ChainEpoch,
