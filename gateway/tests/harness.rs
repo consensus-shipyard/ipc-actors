@@ -20,6 +20,7 @@ use fvm_ipld_encoding::RawBytes;
 use fvm_shared::address::Address;
 use fvm_shared::bigint::bigint_ser::BigIntDe;
 use fvm_shared::bigint::Zero;
+use fvm_shared::clock::ChainEpoch;
 use fvm_shared::econ::TokenAmount;
 use fvm_shared::error::ExitCode;
 use fvm_shared::MethodNum;
@@ -35,7 +36,6 @@ use ipc_gateway::{
 use lazy_static::lazy_static;
 use primitives::{TCid, TCidContent};
 use std::str::FromStr;
-use fvm_shared::clock::ChainEpoch;
 
 lazy_static! {
     pub static ref ROOTNET_ID: SubnetID =
