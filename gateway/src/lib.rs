@@ -70,7 +70,7 @@ impl Actor {
     fn constructor(rt: &mut impl Runtime, params: ConstructorParams) -> Result<(), ActorError> {
         rt.validate_immediate_caller_is(std::iter::once(&INIT_ACTOR_ADDR))?;
 
-        let st = State::new(rt.store(), params, rt.curr_epoch()).map_err(|e| {
+        let st = State::new(rt.store(), params).map_err(|e| {
             e.downcast_default(
                 ExitCode::USR_ILLEGAL_STATE,
                 "Failed to create SCA actor state",

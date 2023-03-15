@@ -48,6 +48,7 @@ lazy_static! {
     pub static ref ACTOR: Address = Address::new_actor("actor".as_bytes());
     pub static ref SIG_TYPES: Vec<Cid> = vec![*ACCOUNT_ACTOR_CODE_ID, *MULTISIG_ACTOR_CODE_ID];
     pub static ref DEFAULT_CRON_PERIOD: ChainEpoch = 20;
+    pub static ref DEFAULT_GENESIS_EPOCH: ChainEpoch = 1;
 }
 
 pub fn new_runtime() -> MockRuntime {
@@ -86,6 +87,7 @@ impl Harness {
             network_name: self.net_name.to_string(),
             checkpoint_period: 10,
             cron_period: *DEFAULT_CRON_PERIOD,
+            genesis_epoch: *DEFAULT_GENESIS_EPOCH,
         };
         rt.set_caller(*INIT_ACTOR_CODE_ID, INIT_ACTOR_ADDR);
         rt.call::<Actor>(
@@ -96,9 +98,6 @@ impl Harness {
     }
 
     pub fn construct_and_verify(&self, rt: &mut MockRuntime) {
-        let chain_epoch = 10;
-        rt.set_epoch(chain_epoch);
-
         self.construct(rt);
 
         let st: State = rt.get_state();
@@ -113,8 +112,8 @@ impl Harness {
         assert_eq!(st.check_period, DEFAULT_CHECKPOINT_PERIOD);
         assert_eq!(st.applied_bottomup_nonce, MAX_NONCE);
         assert_eq!(st.bottomup_msg_meta.cid(), empty_bottomup_array);
-        assert_eq!(st.genesis_epoch, chain_epoch);
         assert_eq!(st.cron_period, *DEFAULT_CRON_PERIOD);
+        assert_eq!(st.genesis_epoch, *DEFAULT_GENESIS_EPOCH);
         verify_empty_map(rt, st.subnets.cid());
         verify_empty_map(rt, st.checkpoints.cid());
         verify_empty_map(rt, st.check_msg_registry.cid());
