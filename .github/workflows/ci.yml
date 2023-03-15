@@ -20,8 +20,8 @@ jobs:
           target: wasm32-unknown-unknown
           toolchain: nightly
           override: true
-      - run: cargo b --all --release
-      - run: cargo t --all --release
+      - run: cargo b --all
+      - run: cargo t --all
 
   fmt:
     name: Rustfmt
@@ -38,7 +38,7 @@ jobs:
       - uses: actions-rs/cargo@v1
         with:
           command: fmt
-          args: --all -- --check
+          args: --all --check
 
   clippy:
     name: Clippy
@@ -55,4 +55,4 @@ jobs:
       - uses: actions-rs/cargo@v1
         with:
           command: clippy
-          args: -- -D warnings
+          args: --all -- -D clippy::all

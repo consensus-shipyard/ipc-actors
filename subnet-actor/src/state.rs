@@ -10,6 +10,7 @@ use fvm_shared::bigint::Zero;
 use fvm_shared::clock::ChainEpoch;
 use fvm_shared::econ::TokenAmount;
 use ipc_gateway::{Checkpoint, SubnetID, DEFAULT_CHECKPOINT_PERIOD, MIN_COLLATERAL_AMOUNT};
+use ipc_sdk::{Validator, ValidatorSet};
 use lazy_static::lazy_static;
 use num::rational::Ratio;
 use num::BigInt;
@@ -78,7 +79,7 @@ impl State {
             checkpoints: TCid::new_hamt(store)?,
             stake: TCid::new_hamt(store)?,
             window_checks: TCid::new_hamt(store)?,
-            validator_set: ValidatorSet::new(),
+            validator_set: ValidatorSet::default(),
         };
 
         Ok(state)
@@ -391,7 +392,7 @@ impl Default for State {
             checkpoints: TCid::default(),
             stake: TCid::default(),
             window_checks: TCid::default(),
-            validator_set: ValidatorSet::new(),
+            validator_set: ValidatorSet::default(),
             min_validators: 0,
         }
     }

@@ -46,6 +46,10 @@ pub struct State {
     pub bottomup_msg_meta: TCid<TAmt<CrossMsgMeta, CROSSMSG_AMT_BITWIDTH>>,
     pub applied_bottomup_nonce: u64,
     pub applied_topdown_nonce: u64,
+    /// The epoch that this actor is deployed
+    pub genesis_epoch: ChainEpoch,
+    /// How often cron checkpoints will be submitted by validator in the child subnet
+    pub cron_period: ChainEpoch,
 }
 
 lazy_static! {
@@ -53,7 +57,11 @@ lazy_static! {
 }
 
 impl State {
-    pub fn new<BS: Blockstore>(store: &BS, params: ConstructorParams) -> anyhow::Result<State> {
+    pub fn new<BS: Blockstore>(
+        store: &BS,
+        params: ConstructorParams,
+        current_epoch: ChainEpoch,
+    ) -> anyhow::Result<State> {
         Ok(State {
             network_name: SubnetID::from_str(&params.network_name)?,
             total_subnets: Default::default(),
@@ -73,6 +81,8 @@ impl State {
             // We first increase to the subsequent and then execute for bottom-up messages
             applied_bottomup_nonce: MAX_NONCE,
             applied_topdown_nonce: Default::default(),
+            genesis_epoch: current_epoch,
+            cron_period: params.cron_period,
         })
     }
 

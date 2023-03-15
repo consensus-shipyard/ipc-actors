@@ -87,7 +87,7 @@ impl Actor {
         }
 
         let msgs = rt.transaction(|st: &mut State, rt| {
-            st.modify_atomic_exec(rt.store(), &exec_id, &actors, |entry| {
+            st.modify_atomic_exec(rt.store(), exec_id, actors, |entry| {
                 // Record the pre-commitment
                 entry.insert(from.to_string().unwrap(), params.commit);
 
@@ -135,13 +135,12 @@ impl Actor {
 
                 // Remove the atomic execution entry
                 rt.transaction(|st: &mut State, rt| {
-                    st.rm_atomic_exec(rt.store(), &exec_id, &actors)
-                        .map_err(|e| {
-                            e.downcast_default(
-                                ExitCode::USR_ILLEGAL_STATE,
-                                "failed to remove atomic exec from registry",
-                            )
-                        })
+                    st.rm_atomic_exec(rt.store(), exec_id, actors).map_err(|e| {
+                        e.downcast_default(
+                            ExitCode::USR_ILLEGAL_STATE,
+                            "failed to remove atomic exec from registry",
+                        )
+                    })
                 })?;
 
                 Ok(true)
@@ -180,7 +179,7 @@ impl Actor {
         }
 
         let msg = rt.transaction(|st: &mut State, rt| {
-            st.modify_atomic_exec(rt.store(), &exec_id, &actors, |entry| {
+            st.modify_atomic_exec(rt.store(), exec_id, actors, |entry| {
                 // Remove the pre-commitment
                 entry.remove_entry(&from.to_string().unwrap());
 

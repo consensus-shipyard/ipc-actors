@@ -158,7 +158,7 @@ impl CrossMsgs {
     }
 
     pub(crate) fn cid(&self) -> anyhow::Result<TCid<TLink<CrossMsgs>>> {
-        TCid::new_link(&MemoryBlockstore::new(), &self)
+        TCid::new_link(&MemoryBlockstore::new(), self)
     }
 
     /// Appends a cross-message to cross-msgs
@@ -211,7 +211,7 @@ pub(crate) fn distribute_crossmsg_fee(
     fee: TokenAmount,
 ) -> Result<(), ActorError> {
     if !fee.is_zero() {
-        rt.send(&subnet_actor, SUBNET_ACTOR_REWARD_METHOD, None, fee)?;
+        rt.send(subnet_actor, SUBNET_ACTOR_REWARD_METHOD, None, fee)?;
     }
     Ok(())
 }

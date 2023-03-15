@@ -7,11 +7,13 @@ use fvm_shared::address::Address;
 use fvm_shared::clock::ChainEpoch;
 use fvm_shared::econ::TokenAmount;
 use ipc_sdk::subnet_id::SubnetID;
+use ipc_sdk::ValidatorSet;
 use multihash::MultihashDigest;
 use primitives::CodeType;
 
 use crate::checkpoint::{Checkpoint, CrossMsgMeta};
 use crate::cross::CrossMsg;
+use crate::StorableMsg;
 
 /// ID used in the builtin-actors bundle manifest
 pub const MANIFEST_ID: &str = "ipc_gateway";
@@ -30,6 +32,7 @@ pub type CrossMsgArray<'bs, BS> = Array<'bs, CrossMsg, BS>;
 pub struct ConstructorParams {
     pub network_name: String,
     pub checkpoint_period: ChainEpoch,
+    pub cron_period: ChainEpoch,
 }
 
 #[derive(Serialize_tuple, Deserialize_tuple, Clone)]
@@ -99,6 +102,13 @@ impl PostBoxItem {
     }
 }
 
+#[derive(Clone, Debug, Serialize_tuple, Deserialize_tuple, PartialEq, Eq)]
+pub struct CronCheckpoint {
+    pub epoch: ChainEpoch,
+    pub membership: ValidatorSet,
+    pub top_down_msgs: Vec<StorableMsg>,
+}
+
 #[cfg(test)]
 mod tests {
     use crate::ConstructorParams;
@@ -109,6 +119,7 @@ mod tests {
         let p = ConstructorParams {
             network_name: "/root".to_string(),
             checkpoint_period: 100,
+            cron_period: 20,
         };
         let bytes = fil_actors_runtime::util::cbor::serialize(&p, "").unwrap();
         let serialized = base64::encode(bytes.bytes());
@@ -120,5 +131,6 @@ mod tests {
 
         assert_eq!(p.network_name, deserialized.network_name);
         assert_eq!(p.checkpoint_period, deserialized.checkpoint_period);
+        assert_eq!(p.cron_period, deserialized.cron_period);
     }
 }

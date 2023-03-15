@@ -340,7 +340,7 @@ impl SubnetActor for Actor {
         // complex and fair policies to incentivize certain behaviors.
         // we may even have a default one for IPC.
         let div = {
-            if st.validator_set.validators().len() == 0 {
+            if st.validator_set.validators().is_empty() {
                 return Err(actor_error!(illegal_state, "no validators in subnet"));
             };
             match BigInt::from_usize(st.validator_set.validators().len()) {
@@ -351,7 +351,7 @@ impl SubnetActor for Actor {
             }
         };
         let rew_amount = amount.div_floor(div);
-        for v in st.validator_set.validators().into_iter() {
+        for v in st.validator_set.validators().iter() {
             rt.send(&v.addr, METHOD_SEND, None, rew_amount.clone())?;
         }
         Ok(None)

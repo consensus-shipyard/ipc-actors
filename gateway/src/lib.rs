@@ -70,7 +70,7 @@ impl Actor {
     fn constructor(rt: &mut impl Runtime, params: ConstructorParams) -> Result<(), ActorError> {
         rt.validate_immediate_caller_is(std::iter::once(&INIT_ACTOR_ADDR))?;
 
-        let st = State::new(rt.store(), params).map_err(|e| {
+        let st = State::new(rt.store(), params, rt.curr_epoch()).map_err(|e| {
             e.downcast_default(
                 ExitCode::USR_ILLEGAL_STATE,
                 "Failed to create SCA actor state",
@@ -328,30 +328,27 @@ impl Actor {
 
                     // commit cross-message in checkpoint to either execute them or
                     // queue them for propagation if there are cross-msgs availble.
-                    match commit.cross_msgs() {
-                        Some(cross_msg) => {
-                            // if tcid not default it means cross-msgs are being propagated.
-                            if cross_msg.msgs_cid != TCid::default() {
-                                st.store_bottomup_msg(rt.store(), cross_msg).map_err(|e| {
-                                    e.downcast_default(
-                                        ExitCode::USR_ILLEGAL_STATE,
-                                        "error storing bottom_up messages from checkpoint",
-                                    )
-                                })?;
-                            }
-
-                            // release circulating supply
-                            sub.release_supply(&cross_msg.value).map_err(|e| {
+                    if let Some(cross_msg) = commit.cross_msgs() {
+                        // if tcid not default it means cross-msgs are being propagated.
+                        if cross_msg.msgs_cid != TCid::default() {
+                            st.store_bottomup_msg(rt.store(), cross_msg).map_err(|e| {
                                 e.downcast_default(
                                     ExitCode::USR_ILLEGAL_STATE,
-                                    "error releasing circulating supply",
+                                    "error storing bottom_up messages from checkpoint",
                                 )
                             })?;
-
-                            // distribute fee
-                            fee = cross_msg.fee.clone();
                         }
-                        None => {}
+
+                        // release circulating supply
+                        sub.release_supply(&cross_msg.value).map_err(|e| {
+                            e.downcast_default(
+                                ExitCode::USR_ILLEGAL_STATE,
+                                "error releasing circulating supply",
+                            )
+                        })?;
+
+                        // distribute fee
+                        fee = cross_msg.fee.clone();
                     }
 
                     // append new checkpoint to the list of childs
@@ -466,7 +463,7 @@ impl Actor {
         rt.transaction(|st: &mut State, rt| {
             let fee = &CROSS_MSG_FEE;
             // collect fees
-            st.collect_cross_fee(&mut value, &fee)?;
+            st.collect_cross_fee(&mut value, fee)?;
 
             // Create release message
             let r_msg = CrossMsg {
@@ -486,7 +483,7 @@ impl Actor {
             };
 
             // Commit bottom-up message.
-            st.commit_bottomup_msg(rt.store(), &r_msg, &fee, rt.curr_epoch())
+            st.commit_bottomup_msg(rt.store(), &r_msg, fee, rt.curr_epoch())
                 .map_err(|e| {
                     e.downcast_default(
                         ExitCode::USR_ILLEGAL_STATE,

@@ -35,6 +35,7 @@ use ipc_gateway::{
 use lazy_static::lazy_static;
 use primitives::{TCid, TCidContent};
 use std::str::FromStr;
+use fvm_shared::clock::ChainEpoch;
 
 lazy_static! {
     pub static ref ROOTNET_ID: SubnetID =
@@ -46,6 +47,7 @@ lazy_static! {
         Address::new_bls(&[1; fvm_shared::address::BLS_PUB_LEN]).unwrap();
     pub static ref ACTOR: Address = Address::new_actor("actor".as_bytes());
     pub static ref SIG_TYPES: Vec<Cid> = vec![*ACCOUNT_ACTOR_CODE_ID, *MULTISIG_ACTOR_CODE_ID];
+    pub static ref DEFAULT_CRON_PERIOD: ChainEpoch = 20;
 }
 
 pub fn new_runtime() -> MockRuntime {
@@ -83,6 +85,7 @@ impl Harness {
         let params = ConstructorParams {
             network_name: self.net_name.to_string(),
             checkpoint_period: 10,
+            cron_period: *DEFAULT_CRON_PERIOD,
         };
         rt.set_caller(*INIT_ACTOR_CODE_ID, INIT_ACTOR_ADDR);
         rt.call::<Actor>(
@@ -93,7 +96,11 @@ impl Harness {
     }
 
     pub fn construct_and_verify(&self, rt: &mut MockRuntime) {
+        let chain_epoch = 10;
+        rt.set_epoch(chain_epoch);
+
         self.construct(rt);
+
         let st: State = rt.get_state();
         let store = &rt.store;
 
@@ -106,6 +113,8 @@ impl Harness {
         assert_eq!(st.check_period, DEFAULT_CHECKPOINT_PERIOD);
         assert_eq!(st.applied_bottomup_nonce, MAX_NONCE);
         assert_eq!(st.bottomup_msg_meta.cid(), empty_bottomup_array);
+        assert_eq!(st.genesis_epoch, chain_epoch);
+        assert_eq!(st.cron_period, *DEFAULT_CRON_PERIOD);
         verify_empty_map(rt, st.subnets.cid());
         verify_empty_map(rt, st.checkpoints.cid());
         verify_empty_map(rt, st.check_msg_registry.cid());
