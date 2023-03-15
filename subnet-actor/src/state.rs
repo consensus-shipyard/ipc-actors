@@ -47,13 +47,18 @@ pub struct State {
     pub window_checks: TCid<THamt<Cid, Votes>>,
     pub validator_set: ValidatorSet,
     pub min_validators: u64,
+    pub genesis_epoch: ChainEpoch,
 }
 
 /// We should probably have a derive macro to mark an object as a state object,
 /// and have load and save methods automatically generated for them as part of a
 /// StateObject trait (i.e. impl StateObject for State).
 impl State {
-    pub fn new<BS: Blockstore>(store: &BS, params: ConstructParams) -> anyhow::Result<State> {
+    pub fn new<BS: Blockstore>(
+        store: &BS,
+        params: ConstructParams,
+        current_epoch: ChainEpoch,
+    ) -> anyhow::Result<State> {
         let min_stake = TokenAmount::from_atto(MIN_COLLATERAL_AMOUNT);
 
         let state = State {
@@ -80,6 +85,7 @@ impl State {
             stake: TCid::new_hamt(store)?,
             window_checks: TCid::new_hamt(store)?,
             validator_set: ValidatorSet::default(),
+            genesis_epoch: current_epoch,
         };
 
         Ok(state)
@@ -394,6 +400,7 @@ impl Default for State {
             window_checks: TCid::default(),
             validator_set: ValidatorSet::default(),
             min_validators: 0,
+            genesis_epoch: 0,
         }
     }
 }

@@ -10,6 +10,7 @@ mod test {
     use fvm_ipld_encoding::ipld_block::IpldBlock;
     use fvm_ipld_encoding::RawBytes;
     use fvm_shared::address::Address;
+    use fvm_shared::clock::ChainEpoch;
     use fvm_shared::crypto::signature::Signature;
     use fvm_shared::econ::TokenAmount;
     use fvm_shared::error::ExitCode;
@@ -28,6 +29,7 @@ mod test {
     // just a test address
     const IPC_GATEWAY_ADDR: u64 = 1024;
     const NETWORK_NAME: &'static str = "test";
+    const DEFAULT_CHAIN_EPOCH: ChainEpoch = 10;
 
     lazy_static! {
         pub static ref SIG_TYPES: Vec<Cid> = vec![*ACCOUNT_ACTOR_CODE_ID, *MULTISIG_ACTOR_CODE_ID];
@@ -63,6 +65,8 @@ mod test {
 
         runtime.expect_validate_caller_addr(vec![INIT_ACTOR_ADDR]);
 
+        runtime.set_epoch(DEFAULT_CHAIN_EPOCH);
+
         runtime
             .call::<Actor>(
                 Method::Constructor as u64,
@@ -88,6 +92,7 @@ mod test {
         assert_eq!(state.ipc_gateway_addr, Address::new_id(IPC_GATEWAY_ADDR));
         assert_eq!(state.total_stake, TokenAmount::zero());
         assert_eq!(state.validator_set.validators().is_empty(), true);
+        assert_eq!(state.genesis_epoch, DEFAULT_CHAIN_EPOCH);
     }
 
     #[test]

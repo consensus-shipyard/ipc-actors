@@ -33,6 +33,7 @@ pub struct ConstructorParams {
     pub network_name: String,
     pub checkpoint_period: ChainEpoch,
     pub cron_period: ChainEpoch,
+    pub genesis_epoch: ChainEpoch,
 }
 
 #[derive(Serialize_tuple, Deserialize_tuple, Clone)]
@@ -120,6 +121,7 @@ mod tests {
             network_name: "/root".to_string(),
             checkpoint_period: 100,
             cron_period: 20,
+            genesis_epoch: 10,
         };
         let bytes = fil_actors_runtime::util::cbor::serialize(&p, "").unwrap();
         let serialized = base64::encode(bytes.bytes());
@@ -132,5 +134,6 @@ mod tests {
         assert_eq!(p.network_name, deserialized.network_name);
         assert_eq!(p.checkpoint_period, deserialized.checkpoint_period);
         assert_eq!(p.cron_period, deserialized.cron_period);
+        assert_eq!(p.genesis_epoch, deserialized.genesis_epoch);
     }
 }
