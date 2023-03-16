@@ -96,7 +96,7 @@ impl CronSubmission {
         submitter: Address,
         checkpoint: CronCheckpoint,
     ) -> anyhow::Result<bool> {
-        // TODO: validation of validator set is correct
+        // TODO: Add validation of validator set logic so that we know the set of validators is correct
         let total_validators = checkpoint.validators.validators().len();
 
         self.update_submitters(store, submitter)?;
