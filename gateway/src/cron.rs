@@ -70,8 +70,6 @@ impl CronCheckpoint {
 /// Track all the cron checkpoint submissions of an epoch
 #[derive(Serialize_tuple, Deserialize_tuple, PartialEq, Eq, Clone)]
 pub struct CronSubmission {
-    /// The total number of submitters
-    total_submitters: u16,
     /// All the submitters
     submitters: TCid<THamt<Address, ()>>,
     /// The most submitted hash. Using set because there might be a tie
@@ -85,7 +83,6 @@ pub struct CronSubmission {
 impl CronSubmission {
     pub fn new<BS: Blockstore>(store: &BS) -> anyhow::Result<CronSubmission> {
         Ok(CronSubmission {
-            total_submitters: 0,
             submitters: TCid::new_hamt(store)?,
             most_submitted_hashes: None,
             submission_counts: Default::default(),
@@ -99,13 +96,17 @@ impl CronSubmission {
         submitter: Address,
         checkpoint: CronCheckpoint,
     ) -> anyhow::Result<bool> {
-        let total_submitters = self.update_submitters(store, submitter)?;
+        // TODO: validation of validator set is correct
+        let total_validators = checkpoint.validators.validators().len();
+
+        self.update_submitters(store, submitter)?;
 
         let checkpoint_hash = self.insert_checkpoint(store, checkpoint)?;
         let most_submitted_count = self.update_submission_count(store, checkpoint_hash)?;
 
         // use u16 numerator and denominator to avoid floating point calculation and external crate
-        if total_submitters * RATIO_NUMERATOR / RATIO_DENOMINATOR > most_submitted_count {
+        // total validators should be within u16::MAX.
+        if total_validators as u16 * RATIO_NUMERATOR / RATIO_DENOMINATOR > most_submitted_count {
             return Ok(false);
         }
 
@@ -140,7 +141,7 @@ impl CronSubmission {
         &mut self,
         store: &BS,
         submitter: Address,
-    ) -> anyhow::Result<u16> {
+    ) -> anyhow::Result<()> {
         let addr_byte_key = BytesKey::from(submitter.to_bytes());
         self.submitters.modify(store, |hamt| {
             // check the submitter has not submitted before
@@ -150,9 +151,8 @@ impl CronSubmission {
 
             // now the submitter has not submitted before, mark as submitted
             hamt.set(addr_byte_key, ())?;
-            self.total_submitters += 1;
 
-            Ok(self.total_submitters)
+            Ok(())
         })
     }
 

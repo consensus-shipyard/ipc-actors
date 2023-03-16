@@ -831,7 +831,7 @@ impl Actor {
                     let epoch = params.epoch;
                     let reached_limit = submission.submit(store, submitter, params)?;
 
-                    if !reached_limit || st.last_cron_executed_epoch + st.cron_period != epoch{
+                    if !reached_limit || st.last_cron_executed_epoch + st.cron_period != epoch {
                         hamt.set(epoch_key, submission)?;
                         return Ok(None);
                     }
