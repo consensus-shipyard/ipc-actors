@@ -51,6 +51,8 @@ pub struct State {
     pub genesis_epoch: ChainEpoch,
     /// How often cron checkpoints will be submitted by validator in the child subnet
     pub cron_period: ChainEpoch,
+    /// The last submit cron epoch that was executed
+    pub last_cron_executed_epoch: ChainEpoch,
     pub cron_submissions: TCid<THamt<ChainEpoch, CronSubmission>>,
 }
 
@@ -81,6 +83,7 @@ impl State {
             applied_topdown_nonce: Default::default(),
             genesis_epoch: params.genesis_epoch,
             cron_period: params.cron_period,
+            last_cron_executed_epoch: params.genesis_epoch,
             cron_submissions: TCid::new_hamt(store)?,
         })
     }

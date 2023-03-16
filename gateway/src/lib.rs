@@ -796,6 +796,14 @@ impl Actor {
         Ok(())
     }
 
+    /// Submit a new cron checkpoint
+    ///
+    /// It only accepts submission at multiples of `cron_period` since `genesis_epoch`, which are
+    /// set during construction. Each checkpoint will have its number of submissions tracked. The
+    /// same address cannot submit twice. Once the number of submissions is more than or equal to 2/3
+    /// of the total number of validators, the messages will be applied.
+    ///
+    /// Each cron checkpoint will be checked against each other using blake hashing.
     fn submit_cron(rt: &mut impl Runtime, params: CronCheckpoint) -> Result<RawBytes, ActorError> {
         // submit cron can only be performed by signable addresses
         rt.validate_immediate_caller_type(CALLER_TYPES_SIGNABLE.iter())?;
@@ -820,17 +828,20 @@ impl Actor {
                         None => CronSubmission::new(store)?,
                     };
 
+                    let epoch = params.epoch;
                     let reached_limit = submission.submit(store, submitter, params)?;
 
-                    if !reached_limit {
+                    if !reached_limit || st.last_cron_executed_epoch + st.cron_period != epoch{
+                        hamt.set(epoch_key, submission)?;
                         return Ok(None);
                     }
+
+                    st.last_cron_executed_epoch = epoch;
 
                     let msgs = submission
                         .load_most_submitted_checkpoint(store)?
                         .unwrap()
                         .top_down_msgs;
-
                     hamt.set(epoch_key, submission)?;
 
                     Ok(Some(msgs))
