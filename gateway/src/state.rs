@@ -16,6 +16,7 @@ use primitives::{TAmt, TCid, THamt, TLink};
 use serde_tuple::{Deserialize_tuple, Serialize_tuple};
 use std::str::FromStr;
 
+use crate::cron::CronSubmission;
 use ipc_sdk::subnet_id::SubnetID;
 
 use super::checkpoint::*;
@@ -50,6 +51,7 @@ pub struct State {
     pub genesis_epoch: ChainEpoch,
     /// How often cron checkpoints will be submitted by validator in the child subnet
     pub cron_period: ChainEpoch,
+    pub cron_submissions: TCid<THamt<ChainEpoch, CronSubmission>>,
 }
 
 lazy_static! {
@@ -79,6 +81,7 @@ impl State {
             applied_topdown_nonce: Default::default(),
             genesis_epoch: params.genesis_epoch,
             cron_period: params.cron_period,
+            cron_submissions: TCid::new_hamt(store)?,
         })
     }
 

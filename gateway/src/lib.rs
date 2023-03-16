@@ -1,10 +1,14 @@
 #![feature(let_chains)] // For some simpler syntax for if let Some conditions
 
+extern crate core;
+
 pub use self::checkpoint::{Checkpoint, CrossMsgMeta};
 pub use self::cross::{is_bottomup, CrossMsg, CrossMsgs, IPCMsgType, StorableMsg};
 pub use self::state::*;
 pub use self::subnet::*;
 pub use self::types::*;
+use crate::cron::CronSubmission;
+use cron::CronCheckpoint;
 use cross::{burn_bu_funds, cross_msg_side_effects, distribute_crossmsg_fee};
 use fil_actors_runtime::runtime::fvm::resolve_secp_bls;
 use fil_actors_runtime::runtime::{ActorCode, Runtime};
@@ -13,6 +17,7 @@ use fil_actors_runtime::{
     CALLER_TYPES_SIGNABLE, INIT_ACTOR_ADDR, SYSTEM_ACTOR_ADDR,
 };
 use fvm_ipld_encoding::RawBytes;
+use fvm_ipld_hamt::BytesKey;
 use fvm_shared::address::Address;
 use fvm_shared::bigint::Zero;
 use fvm_shared::econ::TokenAmount;
@@ -30,6 +35,7 @@ use primitives::TCid;
 fil_actors_runtime::wasm_trampoline!(Actor);
 
 pub mod checkpoint;
+mod cron;
 mod cross;
 mod error;
 #[doc(hidden)]
@@ -60,6 +66,7 @@ pub enum Method {
     ApplyMessage = frc42_dispatch::method_hash!("ApplyMessage"),
     Propagate = frc42_dispatch::method_hash!("Propagate"),
     WhiteListPropagator = frc42_dispatch::method_hash!("WhiteListPropagator"),
+    SubmitCron = frc42_dispatch::method_hash!("SubmitCron"),
 }
 
 /// Gateway Actor
@@ -594,9 +601,11 @@ impl Actor {
     /// - And updated the latest nonce applied for future checks.
     fn apply_msg(rt: &mut impl Runtime, params: ApplyMsgParams) -> Result<RawBytes, ActorError> {
         rt.validate_immediate_caller_is([&SYSTEM_ACTOR_ADDR as &Address])?;
-
         let ApplyMsgParams { cross_msg } = params;
+        Self::apply_msg_inner(rt, cross_msg)
+    }
 
+    fn apply_msg_inner(rt: &mut impl Runtime, cross_msg: CrossMsg) -> Result<RawBytes, ActorError> {
         let rto = match cross_msg.msg.to.raw_addr() {
             Ok(to) => to,
             Err(_) => {
@@ -787,6 +796,69 @@ impl Actor {
         Ok(())
     }
 
+    fn submit_cron(rt: &mut impl Runtime, params: CronCheckpoint) -> Result<RawBytes, ActorError> {
+        // submit cron can only be performed by signable addresses
+        rt.validate_immediate_caller_type(CALLER_TYPES_SIGNABLE.iter())?;
+
+        let msgs = rt.transaction(|st: &mut State, rt| {
+            // first we check the epoch is the correct one
+            let genesis_epoch = st.genesis_epoch;
+
+            // we process only it's multiple of cron_period since genesis_epoch
+            if (params.epoch - genesis_epoch) % st.cron_period != 0 {
+                return Err(actor_error!(illegal_argument, "epoch not allowed"));
+            }
+
+            let store = rt.store();
+            let submitter = rt.message().caller();
+
+            st.cron_submissions
+                .modify(store, |hamt| {
+                    let epoch_key = BytesKey::from(params.epoch.to_be_bytes().as_slice());
+                    let mut submission = match hamt.get(&epoch_key)? {
+                        Some(s) => s.clone(),
+                        None => CronSubmission::new(store)?,
+                    };
+
+                    let reached_limit = submission.submit(store, submitter, params)?;
+
+                    if !reached_limit {
+                        return Ok(None);
+                    }
+
+                    let msgs = submission
+                        .load_most_submitted_checkpoint(store)?
+                        .unwrap()
+                        .top_down_msgs;
+
+                    hamt.set(epoch_key, submission)?;
+
+                    Ok(Some(msgs))
+                })
+                .map_err(|e| {
+                    log::error!(
+                        "encountered error processing submit cron checkpoint: {:?}",
+                        e
+                    );
+                    actor_error!(unhandled_message, e.to_string())
+                })
+        })?;
+
+        if let Some(msgs) = msgs {
+            // TODO: we might need to batch the execution so that it's atomic
+            for m in msgs {
+                Self::apply_msg_inner(
+                    rt,
+                    CrossMsg {
+                        msg: m,
+                        wrapped: false,
+                    },
+                )?;
+            }
+        }
+        Ok(RawBytes::default())
+    }
+
     /// Commit the cross message to storage. It outputs a flag signaling
     /// if the committed messages was bottom-up and some funds need to be
     /// burnt or if a top-down message fee needs to be distributed.
@@ -880,5 +952,6 @@ impl ActorCode for Actor {
         ApplyMessage => apply_msg,
         Propagate => propagate,
         WhiteListPropagator => whitelist_propagator,
+        SubmitCron => submit_cron,
     }
 }

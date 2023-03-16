@@ -7,13 +7,11 @@ use fvm_shared::address::Address;
 use fvm_shared::clock::ChainEpoch;
 use fvm_shared::econ::TokenAmount;
 use ipc_sdk::subnet_id::SubnetID;
-use ipc_sdk::ValidatorSet;
 use multihash::MultihashDigest;
 use primitives::CodeType;
 
 use crate::checkpoint::{Checkpoint, CrossMsgMeta};
 use crate::cross::CrossMsg;
-use crate::StorableMsg;
 
 /// ID used in the builtin-actors bundle manifest
 pub const MANIFEST_ID: &str = "ipc_gateway";
@@ -101,15 +99,6 @@ impl PostBoxItem {
     pub fn deserialize(bytes: Vec<u8>) -> Result<PostBoxItem, ActorError> {
         cbor::deserialize(&RawBytes::from(bytes), POSTBOX_ITEM_DESCRIPTION)
     }
-}
-
-/// Checkpoints propagated from parent to child to signal the "final view" of the parent chain
-/// from the different validators in the subnet.
-#[derive(Clone, Debug, Serialize_tuple, Deserialize_tuple, PartialEq, Eq)]
-pub struct CronCheckpoint {
-    pub epoch: ChainEpoch,
-    pub membership: ValidatorSet,
-    pub top_down_msgs: Vec<StorableMsg>,
 }
 
 #[cfg(test)]
