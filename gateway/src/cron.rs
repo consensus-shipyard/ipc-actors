@@ -60,6 +60,9 @@ impl CronCheckpoint {
         }
 
         let mh_code = Code::Blake2b256;
+        // TODO: to avoid serialization again, maybe we should perform deserialization in the actor
+        // TODO: dispatch call to save gas? The actor dispatching contains the raw serialized data,
+        // TODO: which we dont have to serialize here again
         Ok(mh_code.digest(&to_vec(self).unwrap()).to_bytes())
     }
 }
