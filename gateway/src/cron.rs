@@ -74,7 +74,7 @@ pub struct CronSubmission {
     submitters: TCid<THamt<Address, ()>>,
     /// The most submitted hash. Using set because there might be a tie
     most_submitted_hashes: Option<HashSet<HashOutput>>,
-    /// The binary heap to track the max submitted
+    /// The map to track the max submitted
     submission_counts: TCid<THamt<HashOutput, u16>>,
     /// The different cron checkpoints, with cron checkpoint hash as key
     submissions: TCid<THamt<HashOutput, CronCheckpoint>>,
@@ -90,6 +90,8 @@ impl CronSubmission {
         })
     }
 
+    /// Submit a cron checkpoint as the submitter. Returns `true` if the submission threshold
+    /// is reached, else `false`.
     pub fn submit<BS: Blockstore>(
         &mut self,
         store: &BS,
@@ -118,7 +120,7 @@ impl CronSubmission {
         store: &BS,
     ) -> anyhow::Result<Option<CronCheckpoint>> {
         if let Some(most_submitted_hashes) = &self.most_submitted_hashes {
-            // we will only have one entry in the `most_submitted` set
+            // we will only have one entry in the `most_submitted` set if more than 2/3 has reached
             let hash = most_submitted_hashes.iter().next().unwrap();
             self.get_submission(store, hash)
         } else {
@@ -164,16 +166,18 @@ impl CronSubmission {
     ) -> anyhow::Result<HashOutput> {
         let hash = checkpoint.hash()?;
         let hash_key = BytesKey::from(hash.as_slice());
+
+        let hamt = self.submissions.load(store)?;
+        if hamt.contains_key(&hash_key)? {
+            return Ok(hash);
+        }
+
+        // checkpoint has not submitted before
         self.submissions.modify(store, |hamt| {
-            if hamt.contains_key(&hash_key)? {
-                return Ok(());
-            }
-
-            // checkpoint has not submitted before
             hamt.set(hash_key, checkpoint)?;
-
             Ok(())
         })?;
+
         Ok(hash)
     }
 
@@ -238,6 +242,42 @@ impl CronSubmission {
             Ok(*most_submitted_count)
         })
     }
+
+    /// Checks if the submitter has already submitted the checkpoint. Currently used only in
+    /// tests, but can be used in prod as well.
+    #[cfg(test)]
+    fn has_submitted<BS: Blockstore>(
+        &self,
+        store: &BS,
+        submitter: &Address,
+    ) -> anyhow::Result<bool> {
+        let addr_byte_key = BytesKey::from(submitter.to_bytes());
+        let hamt = self.submitters.load(store)?;
+        Ok(hamt.contains_key(&addr_byte_key)?)
+    }
+
+    /// Checks if the checkpoint hash has already inserted in the store
+    #[cfg(test)]
+    fn has_checkpoint_inserted<BS: Blockstore>(
+        &self,
+        store: &BS,
+        hash: &HashOutput
+    ) -> anyhow::Result<bool> {
+        let hamt = self.submissions.load(store)?;
+        Ok(hamt.contains_key(&BytesKey::from(hash.as_slice()))?)
+    }
+
+    /// Checks if the checkpoint hash has already inserted in the store
+    #[cfg(test)]
+    fn get_submission_count<BS: Blockstore>(
+        &self,
+        store: &BS,
+        hash: &HashOutput
+    ) -> anyhow::Result<Option<u16>> {
+        let hamt = self.submission_counts.load(store)?;
+        let r = hamt.get(&BytesKey::from(hash.as_slice()))?;
+        Ok(r.cloned())
+    }
 }
 
 /// Compare the ordering of two storable messages.
@@ -253,4 +293,135 @@ fn compare_top_down_msg(a: &StorableMsg, b: &StorableMsg) -> anyhow::Result<Orde
     }
 
     Ok(a.nonce.cmp(&b.nonce))
+}
+
+#[cfg(test)]
+mod tests {
+    use std::cmp::Ordering;
+    use fvm_ipld_blockstore::MemoryBlockstore;
+    use fvm_ipld_encoding::RawBytes;
+    use fvm_shared::address::Address;
+    use fvm_shared::econ::TokenAmount;
+    use ipc_sdk::address::IPCAddress;
+    use ipc_sdk::subnet_id::ROOTNET_ID;
+    use crate::{CronCheckpoint, CronSubmission, StorableMsg};
+    use crate::cron::compare_top_down_msg;
+
+    macro_rules! some_hashset {
+        ($($x:expr),*) => {
+            {
+                let mut h = std::collections::HashSet::new();
+                $(
+                h.insert($x);
+                )*
+                Some(h)
+            }
+        }
+    }
+
+    #[test]
+    fn test_new_works() {
+        let store = MemoryBlockstore::new();
+        let r = CronSubmission::new(&store);
+        assert!(r.is_ok());
+    }
+
+    #[test]
+    fn test_compare_top_down_msg() {
+        let a = StorableMsg{
+            from: IPCAddress::new(&ROOTNET_ID, &Address::new_id(0)).unwrap(),
+            to: IPCAddress::new(&ROOTNET_ID, &Address::new_id(1)).unwrap(),
+            method: 0,
+            params: RawBytes::default(),
+            value: TokenAmount::from_whole(1),
+            nonce: 0,
+        };
+
+        let b = StorableMsg{
+            from: IPCAddress::new(&ROOTNET_ID, &Address::new_id(0)).unwrap(),
+            to: IPCAddress::new(&ROOTNET_ID, &Address::new_id(1)).unwrap(),
+            method: 0,
+            params: RawBytes::default(),
+            value: TokenAmount::from_whole(1),
+            nonce: 2,
+        };
+
+        assert_eq!(compare_top_down_msg(&a, &b).unwrap(), Ordering::Less);
+    }
+
+    #[test]
+    fn test_update_submitters() {
+        let store = MemoryBlockstore::new();
+        let mut submission = CronSubmission::new(&store).unwrap();
+
+        let submitter = Address::new_id(0);
+        submission.update_submitters(&store, submitter).unwrap();
+        assert!(submission.has_submitted(&store, &submitter).unwrap());
+
+        // now submit again, but should fail
+        assert!(submission.update_submitters(&store, submitter).is_err());
+    }
+
+    #[test]
+    fn test_insert_checkpoint() {
+        let store = MemoryBlockstore::new();
+        let mut submission = CronSubmission::new(&store).unwrap();
+
+        let checkpoint = CronCheckpoint{
+            epoch: 100,
+            validators: Default::default(),
+            top_down_msgs: vec![]
+        };
+
+        let hash = checkpoint.hash().unwrap();
+
+        submission.insert_checkpoint(&store, checkpoint.clone()).unwrap();
+        assert!(submission.has_checkpoint_inserted(&store, &hash).unwrap());
+
+        // insert again should not have caused any error
+        submission.insert_checkpoint(&store, checkpoint.clone()).unwrap();
+
+        let inserted_checkpoint = submission.get_submission(&store, &hash).unwrap().unwrap();
+        assert_eq!(inserted_checkpoint, checkpoint);
+    }
+
+    #[test]
+    fn test_update_submission_count() {
+        let store = MemoryBlockstore::new();
+        let mut submission = CronSubmission::new(&store).unwrap();
+
+        let hash1 = vec![1, 2, 1];
+        let hash2 = vec![1, 2, 2];
+        let hash3 = vec![1, 2, 3];
+
+        // insert hash1, should have only one item
+        assert_eq!(submission.most_submitted_hashes, None);
+        assert_eq!(submission.update_submission_count(&store, hash1.clone()).unwrap(), 1);
+        assert_eq!(submission.get_submission_count(&store, &hash1).unwrap().unwrap(), 1);
+        assert_eq!(submission.most_submitted_hashes, some_hashset!(hash1.clone()));
+
+        // insert hash2, we should have two items, and there is a tie
+        assert_eq!(submission.update_submission_count(&store, hash2.clone()).unwrap(), 1);
+        assert_eq!(submission.get_submission_count(&store, &hash2).unwrap().unwrap(), 1);
+        assert_eq!(submission.get_submission_count(&store, &hash1).unwrap().unwrap(), 1);
+        assert_eq!(submission.most_submitted_hashes, some_hashset!(hash1.clone(), hash2.clone()));
+
+        // insert hash3, we should have three items, and there is still a tie
+        assert_eq!(submission.update_submission_count(&store, hash3.clone()).unwrap(), 1);
+        assert_eq!(submission.get_submission_count(&store, &hash3).unwrap().unwrap(), 1);
+        assert_eq!(submission.get_submission_count(&store, &hash2).unwrap().unwrap(), 1);
+        assert_eq!(submission.get_submission_count(&store, &hash1).unwrap().unwrap(), 1);
+        assert_eq!(submission.most_submitted_hashes, some_hashset!(hash3.clone(), hash1.clone(), hash2.clone()));
+
+        // insert hash1 again, we should have only 1 most submitted hash
+        assert_eq!(submission.update_submission_count(&store, hash1.clone()).unwrap(), 2);
+        assert_eq!(submission.get_submission_count(&store, &hash1).unwrap().unwrap(), 2);
+        assert_eq!(submission.most_submitted_hashes, some_hashset!(hash1.clone()));
+
+        // insert hash1 again, we should have only 1 most submitted hash, but count incr by 1
+        assert_eq!(submission.update_submission_count(&store, hash1.clone()).unwrap(), 3);
+        assert_eq!(submission.get_submission_count(&store, &hash1).unwrap().unwrap(), 3);
+        assert_eq!(submission.most_submitted_hashes, some_hashset!(hash1.clone()));
+        assert_eq!(submission.most_submitted_hashes.unwrap().len(), 1);
+    }
 }
