@@ -111,6 +111,79 @@ mod test {
     }
 
     #[test]
+    fn test_set_net_addr_works() {
+        let mut runtime = construct_runtime();
+
+        let caller = Address::new_id(10);
+        let validator = Address::new_id(100);
+        let params = JoinParams {
+            validator_net_addr: validator.to_string(),
+        };
+        let gateway = Address::new_id(IPC_GATEWAY_ADDR);
+
+        // join
+        let value = TokenAmount::from_atto(MIN_COLLATERAL_AMOUNT);
+        runtime.set_value(value.clone());
+        runtime.set_balance(value.clone());
+        runtime.set_caller(*ACCOUNT_ACTOR_CODE_ID, caller.clone());
+        runtime.expect_validate_caller_type(SIG_TYPES.clone());
+        runtime.expect_send(
+            gateway.clone(),
+            ipc_gateway::Method::Register as u64,
+            None,
+            TokenAmount::from_atto(MIN_COLLATERAL_AMOUNT),
+            None,
+            ExitCode::new(0),
+        );
+        runtime
+            .call::<Actor>(
+                Method::Join as u64,
+                IpldBlock::serialize_cbor(&params).unwrap(),
+            )
+            .unwrap();
+
+        // modify net address
+        let new_addr = String::from("test_addr");
+        let params = JoinParams {
+            validator_net_addr: new_addr.clone(),
+        };
+
+        runtime.set_caller(*ACCOUNT_ACTOR_CODE_ID, caller.clone());
+        runtime.expect_validate_caller_type(SIG_TYPES.clone());
+        runtime
+            .call::<Actor>(
+                Method::SetValidatorNetAddr as u64,
+                IpldBlock::serialize_cbor(&params).unwrap(),
+            )
+            .unwrap();
+
+        let st: State = runtime.get_state();
+
+        if let Some(val) = st
+            .validator_set
+            .validators()
+            .iter()
+            .find(|x| x.addr == caller)
+        {
+            assert_eq!(val.net_addr, new_addr);
+        } else {
+            panic!("validator address not set correctly")
+        }
+
+        // user which is not a validator tries to change address
+        let caller = Address::new_id(11);
+        runtime.set_caller(*ACCOUNT_ACTOR_CODE_ID, caller.clone());
+        runtime.expect_validate_caller_type(SIG_TYPES.clone());
+        expect_abort(
+            ExitCode::USR_FORBIDDEN,
+            runtime.call::<Actor>(
+                Method::SetValidatorNetAddr as u64,
+                IpldBlock::serialize_cbor(&params).unwrap(),
+            ),
+        );
+    }
+
+    #[test]
     fn test_join_works() {
         let mut runtime = construct_runtime();
 
