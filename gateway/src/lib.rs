@@ -7,7 +7,8 @@ pub use self::cross::{is_bottomup, CrossMsg, CrossMsgs, IPCMsgType, StorableMsg}
 pub use self::state::*;
 pub use self::subnet::*;
 pub use self::types::*;
-use crate::cron::CronSubmission;
+use crate::cron::{CronSubmission, VoteExecutionStatus};
+use anyhow::anyhow;
 use cron::CronCheckpoint;
 use cross::{burn_bu_funds, cross_msg_side_effects, distribute_crossmsg_fee};
 use fil_actors_runtime::runtime::fvm::resolve_secp_bls;
@@ -828,12 +829,33 @@ impl Actor {
                         None => CronSubmission::new(store)?,
                     };
 
-                    let epoch = params.epoch;
-                    let reached_limit = submission.submit(store, submitter, params)?;
+                    if submission.is_executed() {
+                        return Err(anyhow!("epoch already executed"));
+                    }
 
-                    if !reached_limit || st.last_cron_executed_epoch + st.cron_period != epoch {
+                    let epoch = params.epoch;
+                    let execution_status = submission.submit(store, submitter, params)?;
+
+                    if st.last_cron_executed_epoch + st.cron_period != epoch {
+                        // there are pending epoch to be executed,
+                        // just store the submission and skip execution
                         hamt.set(epoch_key, submission)?;
                         return Ok(None);
+                    }
+
+                    match execution_status {
+                        VoteExecutionStatus::ThresholdNotReached
+                        | VoteExecutionStatus::ReachingConsensus => {
+                            // threshold or consensus not reached, store submission and return
+                            hamt.set(epoch_key, submission)?;
+                            return Ok(None);
+                        }
+                        VoteExecutionStatus::RoundAbort => {
+                            submission.abort(store)?;
+                            hamt.set(epoch_key, submission)?;
+                            return Ok(None);
+                        }
+                        VoteExecutionStatus::ConsensusReached => {}
                     }
 
                     st.last_cron_executed_epoch = epoch;
@@ -842,6 +864,7 @@ impl Actor {
                         .load_most_submitted_checkpoint(store)?
                         .unwrap()
                         .top_down_msgs;
+                    submission.executed();
                     hamt.set(epoch_key, submission)?;
 
                     Ok(Some(msgs))
@@ -856,7 +879,6 @@ impl Actor {
         })?;
 
         if let Some(msgs) = msgs {
-            // TODO: we might need to batch the execution so that it's atomic
             for m in msgs {
                 Self::apply_msg_inner(
                     rt,
