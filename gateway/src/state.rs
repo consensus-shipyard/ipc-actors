@@ -16,8 +16,9 @@ use primitives::{TAmt, TCid, THamt, TLink};
 use serde_tuple::{Deserialize_tuple, Serialize_tuple};
 use std::str::FromStr;
 
-use crate::cron::CronSubmission;
+use crate::cron::{CronSubmission, Validators};
 use ipc_sdk::subnet_id::SubnetID;
+use ipc_sdk::Validator;
 
 use super::checkpoint::*;
 use super::cross::*;
@@ -54,6 +55,7 @@ pub struct State {
     /// The last submit cron epoch that was executed
     pub last_cron_executed_epoch: ChainEpoch,
     pub cron_submissions: TCid<THamt<ChainEpoch, CronSubmission>>,
+    pub validators: Validators,
 }
 
 lazy_static! {
@@ -85,6 +87,7 @@ impl State {
             cron_period: params.cron_period,
             last_cron_executed_epoch: params.genesis_epoch,
             cron_submissions: TCid::new_hamt(store)?,
+            validators: Validators::new(store)?,
         })
     }
 
@@ -459,6 +462,35 @@ impl State {
         // update balance after collecting the fee
         *balance -= fee;
         Ok(())
+    }
+
+    /// Add a validator to existing validators
+    pub fn add_validator<BS: Blockstore>(
+        &mut self,
+        st: &BS,
+        validator: Validator,
+    ) -> Result<(), ActorError> {
+        self.validators
+            .add_validator(st, validator)
+            .map_err(|e| actor_error!(unhandled_message, format!("cannot add validator: {:}", e)))
+    }
+
+    /// Removes a validator to existing validators
+    pub fn remove_validator<BS: Blockstore>(
+        &mut self,
+        st: &BS,
+        addr: &Address,
+    ) -> Result<(), ActorError> {
+        self.validators.remove_validator(st, addr).map_err(|e| {
+            actor_error!(
+                unhandled_message,
+                format!("cannot remove validator: {:}", e)
+            )
+        })
+    }
+
+    pub(crate) fn total_validators(&self) -> u16 {
+        self.validators.total_count
     }
 }
 

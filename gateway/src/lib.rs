@@ -26,6 +26,7 @@ use fvm_shared::METHOD_SEND;
 use fvm_shared::{MethodNum, METHOD_CONSTRUCTOR};
 pub use ipc_sdk::address::IPCAddress;
 pub use ipc_sdk::subnet_id::SubnetID;
+use ipc_sdk::Validator;
 use lazy_static::lazy_static;
 use num_derive::FromPrimitive;
 use num_traits::FromPrimitive;
@@ -67,6 +68,8 @@ pub enum Method {
     Propagate = frc42_dispatch::method_hash!("Propagate"),
     WhiteListPropagator = frc42_dispatch::method_hash!("WhiteListPropagator"),
     SubmitCron = frc42_dispatch::method_hash!("SubmitCron"),
+    AddValidator = frc42_dispatch::method_hash!("AddValidator"),
+    RemoveValidator = frc42_dispatch::method_hash!("RemoveValidator"),
 }
 
 /// Gateway Actor
@@ -796,6 +799,25 @@ impl Actor {
         Ok(())
     }
 
+    /// Adds a new validator to the gateway
+    fn add_validator(rt: &mut impl Runtime, params: Validator) -> Result<RawBytes, ActorError> {
+        rt.validate_immediate_caller_is([&SYSTEM_ACTOR_ADDR as &Address])?;
+        rt.transaction(|st: &mut State, rt| {
+            let store = rt.store();
+            st.add_validator(store, params).map(|_| RawBytes::default())
+        })
+    }
+
+    /// Removes a new validator to the gateway
+    fn remove_validator(rt: &mut impl Runtime, params: Address) -> Result<RawBytes, ActorError> {
+        rt.validate_immediate_caller_is([&SYSTEM_ACTOR_ADDR as &Address])?;
+        rt.transaction(|st: &mut State, rt| {
+            let store = rt.store();
+            st.remove_validator(store, &params)
+                .map(|_| RawBytes::default())
+        })
+    }
+
     /// Submit a new cron checkpoint
     ///
     /// It only accepts submission at multiples of `cron_period` since `genesis_epoch`, which are
@@ -823,6 +845,7 @@ impl Actor {
 
             let store = rt.store();
             let submitter = rt.message().caller();
+            let total_validators = st.total_validators();
 
             st.cron_submissions
                 .modify(store, |hamt| {
@@ -833,7 +856,9 @@ impl Actor {
                     };
 
                     let epoch = params.epoch;
-                    let execution_status = submission.submit(store, submitter, params)?;
+                    let most_voted_count = submission.submit(store, submitter, params)?;
+                    let execution_status =
+                        submission.derive_execution_status(total_validators, most_voted_count);
 
                     if st.last_cron_executed_epoch + st.cron_period != epoch {
                         // there are pending epoch to be executed,
@@ -985,5 +1010,7 @@ impl ActorCode for Actor {
         Propagate => propagate,
         WhiteListPropagator => whitelist_propagator,
         SubmitCron => submit_cron,
+        AddValidator => add_validator,
+        RemoveValidator => remove_validator,
     }
 }
