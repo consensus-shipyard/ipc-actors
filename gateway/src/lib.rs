@@ -8,7 +8,6 @@ pub use self::state::*;
 pub use self::subnet::*;
 pub use self::types::*;
 use crate::cron::{CronSubmission, VoteExecutionStatus};
-use anyhow::anyhow;
 use cron::CronCheckpoint;
 use cross::{burn_bu_funds, cross_msg_side_effects, distribute_crossmsg_fee};
 use fil_actors_runtime::runtime::fvm::resolve_secp_bls;
@@ -818,6 +817,10 @@ impl Actor {
                 return Err(actor_error!(illegal_argument, "epoch not allowed"));
             }
 
+            if st.last_cron_executed_epoch >= params.epoch {
+                return Err(actor_error!(illegal_argument, "epoch already executed"));
+            }
+
             let store = rt.store();
             let submitter = rt.message().caller();
 
@@ -828,10 +831,6 @@ impl Actor {
                         Some(s) => s.clone(),
                         None => CronSubmission::new(store)?,
                     };
-
-                    if submission.is_executed() {
-                        return Err(anyhow!("epoch already executed"));
-                    }
 
                     let epoch = params.epoch;
                     let execution_status = submission.submit(store, submitter, params)?;
@@ -858,14 +857,14 @@ impl Actor {
                         VoteExecutionStatus::ConsensusReached => {}
                     }
 
+                    // we reach consensus in the checkpoints submission
                     st.last_cron_executed_epoch = epoch;
 
                     let msgs = submission
                         .load_most_submitted_checkpoint(store)?
                         .unwrap()
                         .top_down_msgs;
-                    submission.executed();
-                    hamt.set(epoch_key, submission)?;
+                    hamt.delete(&epoch_key)?;
 
                     Ok(Some(msgs))
                 })

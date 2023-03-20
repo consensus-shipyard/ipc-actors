@@ -29,29 +29,21 @@ impl CronCheckpoint {
     /// Hash the checkpoint.
     ///
     /// To compare the cron checkpoint and ensure they are the same, we need to make sure the
-    /// validators and top_down_msgs are the same. However, the top_down_msgs and validators are vec,
-    /// they may contain the same content, but their orders are different. In this case, we need to
-    /// ensure the same order is maintained in the cron checkpoint submission.
+    /// top_down_msgs are the same. However, the top_down_msgs are vec, they may contain the same
+    /// content, but their orders are different. In this case, we need to ensure the same order is
+    /// maintained in the cron checkpoint submission.
     ///
     /// To ensure we have the same consistent output for different submissions, we require:
-    ///     - validators are sorted by `net_addr` in string ascending order
-    ///     - top down messages are sorted by (from, to, nonce) in descending order
+    ///     - top down messages are sorted by `nonce` in descending order
     ///
     /// Actor will not perform sorting to save gas. Client should do it, actor just check.
     fn hash(&self) -> anyhow::Result<HashOutput> {
-        // check validators
-        let validators = self.validators.validators();
-        for i in 1..validators.len() {
-            match validators[i - 1].net_addr.cmp(&validators[i].net_addr) {
-                Ordering::Less => {}
-                Ordering::Equal => return Err(anyhow!("validators not unique")),
-                Ordering::Greater => return Err(anyhow!("validators not sorted")),
-            };
-        }
-
         // check top down msgs
         for i in 1..self.top_down_msgs.len() {
-            match compare_top_down_msg(&self.top_down_msgs[i - 1], &self.top_down_msgs[i])? {
+            match self.top_down_msgs[i - 1]
+                .nonce
+                .cmp(&self.top_down_msgs[i].nonce)
+            {
                 Ordering::Less => {}
                 Ordering::Equal => return Err(anyhow!("top down messages not distinct")),
                 Ordering::Greater => return Err(anyhow!("top down messages not sorted")),
@@ -69,9 +61,7 @@ impl CronCheckpoint {
 /// Track all the cron checkpoint submissions of an epoch
 #[derive(Serialize_tuple, Deserialize_tuple, PartialEq, Eq, Clone)]
 pub struct CronSubmission {
-    /// Whether the voting has been executed once consensus has reached
-    executed: bool,
-    /// Total number of submissions
+    /// Total number of submissions from validators
     total_submissions: u16,
     /// The most submitted hash.
     most_voted_hash: Option<HashOutput>,
@@ -86,7 +76,6 @@ pub struct CronSubmission {
 impl CronSubmission {
     pub fn new<BS: Blockstore>(store: &BS) -> anyhow::Result<CronSubmission> {
         Ok(CronSubmission {
-            executed: false,
             total_submissions: 0,
             submitters: TCid::new_hamt(store)?,
             most_voted_hash: None,
@@ -97,26 +86,16 @@ impl CronSubmission {
 
     /// Abort the current round and reset the submission data.
     pub fn abort<BS: Blockstore>(&mut self, store: &BS) -> anyhow::Result<()> {
-        // not need to reset executed as it's still false
-
         self.total_submissions = 0;
         self.submitters = TCid::new_hamt(store)?;
         self.most_voted_hash = None;
         self.submission_counts = TCid::new_hamt(store)?;
 
-        // no need reset submissions, we can still reuse the previous submissions
+        // no need reset `self.submissions`, we can still reuse the previous self.submissions
         // new submissions will be inserted, old submission will not be inserted to save
         // gas.
 
         Ok(())
-    }
-
-    pub fn executed(&mut self) {
-        self.executed = true;
-    }
-
-    pub fn is_executed(&self) -> bool {
-        self.executed
     }
 
     /// Submit a cron checkpoint as the submitter. Returns `true` if the submission threshold
@@ -127,7 +106,8 @@ impl CronSubmission {
         submitter: Address,
         checkpoint: CronCheckpoint,
     ) -> anyhow::Result<VoteExecutionStatus> {
-        // TODO: remove this once tracking of validators are added
+        // TODO: remove this once tracking of validators are added, we will get the validator
+        // TODO: set from a field in the gateway after the next PR.
         let total_validators = checkpoint.validators.validators().len();
 
         let total_submissions = self.update_submitters(store, submitter)?;
@@ -353,61 +333,17 @@ impl CronSubmission {
     }
 }
 
-/// Compare the ordering of two storable messages.
-fn compare_top_down_msg(a: &StorableMsg, b: &StorableMsg) -> anyhow::Result<Ordering> {
-    let ordering = a.from.raw_addr()?.cmp(&b.from.raw_addr()?);
-    if ordering != Ordering::Equal {
-        return Ok(ordering);
-    }
-
-    let ordering = a.to.raw_addr()?.cmp(&b.to.raw_addr()?);
-    if ordering != Ordering::Equal {
-        return Ok(ordering);
-    }
-
-    Ok(a.nonce.cmp(&b.nonce))
-}
-
 #[cfg(test)]
 mod tests {
-    use crate::cron::compare_top_down_msg;
-    use crate::{CronCheckpoint, CronSubmission, StorableMsg, VoteExecutionStatus};
+    use crate::{CronCheckpoint, CronSubmission, VoteExecutionStatus};
     use fvm_ipld_blockstore::MemoryBlockstore;
-    use fvm_ipld_encoding::RawBytes;
     use fvm_shared::address::Address;
-    use fvm_shared::econ::TokenAmount;
-    use ipc_sdk::address::IPCAddress;
-    use ipc_sdk::subnet_id::ROOTNET_ID;
-    use std::cmp::Ordering;
 
     #[test]
     fn test_new_works() {
         let store = MemoryBlockstore::new();
         let r = CronSubmission::new(&store);
         assert!(r.is_ok());
-    }
-
-    #[test]
-    fn test_compare_top_down_msg() {
-        let a = StorableMsg {
-            from: IPCAddress::new(&ROOTNET_ID, &Address::new_id(0)).unwrap(),
-            to: IPCAddress::new(&ROOTNET_ID, &Address::new_id(1)).unwrap(),
-            method: 0,
-            params: RawBytes::default(),
-            value: TokenAmount::from_whole(1),
-            nonce: 0,
-        };
-
-        let b = StorableMsg {
-            from: IPCAddress::new(&ROOTNET_ID, &Address::new_id(0)).unwrap(),
-            to: IPCAddress::new(&ROOTNET_ID, &Address::new_id(1)).unwrap(),
-            method: 0,
-            params: RawBytes::default(),
-            value: TokenAmount::from_whole(1),
-            nonce: 2,
-        };
-
-        assert_eq!(compare_top_down_msg(&a, &b).unwrap(), Ordering::Less);
     }
 
     #[test]
