@@ -838,11 +838,11 @@ impl Actor {
             let store = rt.store();
             let submitter = rt.message().caller();
 
-            if !st.validators.is_validator(&submitter) {
-                return Err(actor_error!(illegal_argument, "caller not validator"));
-            }
-
-            let total_validators = st.total_validators();
+            let validator_weight = match st.validators.get_weight(&submitter) {
+                None => return Err(actor_error!(illegal_argument, "caller not validator")),
+                Some(w) => w,
+            };
+            let total_weight = st.validators.total_weight.clone();
 
             st.cron_submissions
                 .modify(store, |hamt| {
@@ -853,9 +853,10 @@ impl Actor {
                     };
 
                     let epoch = params.epoch;
-                    let most_voted_count = submission.submit(store, submitter, params)?;
+                    let most_voted_weight =
+                        submission.submit(store, submitter, validator_weight, params)?;
                     let execution_status =
-                        submission.derive_execution_status(total_validators, most_voted_count);
+                        submission.derive_execution_status(total_weight, most_voted_weight);
 
                     if st.last_cron_executed_epoch + st.cron_period != epoch {
                         // there are pending epoch to be executed,

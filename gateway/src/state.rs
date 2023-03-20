@@ -467,10 +467,6 @@ impl State {
     pub fn set_membership(&mut self, validator_set: ValidatorSet) {
         self.validators = Validators::new(validator_set);
     }
-
-    pub(crate) fn total_validators(&self) -> u16 {
-        self.validators.validators.validators().len() as u16
-    }
 }
 
 pub fn set_subnet<BS: Blockstore>(

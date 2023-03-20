@@ -10,13 +10,18 @@ use fvm_shared::address::Address;
 use fvm_shared::clock::ChainEpoch;
 use fvm_shared::econ::TokenAmount;
 use ipc_sdk::ValidatorSet;
+use lazy_static::lazy_static;
 use num_traits::Zero;
 use primitives::{TCid, THamt};
 use std::cmp::Ordering;
+use std::ops::Mul;
 
 pub type HashOutput = Vec<u8>;
-const RATIO_NUMERATOR: u16 = 2;
-const RATIO_DENOMINATOR: u16 = 3;
+
+lazy_static! {
+    pub static ref RATIO_NUMERATOR: u64 = 2;
+    pub static ref RATIO_DENOMINATOR: u64 = 3;
+}
 
 /// Validators tracks all the validator in the subnet. It is useful in handling cron checkpoints.
 #[derive(Clone, Debug, Serialize_tuple, Deserialize_tuple)]
@@ -39,9 +44,13 @@ impl Validators {
         }
     }
 
-    /// Checks if an address is a validator
-    pub fn is_validator(&self, addr: &Address) -> bool {
-        self.validators.validators().iter().any(|x| x.addr == *addr)
+    /// Get the weight of a validator
+    pub fn get_weight(&self, addr: &Address) -> Option<TokenAmount> {
+        self.validators
+            .validators()
+            .iter()
+            .find(|x| x.addr == *addr)
+            .map(|v| v.weight.clone())
     }
 }
 
@@ -89,14 +98,14 @@ impl CronCheckpoint {
 /// Track all the cron checkpoint submissions of an epoch
 #[derive(Serialize_tuple, Deserialize_tuple, PartialEq, Eq, Clone)]
 pub struct CronSubmission {
-    /// Total number of submissions from validators
-    total_submissions: u16,
+    /// The summation of the weights from all validator submissions
+    total_submission_weight: TokenAmount,
     /// The most submitted hash.
     most_voted_hash: Option<HashOutput>,
     /// The addresses of all the submitters
     submitters: TCid<THamt<Address, ()>>,
-    /// The map to track the max submitted
-    submission_counts: TCid<THamt<HashOutput, u16>>,
+    /// The map to track the submission weight of each hash
+    submission_weights: TCid<THamt<HashOutput, TokenAmount>>,
     /// The different cron checkpoints, with cron checkpoint hash as key
     submissions: TCid<THamt<HashOutput, CronCheckpoint>>,
 }
@@ -104,20 +113,20 @@ pub struct CronSubmission {
 impl CronSubmission {
     pub fn new<BS: Blockstore>(store: &BS) -> anyhow::Result<Self> {
         Ok(CronSubmission {
-            total_submissions: 0,
+            total_submission_weight: TokenAmount::zero(),
             submitters: TCid::new_hamt(store)?,
             most_voted_hash: None,
-            submission_counts: TCid::new_hamt(store)?,
+            submission_weights: TCid::new_hamt(store)?,
             submissions: TCid::new_hamt(store)?,
         })
     }
 
     /// Abort the current round and reset the submission data.
     pub fn abort<BS: Blockstore>(&mut self, store: &BS) -> anyhow::Result<()> {
-        self.total_submissions = 0;
+        self.total_submission_weight = TokenAmount::zero();
         self.submitters = TCid::new_hamt(store)?;
         self.most_voted_hash = None;
-        self.submission_counts = TCid::new_hamt(store)?;
+        self.submission_weights = TCid::new_hamt(store)?;
 
         // no need reset `self.submissions`, we can still reuse the previous self.submissions
         // new submissions will be inserted, old submission will not be inserted to save
@@ -131,11 +140,13 @@ impl CronSubmission {
         &mut self,
         store: &BS,
         submitter: Address,
+        submitter_weight: TokenAmount,
         checkpoint: CronCheckpoint,
-    ) -> anyhow::Result<u16> {
+    ) -> anyhow::Result<TokenAmount> {
         self.update_submitters(store, submitter)?;
+        self.total_submission_weight += submitter_weight.clone();
         let checkpoint_hash = self.insert_checkpoint(store, checkpoint)?;
-        self.update_submission_count(store, checkpoint_hash)
+        self.update_submission_weight(store, checkpoint_hash, submitter_weight)
     }
 
     pub fn load_most_submitted_checkpoint<BS: Blockstore>(
@@ -162,22 +173,23 @@ impl CronSubmission {
 
     pub fn derive_execution_status(
         &self,
-        total_validators: u16,
-        most_voted_count: u16,
+        total_weight: TokenAmount,
+        most_voted_weight: TokenAmount,
     ) -> VoteExecutionStatus {
-        // use u16 numerator and denominator to avoid floating point calculation and external crate
-        // total validators should be within u16::MAX.
-        let threshold = total_validators as u16 * RATIO_NUMERATOR / RATIO_DENOMINATOR;
+        let threshold = total_weight
+            .clone()
+            .mul(*RATIO_NUMERATOR)
+            .div_floor(*RATIO_DENOMINATOR);
 
         // note that we require THRESHOLD to be surpassed, equality is not enough!
-        if self.total_submissions <= threshold {
+        if self.total_submission_weight <= threshold {
             return VoteExecutionStatus::ThresholdNotReached;
         }
 
         // now we have reached the threshold
 
         // consensus reached
-        if most_voted_count > threshold {
+        if most_voted_weight > threshold {
             return VoteExecutionStatus::ConsensusReached;
         }
 
@@ -189,13 +201,13 @@ impl CronSubmission {
         // consider an example that consensus will never be reached:
         //
         // -------- | -------------------------|--------------- | ------------- |
-        //     MOST_VOTED                 THRESHOLD     TOTAL_SUBMISSIONS  TOTAL_VALIDATORS
+        //     MOST_VOTED                 THRESHOLD     TOTAL_SUBMISSIONS  TOTAL_WEIGHT
         //
-        // we see MOST_VOTED is smaller than THRESHOLD, TOTAL_SUBMISSIONS and TOTAL_VALIDATORS, if
-        // the potential extra votes any vote can obtain, i.e. TOTAL_VALIDATORS - TOTAL_SUBMISSIONS,
+        // we see MOST_VOTED is smaller than THRESHOLD, TOTAL_SUBMISSIONS and TOTAL_WEIGHT, if
+        // the potential extra votes any vote can obtain, i.e. TOTAL_WEIGHT - TOTAL_SUBMISSIONS,
         // is smaller than or equal to the potential extra vote the most voted can obtain, i.e.
         // THRESHOLD - MOST_VOTED, then consensus will never be reached, no point voting, just abort.
-        if threshold - most_voted_count >= total_validators - self.total_submissions {
+        if threshold - most_voted_weight >= total_weight - self.total_submission_weight.clone() {
             VoteExecutionStatus::RoundAbort
         } else {
             VoteExecutionStatus::ReachingConsensus
@@ -223,7 +235,7 @@ impl CronSubmission {
         &mut self,
         store: &BS,
         submitter: Address,
-    ) -> anyhow::Result<u16> {
+    ) -> anyhow::Result<()> {
         let addr_byte_key = BytesKey::from(submitter.to_bytes());
         self.submitters.modify(store, |hamt| {
             // check the submitter has not submitted before
@@ -233,9 +245,8 @@ impl CronSubmission {
 
             // now the submitter has not submitted before, mark as submitted
             hamt.set(addr_byte_key, ())?;
-            self.total_submissions += 1;
 
-            Ok(self.total_submissions)
+            Ok(())
         })
     }
 
@@ -262,25 +273,30 @@ impl CronSubmission {
         Ok(hash)
     }
 
-    /// Update submission count of the hash. Returns the currently most submitted submission count.
-    fn update_submission_count<BS: Blockstore>(
+    /// Update submission weight of the hash. Returns the currently most submitted submission count.
+    fn update_submission_weight<BS: Blockstore>(
         &mut self,
         store: &BS,
         hash: HashOutput,
-    ) -> anyhow::Result<u16> {
+        weight: TokenAmount,
+    ) -> anyhow::Result<TokenAmount> {
         let hash_byte_key = BytesKey::from(hash.as_slice());
 
-        self.submission_counts.modify(store, |hamt| {
-            let new_count = hamt.get(&hash_byte_key)?.map(|v| v + 1).unwrap_or(1);
+        self.submission_weights.modify(store, |hamt| {
+            let new_weight = hamt
+                .get(&hash_byte_key)?
+                .cloned()
+                .unwrap_or_else(TokenAmount::zero)
+                + weight;
 
             // update the new count
-            hamt.set(hash_byte_key, new_count)?;
+            hamt.set(hash_byte_key, new_weight.clone())?;
 
             // now we compare with the most submitted hash or cron checkpoint
             if self.most_voted_hash.is_none() {
                 // no most submitted hash set yet, set to current
                 self.most_voted_hash = Some(hash);
-                return Ok(new_count);
+                return Ok(new_weight);
             }
 
             let most_submitted_hash = self.most_voted_hash.as_mut().unwrap();
@@ -290,7 +306,7 @@ impl CronSubmission {
                 // the current submission is already the only one submission, no need update
 
                 // return the current checkpoint's count as the current most submitted checkpoint
-                return Ok(new_count);
+                return Ok(new_weight);
             }
 
             // the current submission is not part of the most submitted entries, need to check
@@ -303,11 +319,11 @@ impl CronSubmission {
 
             // current submission is not the most voted checkpoints
             // if new_count < *most_submitted_count, we do nothing as the new count is not close to the most submitted
-            if new_count > *most_submitted_count {
+            if new_weight > *most_submitted_count {
                 *most_submitted_hash = hash;
-                Ok(new_count)
+                Ok(new_weight)
             } else {
-                Ok(*most_submitted_count)
+                Ok(most_submitted_count.clone())
             }
         })
     }
@@ -338,12 +354,12 @@ impl CronSubmission {
 
     /// Checks if the checkpoint hash has already inserted in the store
     #[cfg(test)]
-    fn get_submission_count<BS: Blockstore>(
+    fn get_submission_weight<BS: Blockstore>(
         &self,
         store: &BS,
         hash: &HashOutput,
-    ) -> anyhow::Result<Option<u16>> {
-        let hamt = self.submission_counts.load(store)?;
+    ) -> anyhow::Result<Option<TokenAmount>> {
+        let hamt = self.submission_weights.load(store)?;
         let r = hamt.get(&BytesKey::from(hash.as_slice()))?;
         Ok(r.cloned())
     }
@@ -354,6 +370,7 @@ mod tests {
     use crate::{CronCheckpoint, CronSubmission, VoteExecutionStatus};
     use fvm_ipld_blockstore::MemoryBlockstore;
     use fvm_shared::address::Address;
+    use fvm_shared::econ::TokenAmount;
 
     #[test]
     fn test_new_works() {
@@ -413,71 +430,71 @@ mod tests {
         assert_eq!(submission.most_voted_hash, None);
         assert_eq!(
             submission
-                .update_submission_count(&store, hash1.clone())
+                .update_submission_weight(&store, hash1.clone(), TokenAmount::from_atto(1))
                 .unwrap(),
-            1
+            TokenAmount::from_atto(1)
         );
         assert_eq!(
             submission
-                .get_submission_count(&store, &hash1)
+                .get_submission_weight(&store, &hash1)
                 .unwrap()
                 .unwrap(),
-            1
+            TokenAmount::from_atto(1)
         );
         assert_eq!(submission.most_voted_hash, Some(hash1.clone()));
 
         // insert hash2, we should have two items, and there is a tie, hash1 still the most voted
         assert_eq!(
             submission
-                .update_submission_count(&store, hash2.clone())
+                .update_submission_weight(&store, hash2.clone(), TokenAmount::from_atto(1))
                 .unwrap(),
-            1
+            TokenAmount::from_atto(1)
         );
         assert_eq!(
             submission
-                .get_submission_count(&store, &hash2)
+                .get_submission_weight(&store, &hash2)
                 .unwrap()
                 .unwrap(),
-            1
+            TokenAmount::from_atto(1)
         );
         assert_eq!(
             submission
-                .get_submission_count(&store, &hash1)
+                .get_submission_weight(&store, &hash1)
                 .unwrap()
                 .unwrap(),
-            1
+            TokenAmount::from_atto(1)
         );
         assert_eq!(submission.most_voted_hash, Some(hash1.clone()));
 
         // insert hash2 again, we should have only 1 most submitted hash
         assert_eq!(
             submission
-                .update_submission_count(&store, hash2.clone())
+                .update_submission_weight(&store, hash2.clone(), TokenAmount::from_atto(1))
                 .unwrap(),
-            2
+            TokenAmount::from_atto(2)
         );
         assert_eq!(
             submission
-                .get_submission_count(&store, &hash2)
+                .get_submission_weight(&store, &hash2)
                 .unwrap()
                 .unwrap(),
-            2
+            TokenAmount::from_atto(2)
         );
         assert_eq!(submission.most_voted_hash, Some(hash2.clone()));
 
         // insert hash2 again, we should have only 1 most submitted hash, but count incr by 1
         assert_eq!(
             submission
-                .update_submission_count(&store, hash2.clone())
+                .update_submission_weight(&store, hash2.clone(), TokenAmount::from_atto(1))
                 .unwrap(),
-            3
+            TokenAmount::from_atto(3)
         );
         assert_eq!(
             submission
-                .get_submission_count(&store, &hash2)
+                .get_submission_weight(&store, &hash2)
                 .unwrap()
                 .unwrap(),
-            3
+            TokenAmount::from_atto(3)
         );
         assert_eq!(submission.most_voted_hash, Some(hash2.clone()));
     }
@@ -487,11 +504,11 @@ mod tests {
         let store = MemoryBlockstore::new();
         let mut s = CronSubmission::new(&store).unwrap();
 
-        let total_validators = 35;
-        let total_submissions = 10;
-        let most_voted_count = 5;
+        let total_validators = TokenAmount::from_atto(35);
+        let total_submissions = TokenAmount::from_atto(10);
+        let most_voted_count = TokenAmount::from_atto(5);
 
-        s.total_submissions = total_submissions;
+        s.total_submission_weight = total_submissions;
         assert_eq!(
             s.derive_execution_status(total_validators, most_voted_count),
             VoteExecutionStatus::ThresholdNotReached,
@@ -502,23 +519,23 @@ mod tests {
         // If the threshold is 1 / 2, we could have:
         //      If the last vote is C, then we should abort.
         //      If the last vote is any of A or B, we can execute.
-        // If the threshold is 1 / 3, we have to abort.
-        let total_validators = 5;
-        let total_submissions = 4;
-        let most_voted_count = 2;
-        s.total_submissions = total_submissions;
+        // If the threshold is 2 / 3, we have to abort.
+        let total_validators = TokenAmount::from_atto(5);
+        let total_submissions = TokenAmount::from_atto(4);
+        let most_voted_count = TokenAmount::from_atto(2);
+        s.total_submission_weight = total_submissions.clone();
         assert_eq!(
-            s.derive_execution_status(total_submissions, most_voted_count),
+            s.derive_execution_status(total_submissions.clone(), most_voted_count),
             VoteExecutionStatus::RoundAbort,
         );
 
         // We could have 1 submission: A
         // Current submissions and their counts are: A - 4.
-        let total_submissions = 4;
-        let most_voted_count = 4;
-        s.total_submissions = total_submissions;
+        let total_submissions = TokenAmount::from_atto(4);
+        let most_voted_count = TokenAmount::from_atto(4);
+        s.total_submission_weight = total_submissions;
         assert_eq!(
-            s.derive_execution_status(total_validators, most_voted_count),
+            s.derive_execution_status(total_validators.clone(), most_voted_count),
             VoteExecutionStatus::ConsensusReached,
         );
 
@@ -526,9 +543,9 @@ mod tests {
         // Current submissions and their counts are: A - 3, B - 1.
         // Say the threshold is 2 / 3. If the last vote is B, we should abort, if the last vote is
         // A, then we have reached consensus. The current votes are in conclusive.
-        let total_submissions = 4;
-        let most_voted_count = 3;
-        s.total_submissions = total_submissions;
+        let total_submissions = TokenAmount::from_atto(4);
+        let most_voted_count = TokenAmount::from_atto(3);
+        s.total_submission_weight = total_submissions;
         assert_eq!(
             s.derive_execution_status(total_validators, most_voted_count),
             VoteExecutionStatus::ReachingConsensus,
