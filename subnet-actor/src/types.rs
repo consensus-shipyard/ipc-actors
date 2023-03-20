@@ -22,6 +22,8 @@ pub const TESTING_ID: u64 = 339;
 #[derive(Clone, Debug, Serialize_tuple, Deserialize_tuple, PartialEq, Eq)]
 pub struct Validator {
     pub addr: Address,
+    // TODO: We currently support a single validator address for validators,
+    // in the future we should consider supporting more than one multiaddr.
     pub net_addr: String,
     // voting power for the validator determined by its stake in the
     // network.
