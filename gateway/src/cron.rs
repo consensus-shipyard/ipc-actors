@@ -42,6 +42,13 @@ impl Validators {
         BytesKey::from(addr.to_bytes())
     }
 
+    /// Checks if an address is a validator
+    pub fn is_validator<BS: Blockstore>(&self, store: &BS, addr: &Address) -> anyhow::Result<bool> {
+        let key = Self::hamt_key(addr);
+        let hamt = self.validators.load(store)?;
+        Ok(hamt.contains_key(&key)?)
+    }
+
     /// Add a validator to existing validators
     pub fn add_validator<BS: Blockstore>(
         &mut self,

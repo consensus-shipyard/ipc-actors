@@ -845,6 +845,11 @@ impl Actor {
 
             let store = rt.store();
             let submitter = rt.message().caller();
+
+            if !st.is_validator(store, &submitter)? {
+                return Err(actor_error!(illegal_argument, "caller not validator"));
+            }
+
             let total_validators = st.total_validators();
 
             st.cron_submissions

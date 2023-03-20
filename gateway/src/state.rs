@@ -464,6 +464,17 @@ impl State {
         Ok(())
     }
 
+    /// Checks if an address is a validator
+    pub fn is_validator<BS: Blockstore>(
+        &self,
+        st: &BS,
+        addr: &Address,
+    ) -> Result<bool, ActorError> {
+        self.validators
+            .is_validator(st, addr)
+            .map_err(|e| actor_error!(unhandled_message, format!("cannot check validator: {:}", e)))
+    }
+
     /// Add a validator to existing validators
     pub fn add_validator<BS: Blockstore>(
         &mut self,
