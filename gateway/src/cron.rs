@@ -8,7 +8,9 @@ use fvm_ipld_encoding::tuple::{Deserialize_tuple, Serialize_tuple};
 use fvm_ipld_hamt::BytesKey;
 use fvm_shared::address::Address;
 use fvm_shared::clock::ChainEpoch;
-use ipc_sdk::Validator;
+use fvm_shared::econ::TokenAmount;
+use ipc_sdk::ValidatorSet;
+use num_traits::Zero;
 use primitives::{TCid, THamt};
 use std::cmp::Ordering;
 
@@ -19,76 +21,27 @@ const RATIO_DENOMINATOR: u16 = 3;
 /// Validators tracks all the validator in the subnet. It is useful in handling cron checkpoints.
 #[derive(Clone, Debug, Serialize_tuple, Deserialize_tuple)]
 pub struct Validators {
-    /// Total number of validators
-    pub total_count: u16,
-    /// The data structure that tracks all the validators in the subnet.
-    /// We are using hamt due to:
-    ///     - Since the size of validators can grow to significant value, it's not efficient to
-    ///       read all the data every time
-    ///     - We only care about whether some address is a validator instead of the whole validators
-    /// The key is the `Validator.addr` converted to bytes.
-    pub validators: TCid<THamt<String, Validator>>,
+    /// The validator set that holds all the validators
+    pub validators: ValidatorSet,
+    /// Tracks the total weight of the validators
+    pub total_weight: TokenAmount,
 }
 
 impl Validators {
-    pub fn new<BS: Blockstore>(store: &BS) -> anyhow::Result<Self> {
-        Ok(Self {
-            total_count: 0,
-            validators: TCid::new_hamt(store)?,
-        })
-    }
-
-    fn hamt_key(addr: &Address) -> BytesKey {
-        BytesKey::from(addr.to_bytes())
+    pub fn new(validators: ValidatorSet) -> Self {
+        let mut weight = TokenAmount::zero();
+        for v in validators.validators() {
+            weight += v.weight.clone();
+        }
+        Self {
+            validators,
+            total_weight: weight,
+        }
     }
 
     /// Checks if an address is a validator
-    pub fn is_validator<BS: Blockstore>(&self, store: &BS, addr: &Address) -> anyhow::Result<bool> {
-        let key = Self::hamt_key(addr);
-        let hamt = self.validators.load(store)?;
-        Ok(hamt.contains_key(&key)?)
-    }
-
-    /// Add a validator to existing validators
-    pub fn add_validator<BS: Blockstore>(
-        &mut self,
-        store: &BS,
-        validator: Validator,
-    ) -> anyhow::Result<()> {
-        let key = Self::hamt_key(&validator.addr);
-
-        self.validators.modify(store, |hamt| {
-            if hamt.contains_key(&key)? {
-                return Ok(());
-            }
-
-            // not containing the validator
-            self.total_count += 1;
-            hamt.set(key, validator)?;
-
-            Ok(())
-        })
-    }
-
-    /// Remove a validator from existing validators
-    pub fn remove_validator<BS: Blockstore>(
-        &mut self,
-        store: &BS,
-        addr: &Address,
-    ) -> anyhow::Result<()> {
-        let key = Self::hamt_key(addr);
-
-        self.validators.modify(store, |hamt| {
-            if !hamt.contains_key(&key)? {
-                return Ok(());
-            }
-
-            // containing the validator
-            self.total_count -= 1;
-            hamt.delete(&key)?;
-
-            Ok(())
-        })
+    pub fn is_validator(&self, addr: &Address) -> bool {
+        self.validators.validators().iter().any(|x| x.addr == *addr)
     }
 }
 

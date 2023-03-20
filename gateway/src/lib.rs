@@ -26,7 +26,7 @@ use fvm_shared::METHOD_SEND;
 use fvm_shared::{MethodNum, METHOD_CONSTRUCTOR};
 pub use ipc_sdk::address::IPCAddress;
 pub use ipc_sdk::subnet_id::SubnetID;
-use ipc_sdk::Validator;
+use ipc_sdk::ValidatorSet;
 use lazy_static::lazy_static;
 use num_derive::FromPrimitive;
 use num_traits::FromPrimitive;
@@ -68,8 +68,7 @@ pub enum Method {
     Propagate = frc42_dispatch::method_hash!("Propagate"),
     WhiteListPropagator = frc42_dispatch::method_hash!("WhiteListPropagator"),
     SubmitCron = frc42_dispatch::method_hash!("SubmitCron"),
-    AddValidator = frc42_dispatch::method_hash!("AddValidator"),
-    RemoveValidator = frc42_dispatch::method_hash!("RemoveValidator"),
+    SetMembership = frc42_dispatch::method_hash!("SetMembership"),
 }
 
 /// Gateway Actor
@@ -799,22 +798,15 @@ impl Actor {
         Ok(())
     }
 
-    /// Adds a new validator to the gateway
-    fn add_validator(rt: &mut impl Runtime, params: Validator) -> Result<RawBytes, ActorError> {
+    /// Set the memberships of the validators
+    fn set_membership(
+        rt: &mut impl Runtime,
+        validator_set: ValidatorSet,
+    ) -> Result<RawBytes, ActorError> {
         rt.validate_immediate_caller_is([&SYSTEM_ACTOR_ADDR as &Address])?;
-        rt.transaction(|st: &mut State, rt| {
-            let store = rt.store();
-            st.add_validator(store, params).map(|_| RawBytes::default())
-        })
-    }
-
-    /// Removes a new validator to the gateway
-    fn remove_validator(rt: &mut impl Runtime, params: Address) -> Result<RawBytes, ActorError> {
-        rt.validate_immediate_caller_is([&SYSTEM_ACTOR_ADDR as &Address])?;
-        rt.transaction(|st: &mut State, rt| {
-            let store = rt.store();
-            st.remove_validator(store, &params)
-                .map(|_| RawBytes::default())
+        rt.transaction(|st: &mut State, _| {
+            st.set_membership(validator_set);
+            Ok(RawBytes::default())
         })
     }
 
@@ -846,7 +838,7 @@ impl Actor {
             let store = rt.store();
             let submitter = rt.message().caller();
 
-            if !st.is_validator(store, &submitter)? {
+            if !st.validators.is_validator(&submitter) {
                 return Err(actor_error!(illegal_argument, "caller not validator"));
             }
 
@@ -1015,7 +1007,6 @@ impl ActorCode for Actor {
         Propagate => propagate,
         WhiteListPropagator => whitelist_propagator,
         SubmitCron => submit_cron,
-        AddValidator => add_validator,
-        RemoveValidator => remove_validator,
+        SetMembership => set_membership,
     }
 }

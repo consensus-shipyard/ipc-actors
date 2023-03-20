@@ -18,7 +18,7 @@ use std::str::FromStr;
 
 use crate::cron::{CronSubmission, Validators};
 use ipc_sdk::subnet_id::SubnetID;
-use ipc_sdk::Validator;
+use ipc_sdk::ValidatorSet;
 
 use super::checkpoint::*;
 use super::cross::*;
@@ -87,7 +87,7 @@ impl State {
             cron_period: params.cron_period,
             last_cron_executed_epoch: params.genesis_epoch,
             cron_submissions: TCid::new_hamt(store)?,
-            validators: Validators::new(store)?,
+            validators: Validators::new(ValidatorSet::default()),
         })
     }
 
@@ -464,44 +464,12 @@ impl State {
         Ok(())
     }
 
-    /// Checks if an address is a validator
-    pub fn is_validator<BS: Blockstore>(
-        &self,
-        st: &BS,
-        addr: &Address,
-    ) -> Result<bool, ActorError> {
-        self.validators
-            .is_validator(st, addr)
-            .map_err(|e| actor_error!(unhandled_message, format!("cannot check validator: {:}", e)))
-    }
-
-    /// Add a validator to existing validators
-    pub fn add_validator<BS: Blockstore>(
-        &mut self,
-        st: &BS,
-        validator: Validator,
-    ) -> Result<(), ActorError> {
-        self.validators
-            .add_validator(st, validator)
-            .map_err(|e| actor_error!(unhandled_message, format!("cannot add validator: {:}", e)))
-    }
-
-    /// Removes a validator to existing validators
-    pub fn remove_validator<BS: Blockstore>(
-        &mut self,
-        st: &BS,
-        addr: &Address,
-    ) -> Result<(), ActorError> {
-        self.validators.remove_validator(st, addr).map_err(|e| {
-            actor_error!(
-                unhandled_message,
-                format!("cannot remove validator: {:}", e)
-            )
-        })
+    pub fn set_membership(&mut self, validator_set: ValidatorSet) {
+        self.validators = Validators::new(validator_set);
     }
 
     pub(crate) fn total_validators(&self) -> u16 {
-        self.validators.total_count
+        self.validators.validators.validators().len() as u16
     }
 }
 
