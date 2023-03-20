@@ -8,7 +8,9 @@ use fvm_ipld_encoding::tuple::{Deserialize_tuple, Serialize_tuple};
 use fvm_ipld_hamt::BytesKey;
 use fvm_shared::address::Address;
 use fvm_shared::clock::ChainEpoch;
+use fvm_shared::econ::TokenAmount;
 use ipc_sdk::ValidatorSet;
+use num_traits::Zero;
 use primitives::{TCid, THamt};
 use std::cmp::Ordering;
 
@@ -16,12 +18,38 @@ pub type HashOutput = Vec<u8>;
 const RATIO_NUMERATOR: u16 = 2;
 const RATIO_DENOMINATOR: u16 = 3;
 
+/// Validators tracks all the validator in the subnet. It is useful in handling cron checkpoints.
+#[derive(Clone, Debug, Serialize_tuple, Deserialize_tuple)]
+pub struct Validators {
+    /// The validator set that holds all the validators
+    pub validators: ValidatorSet,
+    /// Tracks the total weight of the validators
+    pub total_weight: TokenAmount,
+}
+
+impl Validators {
+    pub fn new(validators: ValidatorSet) -> Self {
+        let mut weight = TokenAmount::zero();
+        for v in validators.validators() {
+            weight += v.weight.clone();
+        }
+        Self {
+            validators,
+            total_weight: weight,
+        }
+    }
+
+    /// Checks if an address is a validator
+    pub fn is_validator(&self, addr: &Address) -> bool {
+        self.validators.validators().iter().any(|x| x.addr == *addr)
+    }
+}
+
 /// Checkpoints propagated from parent to child to signal the "final view" of the parent chain
 /// from the different validators in the subnet.
 #[derive(Clone, Debug, Serialize_tuple, Deserialize_tuple, PartialEq, Eq)]
 pub struct CronCheckpoint {
     pub epoch: ChainEpoch,
-    pub validators: ValidatorSet,
     pub top_down_msgs: Vec<StorableMsg>,
 }
 
@@ -74,7 +102,7 @@ pub struct CronSubmission {
 }
 
 impl CronSubmission {
-    pub fn new<BS: Blockstore>(store: &BS) -> anyhow::Result<CronSubmission> {
+    pub fn new<BS: Blockstore>(store: &BS) -> anyhow::Result<Self> {
         Ok(CronSubmission {
             total_submissions: 0,
             submitters: TCid::new_hamt(store)?,
@@ -98,27 +126,16 @@ impl CronSubmission {
         Ok(())
     }
 
-    /// Submit a cron checkpoint as the submitter. Returns `true` if the submission threshold
-    /// is reached, else `false`.
+    /// Submit a cron checkpoint as the submitter.
     pub fn submit<BS: Blockstore>(
         &mut self,
         store: &BS,
         submitter: Address,
         checkpoint: CronCheckpoint,
-    ) -> anyhow::Result<VoteExecutionStatus> {
-        // TODO: remove this once tracking of validators are added, we will get the validator
-        // TODO: set from a field in the gateway after the next PR.
-        let total_validators = checkpoint.validators.validators().len();
-
-        let total_submissions = self.update_submitters(store, submitter)?;
+    ) -> anyhow::Result<u16> {
+        self.update_submitters(store, submitter)?;
         let checkpoint_hash = self.insert_checkpoint(store, checkpoint)?;
-        let most_submitted_count = self.update_submission_count(store, checkpoint_hash)?;
-
-        Ok(Self::derive_execution_status(
-            total_validators as u16,
-            total_submissions,
-            most_submitted_count,
-        ))
+        self.update_submission_count(store, checkpoint_hash)
     }
 
     pub fn load_most_submitted_checkpoint<BS: Blockstore>(
@@ -142,26 +159,10 @@ impl CronSubmission {
         let key = BytesKey::from(hash.as_slice());
         Ok(hamt.get(&key)?.cloned())
     }
-}
 
-/// The status indicating if the voting should be executed
-#[derive(Eq, PartialEq, Debug)]
-pub enum VoteExecutionStatus {
-    /// The execution threshold has yet to be reached
-    ThresholdNotReached,
-    /// The voting threshold has reached, but consensus has yet to be reached, needs more
-    /// voting to reach consensus
-    ReachingConsensus,
-    /// Consensus cannot be reached in this round
-    RoundAbort,
-    /// Execution threshold reached
-    ConsensusReached,
-}
-
-impl CronSubmission {
-    fn derive_execution_status(
+    pub fn derive_execution_status(
+        &self,
         total_validators: u16,
-        total_submissions: u16,
         most_voted_count: u16,
     ) -> VoteExecutionStatus {
         // use u16 numerator and denominator to avoid floating point calculation and external crate
@@ -169,8 +170,7 @@ impl CronSubmission {
         let threshold = total_validators as u16 * RATIO_NUMERATOR / RATIO_DENOMINATOR;
 
         // note that we require THRESHOLD to be surpassed, equality is not enough!
-
-        if total_submissions <= threshold {
+        if self.total_submissions <= threshold {
             return VoteExecutionStatus::ThresholdNotReached;
         }
 
@@ -195,13 +195,29 @@ impl CronSubmission {
         // the potential extra votes any vote can obtain, i.e. TOTAL_VALIDATORS - TOTAL_SUBMISSIONS,
         // is smaller than or equal to the potential extra vote the most voted can obtain, i.e.
         // THRESHOLD - MOST_VOTED, then consensus will never be reached, no point voting, just abort.
-        if threshold - most_voted_count >= total_validators - total_submissions {
+        if threshold - most_voted_count >= total_validators - self.total_submissions {
             VoteExecutionStatus::RoundAbort
         } else {
             VoteExecutionStatus::ReachingConsensus
         }
     }
+}
 
+/// The status indicating if the voting should be executed
+#[derive(Eq, PartialEq, Debug)]
+pub enum VoteExecutionStatus {
+    /// The execution threshold has yet to be reached
+    ThresholdNotReached,
+    /// The voting threshold has reached, but consensus has yet to be reached, needs more
+    /// voting to reach consensus
+    ReachingConsensus,
+    /// Consensus cannot be reached in this round
+    RoundAbort,
+    /// Execution threshold reached
+    ConsensusReached,
+}
+
+impl CronSubmission {
     /// Update the total submitters, returns the latest total number of submitters
     fn update_submitters<BS: Blockstore>(
         &mut self,
@@ -366,7 +382,6 @@ mod tests {
 
         let checkpoint = CronCheckpoint {
             epoch: 100,
-            validators: Default::default(),
             top_down_msgs: vec![],
         };
 
@@ -469,15 +484,16 @@ mod tests {
 
     #[test]
     fn test_derive_execution_status() {
+        let store = MemoryBlockstore::new();
+        let mut s = CronSubmission::new(&store).unwrap();
+
         let total_validators = 35;
         let total_submissions = 10;
         let most_voted_count = 5;
+
+        s.total_submissions = total_submissions;
         assert_eq!(
-            CronSubmission::derive_execution_status(
-                total_validators,
-                total_submissions,
-                most_voted_count
-            ),
+            s.derive_execution_status(total_validators, most_voted_count),
             VoteExecutionStatus::ThresholdNotReached,
         );
 
@@ -490,26 +506,19 @@ mod tests {
         let total_validators = 5;
         let total_submissions = 4;
         let most_voted_count = 2;
+        s.total_submissions = total_submissions;
         assert_eq!(
-            CronSubmission::derive_execution_status(
-                total_validators,
-                total_submissions,
-                most_voted_count
-            ),
+            s.derive_execution_status(total_submissions, most_voted_count),
             VoteExecutionStatus::RoundAbort,
         );
 
         // We could have 1 submission: A
         // Current submissions and their counts are: A - 4.
-        let total_validators = 5;
         let total_submissions = 4;
         let most_voted_count = 4;
+        s.total_submissions = total_submissions;
         assert_eq!(
-            CronSubmission::derive_execution_status(
-                total_validators,
-                total_submissions,
-                most_voted_count
-            ),
+            s.derive_execution_status(total_validators, most_voted_count),
             VoteExecutionStatus::ConsensusReached,
         );
 
@@ -517,15 +526,11 @@ mod tests {
         // Current submissions and their counts are: A - 3, B - 1.
         // Say the threshold is 2 / 3. If the last vote is B, we should abort, if the last vote is
         // A, then we have reached consensus. The current votes are in conclusive.
-        let total_validators = 5;
         let total_submissions = 4;
         let most_voted_count = 3;
+        s.total_submissions = total_submissions;
         assert_eq!(
-            CronSubmission::derive_execution_status(
-                total_validators,
-                total_submissions,
-                most_voted_count
-            ),
+            s.derive_execution_status(total_validators, most_voted_count),
             VoteExecutionStatus::ReachingConsensus,
         );
     }

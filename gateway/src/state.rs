@@ -16,8 +16,9 @@ use primitives::{TAmt, TCid, THamt, TLink};
 use serde_tuple::{Deserialize_tuple, Serialize_tuple};
 use std::str::FromStr;
 
-use crate::cron::CronSubmission;
+use crate::cron::{CronSubmission, Validators};
 use ipc_sdk::subnet_id::SubnetID;
+use ipc_sdk::ValidatorSet;
 
 use super::checkpoint::*;
 use super::cross::*;
@@ -54,6 +55,7 @@ pub struct State {
     /// The last submit cron epoch that was executed
     pub last_cron_executed_epoch: ChainEpoch,
     pub cron_submissions: TCid<THamt<ChainEpoch, CronSubmission>>,
+    pub validators: Validators,
 }
 
 lazy_static! {
@@ -85,6 +87,7 @@ impl State {
             cron_period: params.cron_period,
             last_cron_executed_epoch: params.genesis_epoch,
             cron_submissions: TCid::new_hamt(store)?,
+            validators: Validators::new(ValidatorSet::default()),
         })
     }
 
@@ -459,6 +462,14 @@ impl State {
         // update balance after collecting the fee
         *balance -= fee;
         Ok(())
+    }
+
+    pub fn set_membership(&mut self, validator_set: ValidatorSet) {
+        self.validators = Validators::new(validator_set);
+    }
+
+    pub(crate) fn total_validators(&self) -> u16 {
+        self.validators.validators.validators().len() as u16
     }
 }
 
