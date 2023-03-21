@@ -207,7 +207,7 @@ impl CronSubmission {
         // the potential extra votes any vote can obtain, i.e. TOTAL_WEIGHT - TOTAL_SUBMISSIONS,
         // is smaller than or equal to the potential extra vote the most voted can obtain, i.e.
         // THRESHOLD - MOST_VOTED, then consensus will never be reached, no point voting, just abort.
-        if threshold - most_voted_weight >= total_weight - self.total_submission_weight.clone() {
+        if threshold - most_voted_weight >= total_weight - &self.total_submission_weight {
             VoteExecutionStatus::RoundAbort
         } else {
             VoteExecutionStatus::ReachingConsensus
