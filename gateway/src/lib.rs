@@ -2,13 +2,14 @@
 
 extern crate core;
 
+use anyhow::anyhow;
 pub use self::checkpoint::{Checkpoint, CrossMsgMeta};
 pub use self::cross::{is_bottomup, CrossMsg, CrossMsgs, IPCMsgType, StorableMsg};
 pub use self::state::*;
 pub use self::subnet::*;
 pub use self::types::*;
-use crate::cron::{CronSubmission, VoteExecutionStatus};
-use cron::CronCheckpoint;
+pub use crate::cron::{CronSubmission, VoteExecutionStatus};
+pub use cron::CronCheckpoint;
 use cross::{burn_bu_funds, cross_msg_side_effects, distribute_crossmsg_fee};
 use fil_actors_runtime::runtime::fvm::resolve_secp_bls;
 use fil_actors_runtime::runtime::{ActorCode, Runtime};
@@ -68,6 +69,7 @@ pub enum Method {
     Propagate = frc42_dispatch::method_hash!("Propagate"),
     WhiteListPropagator = frc42_dispatch::method_hash!("WhiteListPropagator"),
     SubmitCron = frc42_dispatch::method_hash!("SubmitCron"),
+    ExecuteNextCronEpoch = frc42_dispatch::method_hash!("ExecuteNextCronEpoch"),
     SetMembership = frc42_dispatch::method_hash!("SetMembership"),
 }
 
@@ -822,16 +824,16 @@ impl Actor {
         // submit cron can only be performed by signable addresses
         rt.validate_immediate_caller_type(CALLER_TYPES_SIGNABLE.iter())?;
 
-        let msgs = rt.transaction(|st: &mut State, rt| {
-            // first we check the epoch is the correct one
-            let genesis_epoch = st.genesis_epoch;
+        let params_epoch = params.epoch;
 
-            // we process only it's multiple of cron_period since genesis_epoch
-            if (params.epoch - genesis_epoch) % st.cron_period != 0 {
+        let msgs = rt.transaction(|st: &mut State, rt| {
+            // first we check the epoch is the correct one, we process only it's multiple
+            // of cron_period since genesis_epoch
+            if (params_epoch - st.genesis_epoch) % st.cron_period != 0 {
                 return Err(actor_error!(illegal_argument, "epoch not allowed"));
             }
 
-            if st.last_cron_executed_epoch >= params.epoch {
+            if st.last_cron_executed_epoch >= params_epoch {
                 return Err(actor_error!(illegal_argument, "epoch already executed"));
             }
 
@@ -846,19 +848,18 @@ impl Actor {
 
             st.cron_submissions
                 .modify(store, |hamt| {
-                    let epoch_key = BytesKey::from(params.epoch.to_be_bytes().as_slice());
+                    let epoch_key = BytesKey::from(params_epoch.to_be_bytes().as_slice());
                     let mut submission = match hamt.get(&epoch_key)? {
                         Some(s) => s.clone(),
                         None => CronSubmission::new(store)?,
                     };
 
-                    let epoch = params.epoch;
                     let most_voted_weight =
                         submission.submit(store, submitter, validator_weight, params)?;
                     let execution_status =
                         submission.derive_execution_status(total_weight, most_voted_weight);
 
-                    if st.last_cron_executed_epoch + st.cron_period != epoch {
+                    if st.last_cron_executed_epoch + st.cron_period != params_epoch {
                         // there are pending epoch to be executed,
                         // just store the submission and skip execution
                         hamt.set(epoch_key, submission)?;
@@ -878,6 +879,74 @@ impl Actor {
                             return Ok(None);
                         }
                         VoteExecutionStatus::ConsensusReached => {}
+                    }
+
+                    // we reach consensus in the checkpoints submission
+                    st.last_cron_executed_epoch = params_epoch;
+
+                    let msgs = submission
+                        .load_most_submitted_checkpoint(store)?
+                        .unwrap()
+                        .top_down_msgs;
+                    hamt.delete(&epoch_key)?;
+
+                    Ok(Some(msgs))
+                })
+                .map_err(|e| {
+                    log::error!(
+                        "encountered error processing submit cron checkpoint: {:?}",
+                        e
+                    );
+                    actor_error!(unhandled_message, e.to_string())
+                })
+        })?;
+
+        if let Some(msgs) = msgs {
+            for m in msgs {
+                Self::apply_msg_inner(
+                    rt,
+                    CrossMsg {
+                        msg: m,
+                        wrapped: false,
+                    },
+                )?;
+            }
+        }
+        Ok(RawBytes::default())
+    }
+
+    /// Externally trigger cron submission epoch. This is an edge case to ensure none of the epoches
+    /// will be stuck. Consider the following example:
+    ///
+    /// Epoch 10 and 20 are two cron epoch to be executed. However, all the validators have submitted
+    /// epoch 20, and the status is to be executed, however, epoch 10 has yet to be executed. Now,
+    /// epoch 10 has reached consensus and executed, but epoch 20 cannot be executed because every
+    /// validator has already voted, no one can vote again to trigger the execution. Epoch 20 is stuck.
+    ///
+    /// Introduce this method so that anyone can trigger the execution of an epoch, but provided the
+    /// status of the epoch is already consensus reached.
+    fn execute_next_cron_epoch(rt: &mut impl Runtime) -> Result<RawBytes, ActorError> {
+        rt.validate_immediate_caller_accept_any()?;
+
+        let msgs = rt.transaction(|st: &mut State, rt| {
+            let epoch = st.last_cron_executed_epoch + st.cron_period;
+            let store = rt.store();
+
+            let total_weight = st.validators.total_weight.clone();
+            st.cron_submissions
+                .modify(store, |hamt| {
+                    let epoch_key = BytesKey::from(epoch.to_be_bytes().as_slice());
+                    let submission = match hamt.get(&epoch_key)? {
+                        Some(s) => s,
+                        None => return Err(anyhow!("not submission yet")),
+                    };
+
+                    let most_voted_weight = submission.most_voted_weight(store)?;
+                    let execution_status =
+                        submission.derive_execution_status(total_weight, most_voted_weight);
+
+                    if !matches!(execution_status, VoteExecutionStatus::ConsensusReached) {
+                        return Err(anyhow!("not executable"));
                     }
 
                     // we reach consensus in the checkpoints submission
@@ -1008,6 +1077,7 @@ impl ActorCode for Actor {
         Propagate => propagate,
         WhiteListPropagator => whitelist_propagator,
         SubmitCron => submit_cron,
+        ExecuteNextCronEpoch => execute_next_cron_epoch,
         SetMembership => set_membership,
     }
 }
