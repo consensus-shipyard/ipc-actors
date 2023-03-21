@@ -838,7 +838,7 @@ impl Actor {
             let store = rt.store();
             let submitter = rt.message().caller();
 
-            let validator_weight = match st.validators.get_weight(&submitter) {
+            let validator_weight = match st.validators.get_validator_weight(&submitter) {
                 None => return Err(actor_error!(illegal_argument, "caller not validator")),
                 Some(w) => w,
             };

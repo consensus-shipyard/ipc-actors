@@ -45,7 +45,7 @@ impl Validators {
     }
 
     /// Get the weight of a validator
-    pub fn get_weight(&self, addr: &Address) -> Option<TokenAmount> {
+    pub fn get_validator_weight(&self, addr: &Address) -> Option<TokenAmount> {
         self.validators
             .validators()
             .iter()
@@ -144,7 +144,7 @@ impl CronSubmission {
         checkpoint: CronCheckpoint,
     ) -> anyhow::Result<TokenAmount> {
         self.update_submitters(store, submitter)?;
-        self.total_submission_weight += submitter_weight.clone();
+        self.total_submission_weight += &submitter_weight;
         let checkpoint_hash = self.insert_checkpoint(store, checkpoint)?;
         self.update_submission_weight(store, checkpoint_hash, submitter_weight)
     }
