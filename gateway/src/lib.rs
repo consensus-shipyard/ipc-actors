@@ -832,7 +832,7 @@ impl Actor {
 
         let msgs = rt.transaction(|st: &mut State, rt| {
             let submitter = rt.message().caller();
-            let submitter_weight = Self::validate_submitter(&st, checkpoint.epoch, &submitter)?;
+            let submitter_weight = Self::validate_submitter(st, checkpoint.epoch, &submitter)?;
             let store = rt.store();
 
             Self::handle_cron_submission(store, st, checkpoint, submitter, submitter_weight)
@@ -957,7 +957,7 @@ impl Actor {
 
         st.validators
             .get_validator_weight(submitter)
-            .ok_or(actor_error!(illegal_argument, "caller not validator"))
+            .ok_or_else(|| actor_error!(illegal_argument, "caller not validator"))
     }
 }
 
