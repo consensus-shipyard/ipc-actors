@@ -161,13 +161,12 @@ impl CronSubmission {
         }
     }
 
-    pub fn most_voted_weight<BS: Blockstore>(
-        &self,
-        store: &BS,
-    ) -> anyhow::Result<TokenAmount> {
+    pub fn most_voted_weight<BS: Blockstore>(&self, store: &BS) -> anyhow::Result<TokenAmount> {
         // we will only have one entry in the `most_submitted` set if more than 2/3 has reached
         if let Some(hash) = &self.most_voted_hash {
-            Ok(self.get_submission_weight(store, hash)?.unwrap_or_else(TokenAmount::zero))
+            Ok(self
+                .get_submission_weight(store, hash)?
+                .unwrap_or_else(TokenAmount::zero))
         } else {
             Ok(TokenAmount::zero())
         }

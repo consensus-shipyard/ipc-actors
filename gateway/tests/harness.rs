@@ -26,17 +26,17 @@ use fvm_shared::error::ExitCode;
 use fvm_shared::MethodNum;
 use fvm_shared::METHOD_SEND;
 use ipc_gateway::checkpoint::ChildCheck;
-use ipc_gateway::{CronCheckpoint, SUBNET_ACTOR_REWARD_METHOD};
 use ipc_gateway::{
     ext, get_topdown_msg, is_bottomup, Actor, ApplyMsgParams, Checkpoint, ConstructorParams,
     CrossMsg, CrossMsgMeta, CrossMsgParams, CrossMsgs, FundParams, IPCAddress, IPCMsgType, Method,
     PropagateParams, State, StorableMsg, Subnet, SubnetID, CROSSMSG_AMT_BITWIDTH, CROSS_MSG_FEE,
     DEFAULT_CHECKPOINT_PERIOD, MAX_NONCE, MIN_COLLATERAL_AMOUNT,
 };
+use ipc_gateway::{CronCheckpoint, SUBNET_ACTOR_REWARD_METHOD};
+use ipc_sdk::ValidatorSet;
 use lazy_static::lazy_static;
 use primitives::{TCid, TCidContent};
 use std::str::FromStr;
-use ipc_sdk::ValidatorSet;
 
 lazy_static! {
     pub static ref ROOTNET_ID: SubnetID =
@@ -724,7 +724,7 @@ impl Harness {
     pub fn set_membership(
         &self,
         rt: &mut MockRuntime,
-        validator_set: ValidatorSet
+        validator_set: ValidatorSet,
     ) -> Result<(), ActorError> {
         rt.set_caller(*SYSTEM_ACTOR_CODE_ID, SYSTEM_ACTOR_ADDR);
         rt.expect_validate_caller_addr(vec![SYSTEM_ACTOR_ADDR]);
@@ -733,7 +733,7 @@ impl Harness {
             Method::SetMembership as MethodNum,
             IpldBlock::serialize_cbor(&validator_set).unwrap(),
         )
-            .unwrap();
+        .unwrap();
         rt.verify();
 
         Ok(())
@@ -751,24 +751,6 @@ impl Harness {
         rt.call::<Actor>(
             Method::SubmitCron as MethodNum,
             IpldBlock::serialize_cbor(&checkpoint).unwrap(),
-        )?;
-
-        rt.verify();
-
-        Ok(())
-    }
-
-    pub fn execute_next_cron_epoch(
-        &self,
-        rt: &mut MockRuntime,
-        caller: Address,
-    ) -> Result<(), ActorError> {
-        rt.set_caller(*ACCOUNT_ACTOR_CODE_ID, caller);
-        rt.expect_validate_caller_any();
-
-        rt.call::<Actor>(
-            Method::ExecuteNextCronEpoch as MethodNum,
-            None,
         )?;
 
         rt.verify();
