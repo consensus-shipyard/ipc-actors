@@ -5,7 +5,6 @@ use anyhow::anyhow;
 use fil_actors_runtime::runtime::Runtime;
 use fil_actors_runtime::ActorError;
 use fil_actors_runtime::BURNT_FUNDS_ACTOR_ADDR;
-use fvm_ipld_blockstore::MemoryBlockstore;
 use fvm_ipld_encoding::ipld_block::IpldBlock;
 use fvm_ipld_encoding::RawBytes;
 use fvm_shared::address::Address;
@@ -14,7 +13,6 @@ use fvm_shared::MethodNum;
 use fvm_shared::METHOD_SEND;
 use ipc_sdk::address::IPCAddress;
 use ipc_sdk::subnet_id::SubnetID;
-use primitives::{TCid, TLink};
 use serde_tuple::{Deserialize_tuple, Serialize_tuple};
 use std::path::Path;
 
@@ -155,19 +153,6 @@ pub struct CrossMsgs {
 impl CrossMsgs {
     pub fn new() -> Self {
         Self::default()
-    }
-
-    pub(crate) fn cid(&self) -> anyhow::Result<TCid<TLink<CrossMsgs>>> {
-        TCid::new_link(&MemoryBlockstore::new(), self)
-    }
-
-    /// Appends a cross-message to cross-msgs
-    pub(crate) fn add_msg(&mut self, msg: &CrossMsg) -> bool {
-        if !self.msgs.contains(msg) {
-            self.msgs.push(msg.clone());
-            return true;
-        }
-        false
     }
 }
 

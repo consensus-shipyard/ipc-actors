@@ -205,31 +205,11 @@ impl State {
         &mut self,
         store: &BS,
         cross_msg: &CrossMsg,
-        fee: &TokenAmount,
         curr_epoch: ChainEpoch,
     ) -> anyhow::Result<()> {
         let mut ch = self.get_window_checkpoint(store, curr_epoch)?;
 
-        match ch.cross_msgs_mut() {
-            Some(msgmeta) => {
-                let prev_cid = &msgmeta.msgs_cid;
-                let m_cid = self.append_msg_to_meta(store, prev_cid, cross_msg)?;
-                msgmeta.msgs_cid = m_cid;
-                msgmeta.value += &cross_msg.msg.value + fee;
-                msgmeta.fee += fee;
-            }
-            None => self.check_msg_registry.modify(store, |cross_reg| {
-                let mut msgmeta = CrossMsgMeta::default();
-                let mut crossmsgs = CrossMsgs::new();
-                let _ = crossmsgs.add_msg(cross_msg);
-                let m_cid = put_msgmeta(cross_reg, crossmsgs)?;
-                msgmeta.msgs_cid = m_cid;
-                msgmeta.value += &cross_msg.msg.value + fee;
-                msgmeta.fee += fee;
-                ch.set_cross_msgs(msgmeta);
-                Ok(())
-            })?,
-        };
+        ch.cross_msgs_mut().push(cross_msg.clone());
 
         // flush checkpoint
         self.flush_checkpoint(store, &ch).map_err(|e| {
@@ -237,55 +217,6 @@ impl State {
         })?;
 
         Ok(())
-    }
-
-    /// append cross-msg and/or fee reward to a specific message meta.
-    pub(crate) fn append_msg_to_meta<BS: Blockstore>(
-        &mut self,
-        store: &BS,
-        meta_cid: &TCid<TLink<CrossMsgs>>,
-        cross_msg: &CrossMsg,
-    ) -> anyhow::Result<TCid<TLink<CrossMsgs>>> {
-        self.check_msg_registry.modify(store, |cross_reg| {
-            // get previous meta stored
-            let mut prev_crossmsgs = match cross_reg.get(&meta_cid.cid().to_bytes())? {
-                Some(m) => m.clone(),
-                None => {
-                    // double-check that is not found because there were no messages
-                    // in meta and not because we messed-up something.
-                    if meta_cid.cid() != Cid::default() {
-                        return Err(anyhow!("no msgmeta found for cid"));
-                    }
-                    // return empty messages
-                    CrossMsgs::new()
-                }
-            };
-            let added = prev_crossmsgs.add_msg(cross_msg);
-            if !added {
-                return Ok(meta_cid.clone());
-            }
-            replace_msgmeta(cross_reg, meta_cid, prev_crossmsgs)
-        })
-    }
-
-    /// release circulating supply from a subent
-    ///
-    /// This is triggered through bottom-up messages sending subnet tokens
-    /// to some other subnet in the hierarchy.
-    /// store bottomup messages for their execution in the subnet
-    pub(crate) fn store_bottomup_msg<BS: Blockstore>(
-        &mut self,
-        store: &BS,
-        meta: &CrossMsgMeta,
-    ) -> anyhow::Result<()> {
-        let mut new_meta = meta.clone();
-        new_meta.nonce = self.bottomup_nonce;
-        self.bottomup_nonce += 1;
-        self.bottomup_msg_meta.update(store, |crossmsgs| {
-            crossmsgs
-                .set(new_meta.nonce, new_meta)
-                .map_err(|e| anyhow!("failed to set crossmsg meta array: {:?}", e))
-        })
     }
 
     /// commit topdown messages for their execution in the subnet
@@ -330,11 +261,10 @@ impl State {
         &mut self,
         store: &BS,
         msg: &CrossMsg,
-        fee: &TokenAmount,
         curr_epoch: ChainEpoch,
     ) -> anyhow::Result<()> {
         // store bottom-up msg and fee in checkpoint for propagation
-        self.store_msg_in_checkpoint(store, msg, fee, curr_epoch)?;
+        self.store_msg_in_checkpoint(store, msg, curr_epoch)?;
         // increment nonce
         self.nonce += 1;
 
@@ -523,30 +453,6 @@ fn get_checkpoint<'m, BS: Blockstore>(
     checkpoints
         .get(&BytesKey::from(epoch.to_ne_bytes().to_vec()))
         .map_err(|e| e.downcast_wrap(format!("failed to get checkpoint for id {}", epoch)))
-}
-
-fn put_msgmeta<BS: Blockstore>(
-    registry: &mut Map<BS, CrossMsgs>,
-    metas: CrossMsgs,
-) -> anyhow::Result<TCid<TLink<CrossMsgs>>> {
-    let m_cid = metas.cid()?;
-    registry
-        .set(m_cid.cid().to_bytes().into(), metas)
-        .map_err(|e| e.downcast_wrap(format!("failed to set crossmsg meta for cid {}", m_cid)))?;
-    Ok(m_cid)
-}
-
-/// insert a message meta and remove the old one.
-fn replace_msgmeta<BS: Blockstore>(
-    registry: &mut Map<BS, CrossMsgs>,
-    prev_cid: &TCid<TLink<CrossMsgs>>,
-    meta: CrossMsgs,
-) -> anyhow::Result<TCid<TLink<CrossMsgs>>> {
-    // add new meta
-    let m_cid = put_msgmeta(registry, meta)?;
-    // remove the previous one
-    registry.delete(&prev_cid.cid().to_bytes())?;
-    Ok(m_cid)
 }
 
 pub fn get_bottomup_msg<'m, BS: Blockstore>(

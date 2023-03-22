@@ -393,9 +393,7 @@ impl Harness {
         let to = IPCAddress::new(&parent, &TEST_BLS).unwrap();
         rt.set_epoch(0);
         let ch = st.get_window_checkpoint(rt.store(), 0).unwrap();
-        let chmeta = ch.cross_msgs().unwrap();
-        // check that fees are collected
-        assert_eq!(chmeta.fee, expected_fee);
+        let chmeta = ch.cross_msgs();
 
         let cross_reg = st.check_msg_registry.load(rt.store()).unwrap();
         let meta = get_cross_msgs(&cross_reg, &chmeta.msgs_cid.cid())

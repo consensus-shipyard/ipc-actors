@@ -3,6 +3,7 @@
 
 extern crate core;
 
+use std::ops::Mul;
 pub use self::checkpoint::{Checkpoint, CrossMsgMeta};
 pub use self::cross::{is_bottomup, CrossMsg, CrossMsgs, IPCMsgType, StorableMsg};
 pub use self::state::*;
@@ -299,7 +300,6 @@ impl Actor {
                 e.downcast_default(ExitCode::USR_ILLEGAL_STATE, "failed to load subnet")
             })?;
 
-            let mut fee = TokenAmount::zero();
             match sub {
                 Some(mut sub) => {
                     // check if subnet active
@@ -340,28 +340,18 @@ impl Actor {
 
                     // commit cross-message in checkpoint to either execute them or
                     // queue them for propagation if there are cross-msgs availble.
-                    if let Some(cross_msg) = commit.cross_msgs() {
-                        // if tcid not default it means cross-msgs are being propagated.
-                        if cross_msg.msgs_cid != TCid::default() {
-                            st.store_bottomup_msg(rt.store(), cross_msg).map_err(|e| {
-                                e.downcast_default(
-                                    ExitCode::USR_ILLEGAL_STATE,
-                                    "error storing bottom_up messages from checkpoint",
-                                )
-                            })?;
-                        }
+                    let mut value = TokenAmount::zero();
+                    commit.cross_msgs().iter().for_each(|m| value += &m.msg.value);
 
-                        // release circulating supply
-                        sub.release_supply(&cross_msg.value).map_err(|e| {
-                            e.downcast_default(
-                                ExitCode::USR_ILLEGAL_STATE,
-                                "error releasing circulating supply",
-                            )
-                        })?;
+                    // release circulating supply
+                    sub.release_supply(&value).map_err(|e| {
+                        e.downcast_default(
+                            ExitCode::USR_ILLEGAL_STATE,
+                            "error releasing circulating supply",
+                        )
+                    })?;
 
-                        // distribute fee
-                        fee = cross_msg.fee.clone();
-                    }
+                    let fee = CROSS_MSG_FEE.clone().mul(commit.cross_msgs().len());
 
                     // append new checkpoint to the list of childs
                     ch.add_child_check(&commit).map_err(|e| {
@@ -382,17 +372,16 @@ impl Actor {
                     st.flush_subnet(rt.store(), &sub).map_err(|e| {
                         e.downcast_default(ExitCode::USR_ILLEGAL_STATE, "error flushing subnet")
                     })?;
+                    Ok(fee)
                 }
                 None => {
-                    return Err(actor_error!(
+                    Err(actor_error!(
                         illegal_argument,
                         "subnet with id {} not registered",
                         shid
-                    ));
+                    ))
                 }
             }
-
-            Ok(fee)
         })?;
 
         // distribute rewards
@@ -495,7 +484,7 @@ impl Actor {
             };
 
             // Commit bottom-up message.
-            st.commit_bottomup_msg(rt.store(), &r_msg, fee, rt.curr_epoch())
+            st.commit_bottomup_msg(rt.store(), &r_msg, rt.curr_epoch())
                 .map_err(|e| {
                     e.downcast_default(
                         ExitCode::USR_ILLEGAL_STATE,
@@ -916,7 +905,7 @@ impl Actor {
                     if cross_msg.msg.value > TokenAmount::zero() {
                         do_burn = true;
                     }
-                    st.commit_bottomup_msg(rt.store(), cross_msg, &fee, rt.curr_epoch())
+                    st.commit_bottomup_msg(rt.store(), cross_msg, rt.curr_epoch())
                 };
 
                 r.map_err(|e| {

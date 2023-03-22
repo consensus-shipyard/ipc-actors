@@ -9,7 +9,7 @@ use ipc_sdk::subnet_id::SubnetID;
 use primitives::{TCid, TLink};
 use serde_tuple::{Deserialize_tuple, Serialize_tuple};
 
-use crate::CrossMsgs;
+use crate::{CrossMsg, CrossMsgs};
 
 #[derive(PartialEq, Eq, Clone, Debug, Serialize_tuple, Deserialize_tuple)]
 pub struct Checkpoint {
@@ -63,17 +63,17 @@ impl Checkpoint {
     }
 
     /// return cross_msg included in the checkpoint.
-    pub fn cross_msgs(&self) -> Option<&CrossMsgMeta> {
+    pub fn cross_msgs(&self) -> &Vec<CrossMsg> {
         self.data.cross_msgs.as_ref()
     }
 
     /// set cross_msg included in the checkpoint.
-    pub fn set_cross_msgs(&mut self, cm: CrossMsgMeta) {
-        self.data.cross_msgs = Some(cm)
+    pub fn set_cross_msgs(&mut self, cm: Vec<CrossMsg>) {
+        self.data.cross_msgs = cm
     }
 
     /// return cross_msg included in the checkpoint as mutable reference
-    pub fn cross_msgs_mut(&mut self) -> Option<&mut CrossMsgMeta> {
+    pub fn cross_msgs_mut(&mut self) -> &mut Vec<CrossMsg> {
         self.data.cross_msgs.as_mut()
     }
 
@@ -121,7 +121,7 @@ pub struct CheckData {
     pub epoch: ChainEpoch,
     pub prev_check: TCid<TLink<Checkpoint>>,
     pub children: Vec<ChildCheck>,
-    pub cross_msgs: Option<CrossMsgMeta>,
+    pub cross_msgs: Vec<CrossMsg>,
 }
 impl CheckData {
     pub fn new(id: SubnetID, epoch: ChainEpoch) -> Self {
@@ -131,7 +131,7 @@ impl CheckData {
             epoch,
             prev_check: TCid::default(),
             children: Vec::new(),
-            cross_msgs: None,
+            cross_msgs: vec![],
         }
     }
 }
