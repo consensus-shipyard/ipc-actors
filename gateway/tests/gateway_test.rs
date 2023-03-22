@@ -1237,15 +1237,16 @@ fn get_epoch_submissions(rt: &mut MockRuntime, epoch: ChainEpoch) -> Option<Cron
 }
 
 #[test]
-fn test_submit_cron_works() {
+fn test_submit_cron_works_with_execution() {
     let (h, mut rt) = setup_root();
 
     setup_membership(&h, &mut rt);
 
     let epoch = *DEFAULT_GENESIS_EPOCH + *DEFAULT_CRON_PERIOD;
+    let msg = storable_msg(0);
     let checkpoint = CronCheckpoint {
         epoch,
-        top_down_msgs: vec![],
+        top_down_msgs: vec![msg.clone()],
     };
 
     // first submission
@@ -1301,12 +1302,20 @@ fn test_submit_cron_works() {
 
     // fourth submission, executed
     let submitter = Address::new_id(3);
+    rt.expect_send(
+        msg.to.raw_addr().unwrap(),
+        msg.method,
+        None,
+        msg.value,
+        None,
+        ExitCode::OK,
+    );
     let r = h.submit_cron(&mut rt, submitter, checkpoint.clone());
     assert!(r.is_ok());
     let submission = get_epoch_submissions(&mut rt, epoch);
     assert!(submission.is_none());
     let st: State = rt.get_state();
-    assert_eq!(st.last_cron_executed_epoch, epoch); //
+    assert_eq!(st.last_cron_executed_epoch, epoch);
 }
 
 fn storable_msg(nonce: u64) -> StorableMsg {
@@ -1417,10 +1426,11 @@ fn test_submit_cron_sequential_execution() {
     ); // not executed yet
 
     // now we execute the previous epoch
+    let msg = storable_msg(0);
     let epoch = *DEFAULT_GENESIS_EPOCH + *DEFAULT_CRON_PERIOD;
     let checkpoint = CronCheckpoint {
         epoch,
-        top_down_msgs: vec![],
+        top_down_msgs: vec![msg.clone()],
     };
 
     // first submission
@@ -1437,6 +1447,15 @@ fn test_submit_cron_sequential_execution() {
         .unwrap();
     // fourth submission, executed
     let submitter = Address::new_id(3);
+    // define expected send
+    rt.expect_send(
+        msg.to.raw_addr().unwrap(),
+        msg.method,
+        None,
+        msg.value,
+        None,
+        ExitCode::OK,
+    );
     h.submit_cron(&mut rt, submitter, checkpoint.clone())
         .unwrap();
     let submission = get_epoch_submissions(&mut rt, epoch);

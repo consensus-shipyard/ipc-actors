@@ -828,8 +828,6 @@ impl Actor {
         // submit cron can only be performed by signable addresses
         rt.validate_immediate_caller_type(CALLER_TYPES_SIGNABLE.iter())?;
 
-        Self::execute_next_cron_epoch(rt)?;
-
         let msgs = rt.transaction(|st: &mut State, rt| {
             let submitter = rt.message().caller();
             let submitter_weight = Self::validate_submitter(st, checkpoint.epoch, &submitter)?;
@@ -845,7 +843,12 @@ impl Actor {
                 })
         })?;
 
+        // we only `execute_next_cron_epoch(rt)` if there is no execution for the current submission
+        // so that we don't blow up the gas.
         if let Some(msgs) = msgs {
+            if msgs.is_empty() {
+                Self::execute_next_cron_epoch(rt)?;
+            }
             for m in msgs {
                 Self::apply_msg_inner(
                     rt,
@@ -855,6 +858,8 @@ impl Actor {
                     },
                 )?;
             }
+        } else {
+            Self::execute_next_cron_epoch(rt)?;
         }
 
         Ok(RawBytes::default())
@@ -1027,16 +1032,13 @@ impl Actor {
         Ok(messages)
     }
 
-    /// Externally trigger cron submission epoch. This is an edge case to ensure none of the epoches
-    /// will be stuck. Consider the following example:
+    /// Execute the next approved cron checkpoint.
+    /// This is an edge case to ensure none of the epoches will be stuck. Consider the following example:
     ///
     /// Epoch 10 and 20 are two cron epoch to be executed. However, all the validators have submitted
     /// epoch 20, and the status is to be executed, however, epoch 10 has yet to be executed. Now,
     /// epoch 10 has reached consensus and executed, but epoch 20 cannot be executed because every
     /// validator has already voted, no one can vote again to trigger the execution. Epoch 20 is stuck.
-    ///
-    /// Introduce this method so that anyone can trigger the execution of an epoch, but provided the
-    /// status of the epoch is already consensus reached.
     fn execute_next_cron_epoch(rt: &mut impl Runtime) -> Result<(), ActorError> {
         let msgs = rt.transaction(|st: &mut State, rt| {
             let epoch_queue = match st.executable_epoch_queue.as_mut() {
