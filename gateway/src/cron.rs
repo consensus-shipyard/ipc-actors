@@ -1,4 +1,4 @@
-use crate::StorableMsg;
+use crate::{ensure_message_sorted, StorableMsg};
 use anyhow::anyhow;
 use cid::multihash::Code;
 use cid::multihash::MultihashDigest;
@@ -13,7 +13,6 @@ use ipc_sdk::ValidatorSet;
 use lazy_static::lazy_static;
 use num_traits::Zero;
 use primitives::{TCid, THamt};
-use std::cmp::Ordering;
 use std::ops::Mul;
 
 pub type HashOutput = Vec<u8>;
@@ -75,17 +74,7 @@ impl CronCheckpoint {
     ///
     /// Actor will not perform sorting to save gas. Client should do it, actor just check.
     pub fn hash(&self) -> anyhow::Result<HashOutput> {
-        // check top down msgs
-        for i in 1..self.top_down_msgs.len() {
-            match self.top_down_msgs[i - 1]
-                .nonce
-                .cmp(&self.top_down_msgs[i].nonce)
-            {
-                Ordering::Less => {}
-                Ordering::Equal => return Err(anyhow!("top down messages not distinct")),
-                Ordering::Greater => return Err(anyhow!("top down messages not sorted")),
-            };
-        }
+        ensure_message_sorted(&self.top_down_msgs)?;
 
         let mh_code = Code::Blake2b256;
         // TODO: to avoid serialization again, maybe we should perform deserialization in the actor

@@ -10,7 +10,7 @@ use num_traits::Zero;
 use primitives::{TCid, TLink};
 use serde_tuple::{Deserialize_tuple, Serialize_tuple};
 
-use crate::{CrossMsg, CrossMsgs};
+use crate::{ensure_message_sorted, CrossMsg, CrossMsgs};
 
 #[derive(PartialEq, Eq, Clone, Debug, Serialize_tuple, Deserialize_tuple)]
 pub struct Checkpoint {
@@ -67,6 +67,13 @@ impl Checkpoint {
     /// and replace with None.
     pub fn take_cross_msgs(&mut self) -> Option<Vec<CrossMsg>> {
         self.data.cross_msgs.cross_msgs.take()
+    }
+
+    pub fn ensure_cross_msgs_sorted(&self) -> anyhow::Result<()> {
+        match self.data.cross_msgs.cross_msgs.as_ref() {
+            None => Ok(()),
+            Some(v) => ensure_message_sorted(v),
+        }
     }
 
     /// Get the sum of values in cross messages

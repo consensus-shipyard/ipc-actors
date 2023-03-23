@@ -1,6 +1,6 @@
-use crate::ApplyMsgParams;
 use crate::State;
 use crate::SUBNET_ACTOR_REWARD_METHOD;
+use crate::{ApplyMsgParams, ExecutableMessage};
 use anyhow::anyhow;
 use fil_actors_runtime::runtime::Runtime;
 use fil_actors_runtime::ActorError;
@@ -33,10 +33,22 @@ pub struct StorableMsg {
     pub nonce: u64,
 }
 
+impl ExecutableMessage for StorableMsg {
+    fn nonce(&self) -> u64 {
+        self.nonce
+    }
+}
+
 #[derive(PartialEq, Eq, Clone, Debug, Serialize_tuple, Deserialize_tuple)]
 pub struct CrossMsg {
     pub msg: StorableMsg,
     pub wrapped: bool,
+}
+
+impl ExecutableMessage for CrossMsg {
+    fn nonce(&self) -> u64 {
+        self.msg.nonce()
+    }
 }
 
 #[derive(PartialEq, Eq)]

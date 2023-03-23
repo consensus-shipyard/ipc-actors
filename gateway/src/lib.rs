@@ -282,6 +282,13 @@ impl Actor {
         // we should update here.
         rt.validate_immediate_caller_accept_any()?;
 
+        commit.ensure_cross_msgs_sorted().map_err(|_| {
+            actor_error!(
+                illegal_argument,
+                "cross messages not ordered by nonce"
+            )
+        })?;
+
         let subnet_addr = rt.message().caller();
         let subnet_actor = commit.source().subnet_actor();
 
