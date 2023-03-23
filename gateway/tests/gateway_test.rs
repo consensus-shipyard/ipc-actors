@@ -713,7 +713,7 @@ fn test_apply_msg_bu_not_target_subnet() {
     assert_eq!(r.is_err(), true);
     let err = r.unwrap_err();
     assert_eq!(err.to_string(), "cid not found in postbox");
-    assert_eq!(new_state.nonce, old_state.nonce + 1);
+    assert_eq!(new_state.topdown_nonce, old_state.topdown_nonce + 1);
 }
 
 /// This test covers the case where the amount send in the propagate
@@ -792,7 +792,7 @@ fn test_propagate_with_remainder() {
     assert_eq!(r.is_err(), true);
     let err = r.unwrap_err();
     assert_eq!(err.to_string(), "cid not found in postbox");
-    assert_eq!(new_state.nonce, old_state.nonce + 1);
+    assert_eq!(new_state.topdown_nonce, old_state.topdown_nonce + 1);
 }
 
 /// This test covers the case where a bottom up cross_msg's target subnet is NOT the same as that of
@@ -856,7 +856,7 @@ fn test_apply_msg_bu_switch_td() {
 
     let starting_nonce = get_subnet(&rt, &tt.subnet().unwrap().down(&h.net_name).unwrap())
         .unwrap()
-        .nonce;
+        .topdown_nonce;
 
     // propagated as top-down, so it should distribute a fee in this subnet
     rt.expect_send(
@@ -893,7 +893,7 @@ fn test_apply_msg_bu_switch_td() {
 
     // the cross msg should have been committed to the next subnet, check this!
     let sub = get_subnet(&rt, &tt.subnet().unwrap().down(&h.net_name).unwrap()).unwrap();
-    assert_eq!(sub.nonce, starting_nonce + 1);
+    assert_eq!(sub.topdown_nonce, starting_nonce + 1);
     let crossmsgs = sub.top_down_msgs.load(rt.store()).unwrap();
     let msg = get_topdown_msg(&crossmsgs, starting_nonce).unwrap();
     assert_eq!(msg.is_some(), true);
@@ -1027,7 +1027,7 @@ fn test_apply_msg_tp_not_target_subnet() {
     // get the original subnet nonce first
     let starting_nonce = get_subnet(&rt, &tt.subnet().unwrap().down(&h.net_name).unwrap())
         .unwrap()
-        .nonce;
+        .topdown_nonce;
     let caller = ff.clone().raw_addr().unwrap();
 
     // propagated as top-down, so it should distribute a fee in this subnet
@@ -1064,7 +1064,7 @@ fn test_apply_msg_tp_not_target_subnet() {
 
     // the cross msg should have been committed to the next subnet, check this!
     let sub = get_subnet(&rt, &tt.subnet().unwrap().down(&h.net_name).unwrap()).unwrap();
-    assert_eq!(sub.nonce, starting_nonce + 1);
+    assert_eq!(sub.topdown_nonce, starting_nonce + 1);
     let crossmsgs = sub.top_down_msgs.load(rt.store()).unwrap();
     let msg = get_topdown_msg(&crossmsgs, starting_nonce).unwrap();
     assert_eq!(msg.is_some(), true);

@@ -69,7 +69,6 @@ impl StorableMsg {
         sub_id: &SubnetID,
         sig_addr: &Address,
         value: TokenAmount,
-        nonce: u64,
     ) -> anyhow::Result<Self> {
         let to = IPCAddress::new(
             &match sub_id.parent() {
@@ -85,7 +84,7 @@ impl StorableMsg {
             method: METHOD_SEND,
             params: RawBytes::default(),
             value,
-            nonce,
+            nonce: 0,
         })
     }
 

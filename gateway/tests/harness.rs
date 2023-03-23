@@ -334,7 +334,7 @@ impl Harness {
             .unwrap()
             .unwrap();
         assert_eq!(&sub.circ_supply, expected_circ_sup);
-        assert_eq!(sub.nonce, expected_nonce);
+        assert_eq!(sub.topdown_nonce, expected_nonce);
         let from = IPCAddress::new(&self.net_name, &*TEST_BLS).unwrap();
         let to = IPCAddress::new(&id, &TEST_BLS).unwrap();
         assert_eq!(msg.from, from);
@@ -519,7 +519,7 @@ impl Harness {
             let crossmsgs = sub.top_down_msgs.load(rt.store()).unwrap();
             let msg = get_topdown_msg(&crossmsgs, nonce - 1).unwrap().unwrap();
             assert_eq!(&sub.circ_supply, expected_circ_sup);
-            assert_eq!(sub.nonce, nonce);
+            assert_eq!(sub.topdown_nonce, nonce);
             let from = IPCAddress::new(&self.net_name, &SYSTEM_ACTOR_ADDR).unwrap();
             let to = IPCAddress::new(&dest, &to).unwrap();
             assert_eq!(msg.from, from);
@@ -689,7 +689,7 @@ impl Harness {
                 let sub = self
                     .get_subnet(rt, &sto.down(&self.net_name).unwrap())
                     .unwrap();
-                assert_eq!(sub.nonce, td_nonce);
+                assert_eq!(sub.topdown_nonce, td_nonce);
                 let crossmsgs = sub.top_down_msgs.load(rt.store()).unwrap();
                 let msg = get_topdown_msg(&crossmsgs, td_nonce).unwrap();
                 assert_eq!(msg.is_none(), true);

@@ -72,12 +72,12 @@ impl Checkpoint {
     /// Take the cross messages out of the checkpoint. This will empty the `self.data.cross_msgs`
     /// and replace with None.
     pub fn take_cross_msgs(&mut self) -> Option<Vec<CrossMsg>> {
-        self.data.cross_msgs.take()
+        self.data.cross_msgs.cross_msgs.take()
     }
 
     /// Get the sum of values in cross messages
     pub fn total_value(&self) -> TokenAmount {
-        match self.data.cross_msgs.as_ref() {
+        match &self.data.cross_msgs.cross_msgs {
             None => TokenAmount::zero(),
             Some(cross_msgs) => {
                 let mut value = TokenAmount::zero();
@@ -89,9 +89,10 @@ impl Checkpoint {
         }
     }
 
-    pub fn push_cross_msgs(&mut self, cross_msg: CrossMsg) {
-        match self.data.cross_msgs.as_mut() {
-            None => self.data.cross_msgs = Some(vec![cross_msg]),
+    pub fn push_cross_msgs(&mut self, cross_msg: CrossMsg, fee: &TokenAmount) {
+        self.data.cross_msgs.fee += fee;
+        match self.data.cross_msgs.cross_msgs.as_mut() {
+            None => self.data.cross_msgs.cross_msgs = Some(vec![cross_msg]),
             Some(v) => v.push(cross_msg),
         };
     }
@@ -140,7 +141,13 @@ pub struct CheckData {
     pub epoch: ChainEpoch,
     pub prev_check: TCid<TLink<Checkpoint>>,
     pub children: Vec<ChildCheck>,
+    pub cross_msgs: BatchCrossMsgs,
+}
+
+#[derive(Default, PartialEq, Eq, Clone, Debug, Serialize_tuple, Deserialize_tuple)]
+pub struct BatchCrossMsgs {
     pub cross_msgs: Option<Vec<CrossMsg>>,
+    pub fee: TokenAmount,
 }
 
 impl CheckData {
@@ -151,7 +158,7 @@ impl CheckData {
             epoch,
             prev_check: TCid::default(),
             children: Vec::new(),
-            cross_msgs: None,
+            cross_msgs: BatchCrossMsgs::default(),
         }
     }
 }

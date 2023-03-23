@@ -279,6 +279,8 @@ impl Actor {
     /// CommitChildCheck propagates the commitment of a checkpoint from a child subnet,
     /// process the cross-messages directed to the subnet.
     fn commit_child_check(rt: &mut impl Runtime, mut commit: Checkpoint) -> Result<(), ActorError> {
+        // This must be called by a subnet actor, once we have a way to identify subnet actor,
+        // we should update here.
         rt.validate_immediate_caller_accept_any()?;
 
         let subnet_addr = rt.message().caller();
@@ -340,6 +342,7 @@ impl Actor {
                     let value = commit.total_value();
 
                     // release circulating supply
+                    // TODO: release fee as well, use the BatchBottomUp struct
                     sub.release_supply(&value).map_err(|e| {
                         e.downcast_default(
                             ExitCode::USR_ILLEGAL_STATE,
@@ -347,6 +350,8 @@ impl Actor {
                         )
                     })?;
 
+                    // This assumes the same cross message fee to all subnets
+                    // TODO: deprecated
                     let fee = CROSS_MSG_FEE.clone().mul(commit.cross_msgs().len());
 
                     // append new checkpoint to the list of childs
@@ -358,15 +363,13 @@ impl Actor {
                     })?;
 
                     // flush checkpoint
-                    // TODO: what do we have to store in the checkpoint? Seems like quite some data
-                    // TODO: is not used after being stored? We can remove those data from storage
-                    // TODO: to reduce gas and avoid clone.
                     st.flush_checkpoint(rt.store(), &ch).map_err(|e| {
                         e.downcast_default(ExitCode::USR_ILLEGAL_STATE, "error flushing checkpoint")
                     })?;
 
-                    // update prev_check for child
                     let cross_msgs = commit.take_cross_msgs();
+
+                    // update prev_check for child
                     sub.prev_checkpoint = Some(commit);
                     // flush subnet
                     st.flush_subnet(rt.store(), &sub).map_err(|e| {
@@ -452,9 +455,6 @@ impl Actor {
         // funds can only be moved between subnets by signable addresses
         rt.validate_immediate_caller_type(CALLER_TYPES_SIGNABLE.iter())?;
 
-        // FIXME: Only supporting cross-messages initiated by signable addresses for
-        // now. Consider supporting also send-cross messages initiated by actors.
-
         let mut value = rt.message().value_received();
         if value <= TokenAmount::zero() {
             return Err(actor_error!(
@@ -476,7 +476,6 @@ impl Actor {
                     &st.network_name,
                     &sig_addr,
                     value.clone(),
-                    st.nonce,
                 )
                 .map_err(|e| {
                     e.downcast_default(
@@ -488,7 +487,7 @@ impl Actor {
             };
 
             // Commit bottom-up message.
-            st.commit_bottomup_msg(rt.store(), &r_msg, rt.curr_epoch())
+            st.commit_bottomup_msg(rt.store(), &r_msg, rt.curr_epoch(), fee)
                 .map_err(|e| {
                     e.downcast_default(
                         ExitCode::USR_ILLEGAL_STATE,
@@ -792,7 +791,7 @@ impl Actor {
                     if cross_msg.msg.value > TokenAmount::zero() {
                         do_burn = true;
                     }
-                    st.commit_bottomup_msg(rt.store(), cross_msg, rt.curr_epoch())
+                    st.commit_bottomup_msg(rt.store(), cross_msg, rt.curr_epoch(), &fee)
                 };
 
                 r.map_err(|e| {
@@ -873,12 +872,15 @@ impl Actor {
                 // if directed to current network, execute message.
                 if sto == st.network_name {
                     rt.transaction(|st: &mut State, _| {
-                        st.bottomup_state_transition(&cross_msg.msg).map_err(|e| {
-                            e.downcast_default(
-                                ExitCode::USR_ILLEGAL_STATE,
-                                "failed applying bottomup message",
-                            )
-                        })?;
+                        if st.applied_bottomup_nonce != cross_msg.msg.nonce {
+                            return Err(actor_error!(
+                                illegal_state,
+                                "the bottom-up message being applied doesn't hold the subsequent nonce"
+                            ));
+                        }
+
+                        st.applied_bottomup_nonce += 1;
+
                         Ok(())
                     })?;
                     return cross_msg.send(rt, &rto);
@@ -905,14 +907,14 @@ impl Actor {
                 }
 
                 if sto == st.network_name {
-                    if st.applied_topdown_nonce != cross_msg.msg.nonce {
-                        return Err(actor_error!(
+                    rt.transaction(|st: &mut State, _| {
+                        if st.applied_topdown_nonce != cross_msg.msg.nonce {
+                            return Err(actor_error!(
                             illegal_state,
                             "the top-down message being applied doesn't hold the subsequent nonce"
                         ));
-                    }
+                        }
 
-                    rt.transaction(|st: &mut State, _| {
                         st.applied_topdown_nonce += 1;
                         Ok(())
                     })?;

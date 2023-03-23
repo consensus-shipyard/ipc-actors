@@ -12,7 +12,7 @@ use fvm_shared::econ::TokenAmount;
 use fvm_shared::error::ExitCode;
 use lazy_static::lazy_static;
 use num_traits::Zero;
-use primitives::{TAmt, TCid, THamt};
+use primitives::{TCid, THamt};
 use serde_tuple::{Deserialize_tuple, Serialize_tuple};
 use std::collections::BTreeSet;
 use std::str::FromStr;
@@ -43,9 +43,7 @@ pub struct State {
     /// `postbox` keeps track for an EOA of all the cross-net messages triggered by
     /// an actor that need to be propagated further through the hierarchy.
     pub postbox: PostBox,
-    pub nonce: u64,
     pub bottomup_nonce: u64,
-    pub bottomup_msg_meta: TCid<TAmt<CrossMsgMeta, CROSSMSG_AMT_BITWIDTH>>,
     pub applied_bottomup_nonce: u64,
     pub applied_topdown_nonce: u64,
     /// The epoch that the subnet actor is deployed
@@ -80,12 +78,10 @@ impl State {
             },
             checkpoints: TCid::new_hamt(store)?,
             postbox: TCid::new_hamt(store)?,
-            nonce: Default::default(),
             bottomup_nonce: Default::default(),
-            bottomup_msg_meta: TCid::new_amt(store)?,
             // This way we ensure that the first message to execute has nonce= 0, if not it would expect 1 and fail for the first nonce
             // We first increase to the subsequent and then execute for bottom-up messages
-            applied_bottomup_nonce: MAX_NONCE,
+            applied_bottomup_nonce: Default::default(),
             applied_topdown_nonce: Default::default(),
             genesis_epoch: params.genesis_epoch,
             cron_period: params.cron_period,
@@ -128,7 +124,7 @@ impl State {
                     top_down_msgs: TCid::new_amt(rt.store())?,
                     circ_supply: TokenAmount::zero(),
                     status: Status::Active,
-                    nonce: 0,
+                    topdown_nonce: 0,
                     prev_checkpoint: None,
                 };
                 set_subnet(subnets, id, subnet)?;
@@ -204,10 +200,17 @@ impl State {
         store: &BS,
         cross_msg: &CrossMsg,
         curr_epoch: ChainEpoch,
+        fee: &TokenAmount,
     ) -> anyhow::Result<()> {
         let mut ch = self.get_window_checkpoint(store, curr_epoch)?;
 
-        ch.push_cross_msgs(cross_msg.clone());
+        let mut cross_msg = cross_msg.clone();
+        cross_msg.msg.nonce = self.bottomup_nonce;
+
+        ch.push_cross_msgs(cross_msg, fee);
+
+        // increment nonce
+        self.bottomup_nonce += 1;
 
         // flush checkpoint
         self.flush_checkpoint(store, &ch).map_err(|e| {
@@ -239,9 +242,9 @@ impl State {
             })?;
         match sub {
             Some(mut sub) => {
-                cross_msg.msg.nonce = sub.nonce;
+                cross_msg.msg.nonce = sub.topdown_nonce;
                 sub.store_topdown_msg(store, cross_msg)?;
-                sub.nonce += 1;
+                sub.topdown_nonce += 1;
                 sub.circ_supply += &cross_msg.msg.value;
                 self.flush_subnet(store, &sub)?;
             }
@@ -260,35 +263,10 @@ impl State {
         store: &BS,
         msg: &CrossMsg,
         curr_epoch: ChainEpoch,
+        fee: &TokenAmount,
     ) -> anyhow::Result<()> {
         // store bottom-up msg and fee in checkpoint for propagation
-        self.store_msg_in_checkpoint(store, msg, curr_epoch)?;
-        // increment nonce
-        self.nonce += 1;
-
-        Ok(())
-    }
-
-    pub fn bottomup_state_transition(&mut self, msg: &StorableMsg) -> anyhow::Result<()> {
-        // Bottom-up messages include the nonce of their message meta. Several messages
-        // will include the same nonce. They need to be applied in order of nonce.
-
-        // As soon as we see a message with the next msgMeta nonce, we increment the nonce
-        // and start accepting the one for the next nonce.
-        if self.applied_bottomup_nonce == u64::MAX && msg.nonce == 0 {
-            self.applied_bottomup_nonce = 0;
-        } else if self.applied_bottomup_nonce.wrapping_add(1) == msg.nonce {
-            // wrapping add is used to prevent overflow.
-            self.applied_bottomup_nonce = self.applied_bottomup_nonce.wrapping_add(1);
-        };
-
-        if self.applied_bottomup_nonce != msg.nonce {
-            return Err(anyhow!(
-                "the bottom-up message being applied doesn't hold the subsequent nonce: nonce={} applied={}",
-                msg.nonce,
-                self.applied_bottomup_nonce,
-            ));
-        }
+        self.store_msg_in_checkpoint(store, msg, curr_epoch, fee)?;
         Ok(())
     }
 
