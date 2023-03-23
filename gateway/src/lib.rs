@@ -472,17 +472,13 @@ impl Actor {
 
             // Create release message
             let r_msg = CrossMsg {
-                msg: StorableMsg::new_release_msg(
-                    &st.network_name,
-                    &sig_addr,
-                    value.clone(),
-                )
-                .map_err(|e| {
-                    e.downcast_default(
-                        ExitCode::USR_ILLEGAL_STATE,
-                        "error creating release cross-message",
-                    )
-                })?,
+                msg: StorableMsg::new_release_msg(&st.network_name, &sig_addr, value.clone())
+                    .map_err(|e| {
+                        e.downcast_default(
+                            ExitCode::USR_ILLEGAL_STATE,
+                            "error creating release cross-message",
+                        )
+                    })?,
                 wrapped: false,
             };
 
