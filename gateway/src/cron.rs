@@ -74,7 +74,7 @@ impl CronCheckpoint {
     ///     - top down messages are sorted by `nonce` in descending order
     ///
     /// Actor will not perform sorting to save gas. Client should do it, actor just check.
-    fn hash(&self) -> anyhow::Result<HashOutput> {
+    pub fn hash(&self) -> anyhow::Result<HashOutput> {
         // check top down msgs
         for i in 1..self.top_down_msgs.len() {
             match self.top_down_msgs[i - 1]
@@ -161,6 +161,17 @@ impl CronSubmission {
         }
     }
 
+    pub fn most_voted_weight<BS: Blockstore>(&self, store: &BS) -> anyhow::Result<TokenAmount> {
+        // we will only have one entry in the `most_submitted` set if more than 2/3 has reached
+        if let Some(hash) = &self.most_voted_hash {
+            Ok(self
+                .get_submission_weight(store, hash)?
+                .unwrap_or_else(TokenAmount::zero))
+        } else {
+            Ok(TokenAmount::zero())
+        }
+    }
+
     pub fn get_submission<BS: Blockstore>(
         &self,
         store: &BS,
@@ -212,6 +223,17 @@ impl CronSubmission {
         } else {
             VoteExecutionStatus::ReachingConsensus
         }
+    }
+
+    /// Checks if the submitter has already submitted the checkpoint.
+    pub fn has_submitted<BS: Blockstore>(
+        &self,
+        store: &BS,
+        submitter: &Address,
+    ) -> anyhow::Result<bool> {
+        let addr_byte_key = BytesKey::from(submitter.to_bytes());
+        let hamt = self.submitters.load(store)?;
+        Ok(hamt.contains_key(&addr_byte_key)?)
     }
 }
 
@@ -328,17 +350,15 @@ impl CronSubmission {
         })
     }
 
-    /// Checks if the submitter has already submitted the checkpoint. Currently used only in
-    /// tests, but can be used in prod as well.
-    #[cfg(test)]
-    fn has_submitted<BS: Blockstore>(
+    /// Checks if the checkpoint hash has already inserted in the store
+    fn get_submission_weight<BS: Blockstore>(
         &self,
         store: &BS,
-        submitter: &Address,
-    ) -> anyhow::Result<bool> {
-        let addr_byte_key = BytesKey::from(submitter.to_bytes());
-        let hamt = self.submitters.load(store)?;
-        Ok(hamt.contains_key(&addr_byte_key)?)
+        hash: &HashOutput,
+    ) -> anyhow::Result<Option<TokenAmount>> {
+        let hamt = self.submission_weights.load(store)?;
+        let r = hamt.get(&BytesKey::from(hash.as_slice()))?;
+        Ok(r.cloned())
     }
 
     /// Checks if the checkpoint hash has already inserted in the store
@@ -350,18 +370,6 @@ impl CronSubmission {
     ) -> anyhow::Result<bool> {
         let hamt = self.submissions.load(store)?;
         Ok(hamt.contains_key(&BytesKey::from(hash.as_slice()))?)
-    }
-
-    /// Checks if the checkpoint hash has already inserted in the store
-    #[cfg(test)]
-    fn get_submission_weight<BS: Blockstore>(
-        &self,
-        store: &BS,
-        hash: &HashOutput,
-    ) -> anyhow::Result<Option<TokenAmount>> {
-        let hamt = self.submission_weights.load(store)?;
-        let r = hamt.get(&BytesKey::from(hash.as_slice()))?;
-        Ok(r.cloned())
     }
 }
 

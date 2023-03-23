@@ -14,6 +14,7 @@ use lazy_static::lazy_static;
 use num_traits::Zero;
 use primitives::{TAmt, TCid, THamt, TLink};
 use serde_tuple::{Deserialize_tuple, Serialize_tuple};
+use std::collections::BTreeSet;
 use std::str::FromStr;
 
 use crate::cron::{CronSubmission, Validators};
@@ -54,6 +55,11 @@ pub struct State {
     pub cron_period: ChainEpoch,
     /// The last submit cron epoch that was executed
     pub last_cron_executed_epoch: ChainEpoch,
+    /// Contains the executable epochs that are ready to be executed, but has yet to be executed.
+    /// This usually happens when previous submission epoch has not executed, but the next submission
+    /// epoch is ready to be executed. Most of the time this should be empty, we are wrapping with
+    /// Option instead of empty VecDeque just to save some storage space.
+    pub executable_epoch_queue: Option<BTreeSet<ChainEpoch>>,
     pub cron_submissions: TCid<THamt<ChainEpoch, CronSubmission>>,
     pub validators: Validators,
 }
@@ -86,6 +92,7 @@ impl State {
             genesis_epoch: params.genesis_epoch,
             cron_period: params.cron_period,
             last_cron_executed_epoch: params.genesis_epoch,
+            executable_epoch_queue: None,
             cron_submissions: TCid::new_hamt(store)?,
             validators: Validators::new(ValidatorSet::default()),
         })
@@ -466,6 +473,15 @@ impl State {
 
     pub fn set_membership(&mut self, validator_set: ValidatorSet) {
         self.validators = Validators::new(validator_set);
+    }
+
+    pub fn insert_executable_epoch(&mut self, epoch: ChainEpoch) {
+        match self.executable_epoch_queue.as_mut() {
+            None => self.executable_epoch_queue = Some(BTreeSet::from([epoch])),
+            Some(queue) => {
+                queue.insert(epoch);
+            }
+        }
     }
 }
 

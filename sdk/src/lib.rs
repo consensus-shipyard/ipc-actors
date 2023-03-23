@@ -28,6 +28,13 @@ pub struct ValidatorSet {
 }
 
 impl ValidatorSet {
+    pub fn new(validators: Vec<Validator>, configuration_number: u64) -> Self {
+        Self {
+            validators,
+            configuration_number,
+        }
+    }
+
     pub fn validators(&self) -> &Vec<Validator> {
         &self.validators
     }

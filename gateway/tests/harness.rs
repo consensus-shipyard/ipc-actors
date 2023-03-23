@@ -26,13 +26,14 @@ use fvm_shared::error::ExitCode;
 use fvm_shared::MethodNum;
 use fvm_shared::METHOD_SEND;
 use ipc_gateway::checkpoint::ChildCheck;
-use ipc_gateway::SUBNET_ACTOR_REWARD_METHOD;
 use ipc_gateway::{
     ext, get_topdown_msg, is_bottomup, Actor, ApplyMsgParams, Checkpoint, ConstructorParams,
     CrossMsg, CrossMsgMeta, CrossMsgParams, CrossMsgs, FundParams, IPCAddress, IPCMsgType, Method,
     PropagateParams, State, StorableMsg, Subnet, SubnetID, CROSSMSG_AMT_BITWIDTH, CROSS_MSG_FEE,
     DEFAULT_CHECKPOINT_PERIOD, MAX_NONCE, MIN_COLLATERAL_AMOUNT,
 };
+use ipc_gateway::{CronCheckpoint, SUBNET_ACTOR_REWARD_METHOD};
+use ipc_sdk::ValidatorSet;
 use lazy_static::lazy_static;
 use primitives::{TCid, TCidContent};
 use std::str::FromStr;
@@ -718,6 +719,43 @@ impl Harness {
 
     pub fn get_subnet(&self, rt: &MockRuntime, id: &SubnetID) -> Option<Subnet> {
         get_subnet(rt, id)
+    }
+
+    pub fn set_membership(
+        &self,
+        rt: &mut MockRuntime,
+        validator_set: ValidatorSet,
+    ) -> Result<(), ActorError> {
+        rt.set_caller(*SYSTEM_ACTOR_CODE_ID, SYSTEM_ACTOR_ADDR);
+        rt.expect_validate_caller_addr(vec![SYSTEM_ACTOR_ADDR]);
+
+        rt.call::<Actor>(
+            Method::SetMembership as MethodNum,
+            IpldBlock::serialize_cbor(&validator_set).unwrap(),
+        )
+        .unwrap();
+        rt.verify();
+
+        Ok(())
+    }
+
+    pub fn submit_cron(
+        &self,
+        rt: &mut MockRuntime,
+        submitter: Address,
+        checkpoint: CronCheckpoint,
+    ) -> Result<(), ActorError> {
+        rt.set_caller(*ACCOUNT_ACTOR_CODE_ID, submitter);
+        rt.expect_validate_caller_type(SIG_TYPES.clone());
+
+        rt.call::<Actor>(
+            Method::SubmitCron as MethodNum,
+            IpldBlock::serialize_cbor(&checkpoint).unwrap(),
+        )?;
+
+        rt.verify();
+
+        Ok(())
     }
 }
 
