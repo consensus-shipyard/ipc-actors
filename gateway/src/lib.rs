@@ -34,7 +34,6 @@ use lazy_static::lazy_static;
 use num_derive::FromPrimitive;
 use num_traits::FromPrimitive;
 use primitives::TCid;
-use std::ops::Mul;
 
 #[cfg(feature = "fil-gateway-actor")]
 fil_actors_runtime::wasm_trampoline!(Actor);
@@ -339,20 +338,16 @@ impl Actor {
                     }
 
                     // commit cross-message in checkpoint to execute them.
-                    let value = commit.total_value();
+                    let fee = commit.total_fee().clone();
+                    let value = commit.total_value() + &fee;
 
                     // release circulating supply
-                    // TODO: release fee as well, use the BatchBottomUp struct
                     sub.release_supply(&value).map_err(|e| {
                         e.downcast_default(
                             ExitCode::USR_ILLEGAL_STATE,
                             "error releasing circulating supply",
                         )
                     })?;
-
-                    // This assumes the same cross message fee to all subnets
-                    // TODO: deprecated
-                    let fee = CROSS_MSG_FEE.clone().mul(commit.cross_msgs().len());
 
                     // append new checkpoint to the list of childs
                     ch.add_child_check(&commit).map_err(|e| {

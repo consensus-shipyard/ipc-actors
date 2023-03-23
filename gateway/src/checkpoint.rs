@@ -63,12 +63,6 @@ impl Checkpoint {
         &self.data.prev_check
     }
 
-    /// return cross_msg included in the checkpoint.
-    pub fn cross_msgs(&self) -> &Vec<CrossMsg> {
-        // self.data.cross_msgs.as_ref()
-        unimplemented!()
-    }
-
     /// Take the cross messages out of the checkpoint. This will empty the `self.data.cross_msgs`
     /// and replace with None.
     pub fn take_cross_msgs(&mut self) -> Option<Vec<CrossMsg>> {
@@ -87,6 +81,11 @@ impl Checkpoint {
                 value
             }
         }
+    }
+
+    /// Get the total fee of the cross messages
+    pub fn total_fee(&self) -> &TokenAmount {
+        &self.data.cross_msgs.fee
     }
 
     pub fn push_cross_msgs(&mut self, cross_msg: CrossMsg, fee: &TokenAmount) {
