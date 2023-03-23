@@ -12,7 +12,7 @@ use fvm_shared::econ::TokenAmount;
 use fvm_shared::error::ExitCode;
 use lazy_static::lazy_static;
 use num_traits::Zero;
-use primitives::{TAmt, TCid, THamt, TLink};
+use primitives::{TAmt, TCid, THamt};
 use serde_tuple::{Deserialize_tuple, Serialize_tuple};
 use std::collections::BTreeSet;
 use std::str::FromStr;
@@ -40,7 +40,6 @@ pub struct State {
     pub subnets: TCid<THamt<SubnetID, Subnet>>,
     pub check_period: ChainEpoch,
     pub checkpoints: TCid<THamt<ChainEpoch, Checkpoint>>,
-    pub check_msg_registry: TCid<THamt<TCid<TLink<CrossMsgs>>, CrossMsgs>>,
     /// `postbox` keeps track for an EOA of all the cross-net messages triggered by
     /// an actor that need to be propagated further through the hierarchy.
     pub postbox: PostBox,
@@ -80,7 +79,6 @@ impl State {
                 false => DEFAULT_CHECKPOINT_PERIOD,
             },
             checkpoints: TCid::new_hamt(store)?,
-            check_msg_registry: TCid::new_hamt(store)?,
             postbox: TCid::new_hamt(store)?,
             nonce: Default::default(),
             bottomup_nonce: Default::default(),
@@ -209,7 +207,7 @@ impl State {
     ) -> anyhow::Result<()> {
         let mut ch = self.get_window_checkpoint(store, curr_epoch)?;
 
-        ch.cross_msgs_mut().push(cross_msg.clone());
+        ch.push_cross_msgs(cross_msg.clone());
 
         // flush checkpoint
         self.flush_checkpoint(store, &ch).map_err(|e| {

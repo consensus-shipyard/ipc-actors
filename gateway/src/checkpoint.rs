@@ -6,6 +6,7 @@ use fvm_ipld_encoding::{serde_bytes, to_vec};
 use fvm_shared::clock::ChainEpoch;
 use fvm_shared::econ::TokenAmount;
 use ipc_sdk::subnet_id::SubnetID;
+use num_traits::Zero;
 use primitives::{TCid, TLink};
 use serde_tuple::{Deserialize_tuple, Serialize_tuple};
 
@@ -64,17 +65,35 @@ impl Checkpoint {
 
     /// return cross_msg included in the checkpoint.
     pub fn cross_msgs(&self) -> &Vec<CrossMsg> {
-        self.data.cross_msgs.as_ref()
+        // self.data.cross_msgs.as_ref()
+        unimplemented!()
     }
 
-    /// set cross_msg included in the checkpoint.
-    pub fn set_cross_msgs(&mut self, cm: Vec<CrossMsg>) {
-        self.data.cross_msgs = cm
+    /// Take the cross messages out of the checkpoint. This will empty the `self.data.cross_msgs`
+    /// and replace with None.
+    pub fn take_cross_msgs(&mut self) -> Option<Vec<CrossMsg>> {
+        self.data.cross_msgs.take()
     }
 
-    /// return cross_msg included in the checkpoint as mutable reference
-    pub fn cross_msgs_mut(&mut self) -> &mut Vec<CrossMsg> {
-        self.data.cross_msgs.as_mut()
+    /// Get the sum of values in cross messages
+    pub fn total_value(&self) -> TokenAmount {
+        match self.data.cross_msgs.as_ref() {
+            None => TokenAmount::zero(),
+            Some(cross_msgs) => {
+                let mut value = TokenAmount::zero();
+                cross_msgs.iter().for_each(|cross_msg| {
+                    value += &cross_msg.msg.value;
+                });
+                value
+            }
+        }
+    }
+
+    pub fn push_cross_msgs(&mut self, cross_msg: CrossMsg) {
+        match self.data.cross_msgs.as_mut() {
+            None => self.data.cross_msgs = Some(vec![cross_msg]),
+            Some(v) => v.push(cross_msg),
+        };
     }
 
     /// Add the cid of a checkpoint from a child subnet for further propagation
@@ -121,8 +140,9 @@ pub struct CheckData {
     pub epoch: ChainEpoch,
     pub prev_check: TCid<TLink<Checkpoint>>,
     pub children: Vec<ChildCheck>,
-    pub cross_msgs: Vec<CrossMsg>,
+    pub cross_msgs: Option<Vec<CrossMsg>>,
 }
+
 impl CheckData {
     pub fn new(id: SubnetID, epoch: ChainEpoch) -> Self {
         Self {
@@ -131,7 +151,7 @@ impl CheckData {
             epoch,
             prev_check: TCid::default(),
             children: Vec::new(),
-            cross_msgs: vec![],
+            cross_msgs: None,
         }
     }
 }

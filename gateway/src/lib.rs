@@ -3,7 +3,6 @@
 
 extern crate core;
 
-use std::ops::Mul;
 pub use self::checkpoint::{Checkpoint, CrossMsgMeta};
 pub use self::cross::{is_bottomup, CrossMsg, CrossMsgs, IPCMsgType, StorableMsg};
 pub use self::state::*;
@@ -35,6 +34,7 @@ use lazy_static::lazy_static;
 use num_derive::FromPrimitive;
 use num_traits::FromPrimitive;
 use primitives::TCid;
+use std::ops::Mul;
 
 #[cfg(feature = "fil-gateway-actor")]
 fil_actors_runtime::wasm_trampoline!(Actor);
@@ -68,7 +68,6 @@ pub enum Method {
     Fund = frc42_dispatch::method_hash!("Fund"),
     Release = frc42_dispatch::method_hash!("Release"),
     SendCross = frc42_dispatch::method_hash!("SendCross"),
-    ApplyMessage = frc42_dispatch::method_hash!("ApplyMessage"),
     Propagate = frc42_dispatch::method_hash!("Propagate"),
     WhiteListPropagator = frc42_dispatch::method_hash!("WhiteListPropagator"),
     SubmitCron = frc42_dispatch::method_hash!("SubmitCron"),
@@ -279,11 +278,10 @@ impl Actor {
 
     /// CommitChildCheck propagates the commitment of a checkpoint from a child subnet,
     /// process the cross-messages directed to the subnet.
-    fn commit_child_check(rt: &mut impl Runtime, params: Checkpoint) -> Result<(), ActorError> {
+    fn commit_child_check(rt: &mut impl Runtime, mut commit: Checkpoint) -> Result<(), ActorError> {
         rt.validate_immediate_caller_accept_any()?;
 
         let subnet_addr = rt.message().caller();
-        let commit = params;
         let subnet_actor = commit.source().subnet_actor();
 
         // check if the checkpoint belongs to the subnet
@@ -294,7 +292,7 @@ impl Actor {
             ));
         }
 
-        let fee = rt.transaction(|st: &mut State, rt| {
+        let (fee, cross_msgs) = rt.transaction(|st: &mut State, rt| {
             let shid = SubnetID::new_from_parent(&st.network_name, subnet_addr);
             let sub = st.get_subnet(rt.store(), &shid).map_err(|e| {
                 e.downcast_default(ExitCode::USR_ILLEGAL_STATE, "failed to load subnet")
@@ -333,15 +331,13 @@ impl Actor {
                         if commit.prev_check().cid() != prev_checkpoint.cid() {
                             return Err(actor_error!(
                                 illegal_argument,
-                                "previous checkpoint not consistente with previous one"
+                                "previous checkpoint not consistent with previous one"
                             ));
                         }
                     }
 
-                    // commit cross-message in checkpoint to either execute them or
-                    // queue them for propagation if there are cross-msgs availble.
-                    let mut value = TokenAmount::zero();
-                    commit.cross_msgs().iter().for_each(|m| value += &m.msg.value);
+                    // commit cross-message in checkpoint to execute them.
+                    let value = commit.total_value();
 
                     // release circulating supply
                     sub.release_supply(&value).map_err(|e| {
@@ -362,27 +358,35 @@ impl Actor {
                     })?;
 
                     // flush checkpoint
+                    // TODO: what do we have to store in the checkpoint? Seems like quite some data
+                    // TODO: is not used after being stored? We can remove those data from storage
+                    // TODO: to reduce gas and avoid clone.
                     st.flush_checkpoint(rt.store(), &ch).map_err(|e| {
                         e.downcast_default(ExitCode::USR_ILLEGAL_STATE, "error flushing checkpoint")
                     })?;
 
                     // update prev_check for child
+                    let cross_msgs = commit.take_cross_msgs();
                     sub.prev_checkpoint = Some(commit);
                     // flush subnet
                     st.flush_subnet(rt.store(), &sub).map_err(|e| {
                         e.downcast_default(ExitCode::USR_ILLEGAL_STATE, "error flushing subnet")
                     })?;
-                    Ok(fee)
+                    Ok((fee, cross_msgs))
                 }
-                None => {
-                    Err(actor_error!(
-                        illegal_argument,
-                        "subnet with id {} not registered",
-                        shid
-                    ))
-                }
+                None => Err(actor_error!(
+                    illegal_argument,
+                    "subnet with id {} not registered",
+                    shid
+                )),
             }
         })?;
+
+        if let Some(msgs) = cross_msgs {
+            for cross_msg in msgs {
+                Self::apply_msg_inner(rt, cross_msg)?;
+            }
+        }
 
         // distribute rewards
         distribute_crossmsg_fee(rt, &subnet_actor, fee)
@@ -583,123 +587,6 @@ impl Actor {
         cross_msg_side_effects(rt, &cross_msg, do_burn, &top_down_fee)?;
 
         Ok(())
-    }
-
-    /// ApplyMessage triggers the execution of a cross-subnet message validated through the consensus.
-    ///
-    /// This function can only be triggered using `ApplyImplicitMessage`, and the source needs to
-    /// be the SystemActor. Cross messages are applied similarly to how rewards are applied once
-    /// a block has been validated. This function:
-    /// - Determines the type of cross-message.
-    /// - Performs the corresponding state changes.
-    /// - And updated the latest nonce applied for future checks.
-    fn apply_msg(rt: &mut impl Runtime, params: ApplyMsgParams) -> Result<RawBytes, ActorError> {
-        rt.validate_immediate_caller_is([&SYSTEM_ACTOR_ADDR as &Address])?;
-        let ApplyMsgParams { cross_msg } = params;
-        Self::apply_msg_inner(rt, cross_msg)
-    }
-
-    fn apply_msg_inner(rt: &mut impl Runtime, cross_msg: CrossMsg) -> Result<RawBytes, ActorError> {
-        let rto = match cross_msg.msg.to.raw_addr() {
-            Ok(to) => to,
-            Err(_) => {
-                return Err(actor_error!(
-                    illegal_argument,
-                    "error getting raw address from msg"
-                ));
-            }
-        };
-        let sto = match cross_msg.msg.to.subnet() {
-            Ok(to) => to,
-            Err(_) => {
-                return Err(actor_error!(
-                    illegal_argument,
-                    "error getting subnet from msg"
-                ));
-            }
-        };
-
-        let st: State = rt.state()?;
-
-        log::debug!("sto: {:?}, network: {:?}", sto, st.network_name);
-
-        match cross_msg.msg.apply_type(&st.network_name) {
-            Ok(IPCMsgType::BottomUp) => {
-                // if directed to current network, execute message.
-                if sto == st.network_name {
-                    rt.transaction(|st: &mut State, _| {
-                        st.bottomup_state_transition(&cross_msg.msg).map_err(|e| {
-                            e.downcast_default(
-                                ExitCode::USR_ILLEGAL_STATE,
-                                "failed applying bottomup message",
-                            )
-                        })?;
-                        Ok(())
-                    })?;
-                    return cross_msg.send(rt, &rto);
-                }
-            }
-            Ok(IPCMsgType::TopDown) => {
-                // Mint funds for the gateway, as any topdown message
-                // including tokens traversing the subnet will use
-                // some balance from the gateway to increase the circ_supply.
-                // check if the gateway has enough funds to mint new FIL,
-                // if not fail right-away and do not allow the execution of
-                // the message.
-                // TODO: It may be a good idea in the future to decouple the
-                // balance provisioned in the gateway to mint new circulating supply
-                // in an independent actor. Minting tokens would require a call to the new actor actor to unlock
-                // additional circulating supply. This prevents an attacker from being able token
-                // vulnerabilities in the gateway
-                // from draining the whole balance.
-                if rt.current_balance() < cross_msg.msg.value {
-                    return Err(actor_error!(
-                        illegal_state,
-                        "not enough balance to mint new tokens as part of the cross-message"
-                    ));
-                }
-
-                if sto == st.network_name {
-                    if st.applied_topdown_nonce != cross_msg.msg.nonce {
-                        return Err(actor_error!(
-                            illegal_state,
-                            "the top-down message being applied doesn't hold the subsequent nonce"
-                        ));
-                    }
-
-                    rt.transaction(|st: &mut State, _| {
-                        st.applied_topdown_nonce += 1;
-                        Ok(())
-                    })?;
-
-                    // We can return the send result
-                    return cross_msg.send(rt, &rto);
-                }
-            }
-            _ => {
-                return Err(actor_error!(
-                    illegal_argument,
-                    "cross-message to apply dosen't have the right type"
-                ))
-            }
-        };
-
-        let cid = rt.transaction(|st: &mut State, rt| {
-            let owner = cross_msg
-                .msg
-                .from
-                .raw_addr()
-                .map_err(|_| actor_error!(illegal_argument, "invalid address"))?;
-            let r = st
-                .insert_postbox(rt.store(), Some(vec![owner]), cross_msg)
-                .map_err(|e| {
-                    e.downcast_default(ExitCode::USR_ILLEGAL_STATE, "error save topdown messages")
-                })?;
-            Ok(r)
-        })?;
-
-        // it is safe to just unwrap. If `transaction` fails, cid is None and wont reach here.
-        Ok(RawBytes::new(cid.to_bytes()))
     }
 
     /// Whitelist a series of addresses as propagator of a cross net message.
@@ -957,6 +844,109 @@ impl Actor {
 
 /// Contains private method invocation
 impl Actor {
+    fn apply_msg_inner(rt: &mut impl Runtime, cross_msg: CrossMsg) -> Result<RawBytes, ActorError> {
+        let rto = match cross_msg.msg.to.raw_addr() {
+            Ok(to) => to,
+            Err(_) => {
+                return Err(actor_error!(
+                    illegal_argument,
+                    "error getting raw address from msg"
+                ));
+            }
+        };
+        let sto = match cross_msg.msg.to.subnet() {
+            Ok(to) => to,
+            Err(_) => {
+                return Err(actor_error!(
+                    illegal_argument,
+                    "error getting subnet from msg"
+                ));
+            }
+        };
+
+        let st: State = rt.state()?;
+
+        log::debug!("sto: {:?}, network: {:?}", sto, st.network_name);
+
+        match cross_msg.msg.apply_type(&st.network_name) {
+            Ok(IPCMsgType::BottomUp) => {
+                // if directed to current network, execute message.
+                if sto == st.network_name {
+                    rt.transaction(|st: &mut State, _| {
+                        st.bottomup_state_transition(&cross_msg.msg).map_err(|e| {
+                            e.downcast_default(
+                                ExitCode::USR_ILLEGAL_STATE,
+                                "failed applying bottomup message",
+                            )
+                        })?;
+                        Ok(())
+                    })?;
+                    return cross_msg.send(rt, &rto);
+                }
+            }
+            Ok(IPCMsgType::TopDown) => {
+                // Mint funds for the gateway, as any topdown message
+                // including tokens traversing the subnet will use
+                // some balance from the gateway to increase the circ_supply.
+                // check if the gateway has enough funds to mint new FIL,
+                // if not fail right-away and do not allow the execution of
+                // the message.
+                // TODO: It may be a good idea in the future to decouple the
+                // balance provisioned in the gateway to mint new circulating supply
+                // in an independent actor. Minting tokens would require a call to the new actor actor to unlock
+                // additional circulating supply. This prevents an attacker from being able token
+                // vulnerabilities in the gateway
+                // from draining the whole balance.
+                if rt.current_balance() < cross_msg.msg.value {
+                    return Err(actor_error!(
+                        illegal_state,
+                        "not enough balance to mint new tokens as part of the cross-message"
+                    ));
+                }
+
+                if sto == st.network_name {
+                    if st.applied_topdown_nonce != cross_msg.msg.nonce {
+                        return Err(actor_error!(
+                            illegal_state,
+                            "the top-down message being applied doesn't hold the subsequent nonce"
+                        ));
+                    }
+
+                    rt.transaction(|st: &mut State, _| {
+                        st.applied_topdown_nonce += 1;
+                        Ok(())
+                    })?;
+
+                    // We can return the send result
+                    return cross_msg.send(rt, &rto);
+                }
+            }
+            _ => {
+                return Err(actor_error!(
+                    illegal_argument,
+                    "cross-message to apply dosen't have the right type"
+                ))
+            }
+        };
+
+        let cid = rt.transaction(|st: &mut State, rt| {
+            let owner = cross_msg
+                .msg
+                .from
+                .raw_addr()
+                .map_err(|_| actor_error!(illegal_argument, "invalid address"))?;
+            let r = st
+                .insert_postbox(rt.store(), Some(vec![owner]), cross_msg)
+                .map_err(|e| {
+                    e.downcast_default(ExitCode::USR_ILLEGAL_STATE, "error save topdown messages")
+                })?;
+            Ok(r)
+        })?;
+
+        // it is safe to just unwrap. If `transaction` fails, cid is None and wont reach here.
+        Ok(RawBytes::new(cid.to_bytes()))
+    }
+
     fn handle_cron_submission<BS: Blockstore>(
         store: &BS,
         st: &mut State,
@@ -1109,7 +1099,6 @@ impl ActorCode for Actor {
         Fund => fund,
         Release => release,
         SendCross => send_cross,
-        ApplyMessage => apply_msg,
         Propagate => propagate,
         WhiteListPropagator => whitelist_propagator,
         SubmitCron => submit_cron,
