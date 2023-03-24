@@ -378,9 +378,7 @@ impl Actor {
                 .iter()
                 .position(|x| x.addr == caller)
             {
-                if let Some(x) = st.validator_set
-                    .validators_mut()
-                    .get_mut(index) {
+                if let Some(x) = st.validator_set.validators_mut().get_mut(index) {
                     x.net_addr = params.validator_net_addr;
                 }
             } else {
