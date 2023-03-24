@@ -378,10 +378,11 @@ impl Actor {
                 .iter()
                 .position(|x| x.addr == caller)
             {
-                st.validator_set
+                if let Some(x) = st.validator_set
                     .validators_mut()
-                    .get_mut(index)
-                    .map(|x| x.net_addr = params.validator_net_addr);
+                    .get_mut(index) {
+                    x.net_addr = params.validator_net_addr;
+                }
             } else {
                 return Err(actor_error!(forbidden, "caller is not a validator"));
             }
