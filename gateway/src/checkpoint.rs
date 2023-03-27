@@ -2,14 +2,24 @@ use anyhow::anyhow;
 use cid::multihash::Code;
 use cid::multihash::MultihashDigest;
 use cid::Cid;
+use fvm_ipld_encoding::DAG_CBOR;
 use fvm_ipld_encoding::{serde_bytes, to_vec};
 use fvm_shared::clock::ChainEpoch;
 use fvm_shared::econ::TokenAmount;
 use ipc_sdk::subnet_id::SubnetID;
+use lazy_static::lazy_static;
 use primitives::{TCid, TLink};
 use serde_tuple::{Deserialize_tuple, Serialize_tuple};
 
 use crate::CrossMsgs;
+
+lazy_static! {
+    // Default CID used for the genesis checkpoint. Using
+    // TCid::default() leads to corrupting the fvm datastore
+    // for storing the cid of an inaccessible HAMT.
+    pub static ref CHECKPOINT_GENESIS_CID: Cid =
+        Cid::new_v1(DAG_CBOR, Code::Blake2b256.digest("genesis".as_bytes()));
+}
 
 #[derive(PartialEq, Eq, Clone, Debug, Serialize_tuple, Deserialize_tuple)]
 pub struct Checkpoint {
@@ -129,7 +139,7 @@ impl CheckData {
             source: id,
             proof: Vec::new(),
             epoch,
-            prev_check: TCid::default(),
+            prev_check: CHECKPOINT_GENESIS_CID.clone().into(),
             children: Vec::new(),
             cross_msgs: None,
         }

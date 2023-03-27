@@ -1,6 +1,6 @@
 #![feature(let_chains)] // For some simpler syntax for if let Some conditions
 
-pub use self::checkpoint::{Checkpoint, CrossMsgMeta};
+pub use self::checkpoint::{Checkpoint, CrossMsgMeta, CHECKPOINT_GENESIS_CID};
 pub use self::cross::{is_bottomup, CrossMsg, CrossMsgs, IPCMsgType, StorableMsg};
 pub use self::state::*;
 pub use self::subnet::*;
@@ -73,7 +73,7 @@ impl Actor {
         let st = State::new(rt.store(), params).map_err(|e| {
             e.downcast_default(
                 ExitCode::USR_ILLEGAL_STATE,
-                "Failed to create SCA actor state",
+                "Failed to create gateway actor state",
             )
         })?;
         rt.create(&st)?;

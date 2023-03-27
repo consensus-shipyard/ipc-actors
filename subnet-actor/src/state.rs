@@ -9,7 +9,9 @@ use fvm_shared::address::Address;
 use fvm_shared::bigint::Zero;
 use fvm_shared::clock::ChainEpoch;
 use fvm_shared::econ::TokenAmount;
+use ipc_gateway::checkpoint::CHECKPOINT_GENESIS_CID;
 use ipc_gateway::{Checkpoint, SubnetID, DEFAULT_CHECKPOINT_PERIOD, MIN_COLLATERAL_AMOUNT};
+use ipc_sdk::epoch_key;
 use lazy_static::lazy_static;
 use num::rational::Ratio;
 use num::BigInt;
@@ -42,6 +44,8 @@ pub struct State {
     pub genesis: Vec<u8>,
     pub finality_threshold: ChainEpoch,
     pub check_period: ChainEpoch,
+    // FIXME: Consider making checkpoints a HAMT instead of an AMT so we use
+    // the AMT index instead of and epoch k for object indexing.
     pub checkpoints: TCid<THamt<ChainEpoch, Checkpoint>>,
     pub window_checks: TCid<THamt<Cid, Votes>>,
     pub validator_set: ValidatorSet,
@@ -274,14 +278,14 @@ impl State {
     fn get_checkpoint<BS: Blockstore>(
         &self,
         store: &BS,
-        epoch: &ChainEpoch,
+        epoch: ChainEpoch,
     ) -> anyhow::Result<Option<Checkpoint>> {
         let hamt = self
             .checkpoints
             .load(store)
             .map_err(|e| anyhow!("failed to load checkpoints: {}", e))?;
         let checkpoint = hamt
-            .get(&BytesKey::from(epoch.to_ne_bytes().to_vec()))
+            .get(&epoch_key(epoch))
             .map_err(|e| anyhow!("failed to get checkpoint for id {}: {:?}", epoch, e))?
             .cloned();
         Ok(checkpoint)
@@ -304,7 +308,7 @@ impl State {
         }
 
         // check that a checkpoint for the epoch doesn't exist already.
-        if self.get_checkpoint(rt.store(), &ch.epoch())?.is_some() {
+        if self.get_checkpoint(rt.store(), ch.epoch())?.is_some() {
             return Err(anyhow!("cannot submit checkpoint for epoch"));
         };
 
@@ -350,14 +354,14 @@ impl State {
     ) -> anyhow::Result<Cid> {
         let mut epoch = epoch - self.check_period;
         while epoch >= 0 {
-            match self.get_checkpoint(store, &epoch)? {
+            match self.get_checkpoint(store, epoch)? {
                 Some(ch) => return Ok(ch.cid()),
                 None => {
                     epoch -= self.check_period;
                 }
             }
         }
-        Ok(Cid::default())
+        Ok(CHECKPOINT_GENESIS_CID.clone())
     }
 
     pub fn flush_checkpoint<BS: Blockstore>(
@@ -367,7 +371,7 @@ impl State {
     ) -> anyhow::Result<()> {
         let epoch = ch.epoch();
         self.checkpoints.modify(store, |hamt| {
-            hamt.set(BytesKey::from(epoch.to_ne_bytes().to_vec()), ch.clone())
+            hamt.set(epoch_key(epoch), ch.clone())
                 .map_err(|e| anyhow!("failed to set checkpoint: {:?}", e))?;
             Ok(true)
         })?;
