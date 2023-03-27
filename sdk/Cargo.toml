@@ -17,4 +17,6 @@ serde_tuple = "0.5"
 serde = { version = "1.0.136", features = ["derive"] }
 fvm_shared = { version = "=3.0.0-alpha.17", default-features = false }
 thiserror = "1.0.38"
+num-traits = "0.2.14"
 fil_actors_runtime = { git = "https://github.com/consensus-shipyard/fvm-utils", features = ["fil-actor"] }
+integer-encoding = { version = "3.0.3", default-features = false }

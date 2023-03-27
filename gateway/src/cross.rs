@@ -228,12 +228,12 @@ mod tests {
 
     #[test]
     fn test_is_bottomup() {
-        bottom_up("/root/f01", "/root/f01/f02", false);
-        bottom_up("/root/f01", "/root", true);
-        bottom_up("/root/f01", "/root/f01/f02", false);
-        bottom_up("/root/f01", "/root/f02/f02", true);
-        bottom_up("/root/f01/f02", "/root/f01/f02", false);
-        bottom_up("/root/f01/f02", "/root/f01/f02/f03", false);
+        bottom_up("/root/t01", "/root/t01/t02", false);
+        bottom_up("/root/t01", "/root", true);
+        bottom_up("/root/t01", "/root/t01/t02", false);
+        bottom_up("/root/t01", "/root/t02/t02", true);
+        bottom_up("/root/t01/t02", "/root/t01/t02", false);
+        bottom_up("/root/t01/t02", "/root/t01/t02/t03", false);
     }
     fn bottom_up(a: &str, b: &str, res: bool) {
         assert_eq!(
