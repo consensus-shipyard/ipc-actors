@@ -158,6 +158,8 @@ impl fmt::Display for SubnetID {
         // FIXME: This is a horrible hack, and it makes me feel dirty,
         // but it is the only way to ensure that we are picking up
         // the right network address for the environment.
+        // Future fix being tracked here:
+        // https://github.com/consensus-shipyard/ipc-actors/issues/78
         set_network_from_env();
 
         if self.parent == "/root" && self.actor == Address::new_id(0) {
