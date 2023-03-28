@@ -29,6 +29,10 @@ pub struct Checkpoint {
 }
 
 impl Checkpoint {
+    pub fn with_data_and_sig(data: CheckData, sig: Vec<u8>) -> Self {
+        Self { data, sig }
+    }
+
     pub fn new(id: SubnetID, epoch: ChainEpoch) -> Self {
         Self {
             data: CheckData::new(id, epoch),
