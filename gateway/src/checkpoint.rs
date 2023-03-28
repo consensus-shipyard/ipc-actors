@@ -25,14 +25,10 @@ lazy_static! {
 pub struct Checkpoint {
     pub data: CheckData,
     #[serde(with = "serde_bytes")]
-    sig: Vec<u8>,
+    pub sig: Vec<u8>,
 }
 
 impl Checkpoint {
-    pub fn with_data_and_sig(data: CheckData, sig: Vec<u8>) -> Self {
-        Self { data, sig }
-    }
-
     pub fn new(id: SubnetID, epoch: ChainEpoch) -> Self {
         Self {
             data: CheckData::new(id, epoch),
