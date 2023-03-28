@@ -25,7 +25,7 @@ lazy_static! {
 pub struct Checkpoint {
     pub data: CheckData,
     #[serde(with = "serde_bytes")]
-    sig: Vec<u8>,
+    pub sig: Vec<u8>,
 }
 
 impl Checkpoint {
