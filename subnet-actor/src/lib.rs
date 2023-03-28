@@ -33,6 +33,7 @@ pub enum Method {
     Leave = frc42_dispatch::method_hash!("Leave"),
     Kill = frc42_dispatch::method_hash!("Kill"),
     SubmitCheckpoint = frc42_dispatch::method_hash!("SubmitCheckpoint"),
+    SetValidatorNetAddr = frc42_dispatch::method_hash!("SetValidatorNetAddr"),
     Reward = frc42_dispatch::method_hash!("Reward"),
 }
 
@@ -358,6 +359,37 @@ impl SubnetActor for Actor {
     }
 }
 
+/// This impl includes methods that are not required by the subnet actor
+/// trait.
+impl Actor {
+    /// Sets a new net address to an existing validator
+    pub fn set_validator_net_addr(
+        rt: &mut impl Runtime,
+        params: JoinParams,
+    ) -> Result<Option<RawBytes>, ActorError> {
+        rt.validate_immediate_caller_type(CALLER_TYPES_SIGNABLE.iter())?;
+        let caller = rt.message().caller();
+
+        rt.transaction(|st: &mut State, _rt| {
+            // if the caller is a validator allow him to change his net addr
+            if let Some(index) = st
+                .validator_set
+                .validators()
+                .iter()
+                .position(|x| x.addr == caller)
+            {
+                if let Some(x) = st.validator_set.validators_mut().get_mut(index) {
+                    x.net_addr = params.validator_net_addr;
+                }
+            } else {
+                return Err(actor_error!(forbidden, "caller is not a validator"));
+            }
+            Ok(())
+        })?;
+        Ok(None)
+    }
+}
+
 impl ActorCode for Actor {
     type Methods = Method;
 
@@ -368,5 +400,6 @@ impl ActorCode for Actor {
         Kill => kill,
         SubmitCheckpoint => submit_checkpoint,
         Reward => reward,
+        SetValidatorNetAddr => set_validator_net_addr,
     }
 }

@@ -26,7 +26,7 @@ pub struct Subnet {
     pub id: SubnetID,
     pub stake: TokenAmount,
     pub top_down_msgs: TCid<TAmt<CrossMsg, CROSSMSG_AMT_BITWIDTH>>,
-    pub nonce: u64,
+    pub topdown_nonce: u64,
     pub circ_supply: TokenAmount,
     pub status: Status,
     pub prev_checkpoint: Option<Checkpoint>,
