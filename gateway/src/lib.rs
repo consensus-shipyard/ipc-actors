@@ -8,7 +8,6 @@ pub use self::cross::{is_bottomup, CrossMsg, CrossMsgs, IPCMsgType, StorableMsg}
 pub use self::state::*;
 pub use self::subnet::*;
 pub use self::types::*;
-pub use crate::cron::{CronSubmission, VoteExecutionStatus};
 pub use cron::CronCheckpoint;
 use cross::{burn_bu_funds, cross_msg_side_effects, distribute_crossmsg_fee};
 use fil_actors_runtime::runtime::fvm::resolve_secp_bls;
@@ -17,7 +16,6 @@ use fil_actors_runtime::{
     actor_dispatch, actor_error, restrict_internal_api, ActorDowncast, ActorError,
     CALLER_TYPES_SIGNABLE, INIT_ACTOR_ADDR, SYSTEM_ACTOR_ADDR,
 };
-use fvm_ipld_blockstore::Blockstore;
 use fvm_ipld_encoding::RawBytes;
 use fvm_ipld_hamt::BytesKey;
 use fvm_shared::address::Address;
@@ -47,6 +45,7 @@ pub mod ext;
 mod state;
 pub mod subnet;
 mod types;
+pub mod vote;
 
 // TODO: make this into constructor!
 lazy_static! {
@@ -698,12 +697,14 @@ impl Actor {
         // submit cron can only be performed by signable addresses
         rt.validate_immediate_caller_type(CALLER_TYPES_SIGNABLE.iter())?;
 
-        let msgs = rt.transaction(|st: &mut State, rt| {
+        let to_execute = rt.transaction(|st: &mut State, rt| {
             let submitter = rt.message().caller();
             let submitter_weight = Self::validate_submitter(st, checkpoint.epoch, &submitter)?;
             let store = rt.store();
 
-            Self::handle_cron_submission(store, st, checkpoint, submitter, submitter_weight)
+            let epoch = checkpoint.epoch;
+            let total_weight = st.validators.total_weight.clone();
+            st.cron_checkpoint_voting.submit_vote(store, checkpoint, epoch, submitter, submitter_weight, total_weight)
                 .map_err(|e| {
                     log::error!(
                         "encountered error processing submit cron checkpoint: {:?}",
@@ -715,11 +716,11 @@ impl Actor {
 
         // we only `execute_next_cron_epoch(rt)` if there is no execution for the current submission
         // so that we don't blow up the gas.
-        if let Some(msgs) = msgs {
-            if msgs.is_empty() {
+        if let Some(checkpoint) = to_execute {
+            if checkpoint.top_down_msgs.is_empty() {
                 Self::execute_next_cron_epoch(rt)?;
             }
-            for m in msgs {
+            for m in checkpoint.top_down_msgs {
                 Self::apply_msg_inner(
                     rt,
                     CrossMsg {
@@ -822,11 +823,11 @@ impl Actor {
     ) -> Result<TokenAmount, ActorError> {
         // first we check the epoch is the correct one, we process only it's multiple
         // of cron_period since genesis_epoch
-        if (epoch - st.genesis_epoch) % st.cron_period != 0 {
+        if !st.cron_checkpoint_voting.epoch_can_vote(epoch) {
             return Err(actor_error!(illegal_argument, "epoch not allowed"));
         }
 
-        if st.last_cron_executed_epoch >= epoch {
+        if st.cron_checkpoint_voting.is_epoch_executed(epoch) {
             return Err(actor_error!(illegal_argument, "epoch already executed"));
         }
 
@@ -944,70 +945,6 @@ impl Actor {
         Ok(RawBytes::new(cid.to_bytes()))
     }
 
-    fn handle_cron_submission<BS: Blockstore>(
-        store: &BS,
-        st: &mut State,
-        checkpoint: CronCheckpoint,
-        submitter: Address,
-        submitter_weight: TokenAmount,
-    ) -> anyhow::Result<Option<Vec<StorableMsg>>> {
-        let total_weight = st.validators.total_weight.clone();
-        let params_epoch = checkpoint.epoch;
-
-        // We are doing this manually because we have to modify `state` while processing the `hamt`.
-        // The current `st.cron_submissions.modify(...)` does not allow us to modify state in the
-        // function closure passed to modify.
-        let mut hamt = st.cron_submissions.load(store)?;
-
-        let epoch_key = BytesKey::from(params_epoch.to_be_bytes().as_slice());
-        let mut submission = match hamt.get(&epoch_key)? {
-            Some(s) => s.clone(),
-            None => CronSubmission::new(store)?,
-        };
-
-        let most_voted_weight =
-            submission.submit(store, submitter, submitter_weight, checkpoint)?;
-        let execution_status = submission.derive_execution_status(total_weight, most_voted_weight);
-
-        let messages = match execution_status {
-            VoteExecutionStatus::ThresholdNotReached | VoteExecutionStatus::ReachingConsensus => {
-                // threshold or consensus not reached, store submission and return
-                hamt.set(epoch_key, submission)?;
-                None
-            }
-            VoteExecutionStatus::RoundAbort => {
-                submission.abort(store)?;
-                hamt.set(epoch_key, submission)?;
-                None
-            }
-            VoteExecutionStatus::ConsensusReached => {
-                if st.last_cron_executed_epoch + st.cron_period != params_epoch {
-                    // there are pending epochs to be executed,
-                    // just store the submission and skip execution
-                    hamt.set(epoch_key, submission)?;
-                    st.insert_executable_epoch(params_epoch);
-                    return Ok(None);
-                }
-
-                // we reach consensus in the checkpoints submission
-                st.last_cron_executed_epoch = params_epoch;
-
-                let msgs = submission
-                    .load_most_submitted_checkpoint(store)?
-                    .unwrap()
-                    .top_down_msgs;
-                hamt.delete(&epoch_key)?;
-
-                Some(msgs)
-            }
-        };
-
-        // don't forget to flush
-        st.cron_submissions = TCid::from(hamt.flush()?);
-
-        Ok(messages)
-    }
-
     /// Execute the next approved cron checkpoint.
     /// This is an edge case to ensure none of the epoches will be stuck. Consider the following example:
     ///
@@ -1016,49 +953,8 @@ impl Actor {
     /// epoch 10 has reached consensus and executed, but epoch 20 cannot be executed because every
     /// validator has already voted, no one can vote again to trigger the execution. Epoch 20 is stuck.
     fn execute_next_cron_epoch(rt: &mut impl Runtime) -> Result<(), ActorError> {
-        let msgs = rt.transaction(|st: &mut State, rt| {
-            let epoch_queue = match st.executable_epoch_queue.as_mut() {
-                None => return Ok(None),
-                Some(queue) => queue,
-            };
-
-            match epoch_queue.first() {
-                None => {
-                    unreachable!("`epoch_queue` is not None, it should not be empty, report bug")
-                }
-                Some(epoch) => {
-                    if *epoch > st.last_cron_executed_epoch + st.cron_period {
-                        log::debug!("earliest executable epoch not the same cron period");
-                        return Ok(None);
-                    }
-                }
-            }
-
-            let store = rt.store();
-            let epoch = epoch_queue.pop_first().unwrap();
-
-            if epoch_queue.is_empty() {
-                st.executable_epoch_queue = None;
-            }
-
-            st.cron_submissions
-                .modify(store, |hamt| {
-                    let epoch_key = BytesKey::from(epoch.to_be_bytes().as_slice());
-                    let submission = match hamt.get(&epoch_key)? {
-                        Some(s) => s,
-                        None => unreachable!("Submission in epoch not found, report bug"),
-                    };
-
-                    st.last_cron_executed_epoch = epoch;
-
-                    let msgs = submission
-                        .load_most_submitted_checkpoint(store)?
-                        .unwrap()
-                        .top_down_msgs;
-                    hamt.delete(&epoch_key)?;
-
-                    Ok(Some(msgs))
-                })
+        let checkpoint = rt.transaction(|st: &mut State, rt| {
+            st.cron_checkpoint_voting.dump_next_executable_vote(rt.store())
                 .map_err(|e| {
                     log::error!(
                         "encountered error processing submit cron checkpoint: {:?}",
@@ -1068,8 +964,8 @@ impl Actor {
                 })
         })?;
 
-        if let Some(msgs) = msgs {
-            for m in msgs {
+        if let Some(checkpoint) = checkpoint {
+            for m in checkpoint.top_down_msgs {
                 Self::apply_msg_inner(
                     rt,
                     CrossMsg {
