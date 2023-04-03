@@ -1,6 +1,3 @@
-use anyhow::anyhow;
-use cid::multihash::Code;
-use cid::multihash::MultihashDigest;
 use cid::Cid;
 use fil_actors_runtime::builtin::HAMT_BIT_WIDTH;
 use fil_actors_runtime::deserialize_block;
@@ -10,11 +7,10 @@ use fil_actors_runtime::test_utils::{
     MockRuntime, ACCOUNT_ACTOR_CODE_ID, INIT_ACTOR_CODE_ID, MULTISIG_ACTOR_CODE_ID,
     SUBNET_ACTOR_CODE_ID, SYSTEM_ACTOR_CODE_ID,
 };
+use fil_actors_runtime::INIT_ACTOR_ADDR;
 use fil_actors_runtime::{
-    make_map_with_root_and_bitwidth, ActorError, Map, BURNT_FUNDS_ACTOR_ADDR, SYSTEM_ACTOR_ADDR,
+    make_map_with_root_and_bitwidth, ActorError, BURNT_FUNDS_ACTOR_ADDR, SYSTEM_ACTOR_ADDR,
 };
-use fil_actors_runtime::{Array, INIT_ACTOR_ADDR};
-use fvm_ipld_blockstore::Blockstore;
 use fvm_ipld_encoding::ipld_block::IpldBlock;
 use fvm_ipld_encoding::RawBytes;
 use fvm_shared::address::Address;
@@ -27,10 +23,9 @@ use fvm_shared::MethodNum;
 use fvm_shared::METHOD_SEND;
 use ipc_gateway::checkpoint::ChildCheck;
 use ipc_gateway::{
-    ext, get_topdown_msg, is_bottomup, Actor, ApplyMsgParams, Checkpoint, ConstructorParams,
-    CrossMsg, CrossMsgMeta, CrossMsgParams, CrossMsgs, FundParams, IPCAddress, IPCMsgType, Method,
-    PropagateParams, State, StorableMsg, Subnet, SubnetID, CROSSMSG_AMT_BITWIDTH, CROSS_MSG_FEE,
-    DEFAULT_CHECKPOINT_PERIOD, MAX_NONCE, MIN_COLLATERAL_AMOUNT,
+    ext, get_topdown_msg, is_bottomup, Actor, Checkpoint, ConstructorParams, CrossMsg,
+    CrossMsgParams, FundParams, IPCAddress, Method, PropagateParams, State, StorableMsg, Subnet,
+    SubnetID, CROSS_MSG_FEE, DEFAULT_CHECKPOINT_PERIOD, MIN_COLLATERAL_AMOUNT,
 };
 use ipc_gateway::{CronCheckpoint, SUBNET_ACTOR_REWARD_METHOD};
 use ipc_sdk::ValidatorSet;
@@ -102,22 +97,15 @@ impl Harness {
         self.construct(rt);
 
         let st: State = rt.get_state();
-        let store = &rt.store;
-
-        let empty_bottomup_array = Array::<(), _>::new_with_bit_width(store, CROSSMSG_AMT_BITWIDTH)
-            .flush()
-            .unwrap();
 
         assert_eq!(st.network_name, self.net_name);
         assert_eq!(st.min_stake, TokenAmount::from_atto(MIN_COLLATERAL_AMOUNT));
         assert_eq!(st.check_period, DEFAULT_CHECKPOINT_PERIOD);
-        assert_eq!(st.applied_bottomup_nonce, MAX_NONCE);
-        assert_eq!(st.bottomup_msg_meta.cid(), empty_bottomup_array);
+        assert_eq!(st.applied_bottomup_nonce, 0);
         assert_eq!(st.cron_period, *DEFAULT_CRON_PERIOD);
         assert_eq!(st.genesis_epoch, *DEFAULT_GENESIS_EPOCH);
         verify_empty_map(rt, st.subnets.cid());
         verify_empty_map(rt, st.checkpoints.cid());
-        verify_empty_map(rt, st.check_msg_registry.cid());
     }
 
     pub fn register(
@@ -334,7 +322,7 @@ impl Harness {
             .unwrap()
             .unwrap();
         assert_eq!(&sub.circ_supply, expected_circ_sup);
-        assert_eq!(sub.nonce, expected_nonce);
+        assert_eq!(sub.topdown_nonce, expected_nonce);
         let from = IPCAddress::new(&self.net_name, &*TEST_BLS).unwrap();
         let to = IPCAddress::new(&id, &TEST_BLS).unwrap();
         assert_eq!(msg.from, from);
@@ -352,8 +340,6 @@ impl Harness {
         code: ExitCode,
         value: TokenAmount,
         expected_nonce: u64,
-        prev_meta: &Cid,
-        expected_fee: TokenAmount,
     ) -> Result<Cid, ActorError> {
         rt.set_caller(*ACCOUNT_ACTOR_CODE_ID, *releaser);
         rt.expect_validate_caller_type(SIG_TYPES.clone());
@@ -393,30 +379,14 @@ impl Harness {
         let to = IPCAddress::new(&parent, &TEST_BLS).unwrap();
         rt.set_epoch(0);
         let ch = st.get_window_checkpoint(rt.store(), 0).unwrap();
-        let chmeta = ch.cross_msgs().unwrap();
-        // check that fees are collected
-        assert_eq!(chmeta.fee, expected_fee);
 
-        let cross_reg = st.check_msg_registry.load(rt.store()).unwrap();
-        let meta = get_cross_msgs(&cross_reg, &chmeta.msgs_cid.cid())
-            .unwrap()
-            .unwrap();
-        let msg = meta.msgs[expected_nonce as usize].clone();
-
-        assert_eq!(meta.msgs.len(), (expected_nonce + 1) as usize);
+        let msg = ch.data.cross_msgs.cross_msgs.unwrap()[expected_nonce as usize].clone();
         assert_eq!(msg.msg.from, from);
         assert_eq!(msg.msg.to, to);
         assert_eq!(msg.msg.nonce, expected_nonce);
         assert_eq!(msg.msg.value, value);
 
-        if prev_meta != &Cid::default() {
-            match get_cross_msgs(&cross_reg, &prev_meta).unwrap() {
-                Some(_) => panic!("previous meta should have been removed"),
-                None => {}
-            }
-        }
-
-        Ok(chmeta.msgs_cid.cid())
+        Ok(Cid::default())
     }
 
     pub fn send_cross(
@@ -500,15 +470,8 @@ impl Harness {
             let to = IPCAddress::new(&dest, &to).unwrap();
             rt.set_epoch(0);
             let ch = st.get_window_checkpoint(rt.store(), 0).unwrap();
-            let chmeta = ch.cross_msgs();
 
-            let cross_reg = st.check_msg_registry.load(rt.store()).unwrap();
-            let meta = get_cross_msgs(&cross_reg, &chmeta.unwrap().msgs_cid.cid())
-                .unwrap()
-                .unwrap();
-            let msg = meta.msgs[nonce as usize].clone();
-
-            assert_eq!(meta.msgs.len(), (nonce + 1) as usize);
+            let msg = ch.data.cross_msgs.cross_msgs.unwrap()[nonce as usize].clone();
             assert_eq!(msg.msg.from, from);
             assert_eq!(msg.msg.to, to);
             assert_eq!(msg.msg.nonce, nonce);
@@ -521,7 +484,7 @@ impl Harness {
             let crossmsgs = sub.top_down_msgs.load(rt.store()).unwrap();
             let msg = get_topdown_msg(&crossmsgs, nonce - 1).unwrap().unwrap();
             assert_eq!(&sub.circ_supply, expected_circ_sup);
-            assert_eq!(sub.nonce, nonce);
+            assert_eq!(sub.topdown_nonce, nonce);
             let from = IPCAddress::new(&self.net_name, &SYSTEM_ACTOR_ADDR).unwrap();
             let to = IPCAddress::new(&dest, &to).unwrap();
             assert_eq!(msg.from, from);
@@ -531,39 +494,6 @@ impl Harness {
         }
 
         Ok(())
-    }
-
-    pub fn apply_cross_execute_only(
-        &self,
-        rt: &mut MockRuntime,
-        balance: TokenAmount,
-        params: StorableMsg,
-        append_expected_send: Option<Box<dyn Fn(&mut MockRuntime)>>,
-    ) -> Result<Option<Cid>, ActorError> {
-        rt.set_caller(*SYSTEM_ACTOR_CODE_ID, SYSTEM_ACTOR_ADDR);
-        rt.expect_validate_caller_addr(vec![SYSTEM_ACTOR_ADDR.clone()]);
-        rt.set_balance(balance);
-
-        if let Some(f) = append_expected_send {
-            f(rt)
-        }
-        let cid_blk = rt.call::<Actor>(
-            Method::ApplyMessage as MethodNum,
-            IpldBlock::serialize_cbor(&ApplyMsgParams {
-                cross_msg: CrossMsg {
-                    msg: params.clone(),
-                    wrapped: false,
-                },
-            })?,
-        )?;
-        rt.verify();
-
-        let cid: RawBytes = deserialize_block(cid_blk).unwrap();
-        if cid.is_empty() {
-            Ok(None)
-        } else {
-            Ok(Some(Cid::try_from(cid.to_vec().as_slice()).unwrap()))
-        }
     }
 
     pub fn propagate(
@@ -589,127 +519,6 @@ impl Harness {
         )?;
         rt.verify();
 
-        Ok(())
-    }
-
-    pub fn apply_cross_msg(
-        &self,
-        rt: &mut MockRuntime,
-        from: &IPCAddress,
-        to: &IPCAddress,
-        value: TokenAmount,
-        msg_nonce: u64,
-        td_nonce: u64,
-        code: ExitCode,
-    ) -> Result<(), ActorError> {
-        rt.set_caller(*SYSTEM_ACTOR_CODE_ID, SYSTEM_ACTOR_ADDR);
-        rt.expect_validate_caller_addr(vec![SYSTEM_ACTOR_ADDR.clone()]);
-
-        rt.set_balance(value.clone());
-        let params = StorableMsg {
-            to: to.clone(),
-            from: from.clone(),
-            method: METHOD_SEND,
-            value: value.clone(),
-            params: RawBytes::default(),
-            nonce: msg_nonce,
-        };
-
-        let st: State = rt.get_state();
-        let sto = params.to.subnet().unwrap();
-        let rto = to.raw_addr().unwrap();
-
-        // if expected code is not ok
-        if code != ExitCode::OK {
-            expect_abort(
-                code,
-                rt.call::<Actor>(
-                    Method::ApplyMessage as MethodNum,
-                    IpldBlock::serialize_cbor(&ApplyMsgParams {
-                        cross_msg: CrossMsg {
-                            msg: params.clone(),
-                            wrapped: false,
-                        },
-                    })
-                    .unwrap(),
-                ),
-            );
-            rt.verify();
-            return Ok(());
-        }
-
-        if params.apply_type(&st.network_name).unwrap() == IPCMsgType::BottomUp {
-            if sto == st.network_name {
-                rt.expect_send(
-                    rto,
-                    METHOD_SEND,
-                    None,
-                    params.value.clone(),
-                    None,
-                    ExitCode::OK,
-                );
-            }
-
-            rt.call::<Actor>(
-                Method::ApplyMessage as MethodNum,
-                IpldBlock::serialize_cbor(&ApplyMsgParams {
-                    cross_msg: CrossMsg {
-                        msg: params.clone(),
-                        wrapped: false,
-                    },
-                })
-                .unwrap(),
-            )?;
-            rt.verify();
-            let st: State = rt.get_state();
-            assert_eq!(st.applied_bottomup_nonce, msg_nonce);
-        } else {
-            if sto == st.network_name {
-                rt.expect_send(
-                    rto,
-                    METHOD_SEND,
-                    None,
-                    params.value.clone(),
-                    None,
-                    ExitCode::OK,
-                );
-            }
-            let cid_blk = rt.call::<Actor>(
-                Method::ApplyMessage as MethodNum,
-                IpldBlock::serialize_cbor(&ApplyMsgParams {
-                    cross_msg: CrossMsg {
-                        msg: params.clone(),
-                        wrapped: false,
-                    },
-                })
-                .unwrap(),
-            )?;
-            rt.verify();
-            let st: State = rt.get_state();
-
-            if sto != st.network_name {
-                let sub = self
-                    .get_subnet(rt, &sto.down(&self.net_name).unwrap())
-                    .unwrap();
-                assert_eq!(sub.nonce, td_nonce);
-                let crossmsgs = sub.top_down_msgs.load(rt.store()).unwrap();
-                let msg = get_topdown_msg(&crossmsgs, td_nonce).unwrap();
-                assert_eq!(msg.is_none(), true);
-
-                let cid: RawBytes = deserialize_block(cid_blk).unwrap();
-                let cid_ref = cid.to_vec();
-                let item = st
-                    .load_from_postbox(rt.store(), Cid::try_from(cid_ref.as_slice()).unwrap())
-                    .unwrap();
-                assert_eq!(item.owners, Some(vec![from.clone().raw_addr().unwrap()]));
-                let msg = item.cross_msg.msg;
-                assert_eq!(&msg.to, to);
-                assert_eq!(msg.nonce, msg_nonce);
-                assert_eq!(msg.value, value);
-            } else {
-                assert_eq!(st.applied_topdown_nonce, msg_nonce + 1);
-            }
-        }
         Ok(())
     }
 
@@ -783,34 +592,10 @@ pub fn has_cid<'a, T: TCidContent>(children: &'a Vec<TCid<T>>, cid: &Cid) -> boo
     children.iter().any(|c| c.cid() == *cid)
 }
 
-pub fn get_cross_msgs<'m, BS: Blockstore>(
-    registry: &'m Map<BS, CrossMsgs>,
-    cid: &Cid,
-) -> anyhow::Result<Option<&'m CrossMsgs>> {
-    registry
-        .get(&cid.to_bytes())
-        .map_err(|e| anyhow!("error getting fross messages: {:?}", e))
-}
-
 fn set_rt_value_with_cross_fee(rt: &mut MockRuntime, value: &TokenAmount) {
     rt.set_value(if value.clone() != TokenAmount::zero() {
         value.clone() + &*CROSS_MSG_FEE
     } else {
         value.clone()
     });
-}
-
-pub fn set_msg_meta(ch: &mut Checkpoint, rand: Vec<u8>, value: TokenAmount, fee: TokenAmount) {
-    let mh_code = Code::Blake2b256;
-    let c = TCid::from(Cid::new_v1(
-        fvm_ipld_encoding::DAG_CBOR,
-        mh_code.digest(&rand),
-    ));
-    let meta = CrossMsgMeta {
-        msgs_cid: c,
-        nonce: 0,
-        value,
-        fee,
-    };
-    ch.set_cross_msgs(meta);
 }
