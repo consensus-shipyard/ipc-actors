@@ -1,3 +1,5 @@
+use crate::vote::submission::VoteExecutionStatus;
+use crate::vote::{EpochVoteSubmissions, UniqueVote};
 use fil_actors_runtime::fvm_ipld_hamt::BytesKey;
 use fvm_ipld_blockstore::Blockstore;
 use fvm_shared::address::Address;
@@ -5,14 +7,12 @@ use fvm_shared::clock::ChainEpoch;
 use fvm_shared::econ::TokenAmount;
 use primitives::{TCid, THamt};
 use serde::de::DeserializeOwned;
-use serde::{Deserialize, Serialize};
+use serde::{Deserialize, Deserializer, Serialize, Serializer};
 use std::collections::BTreeSet;
-use crate::vote::{EpochVoteSubmissions, UniqueVote};
-use crate::vote::submission::VoteExecutionStatus;
 
 /// Handle the epoch voting
-#[derive(Serialize, Deserialize, PartialEq, Eq, Clone)]
-pub struct VotingInner<Vote> {
+#[derive(PartialEq, Eq, Clone)]
+pub struct Voting<Vote> {
     /// The epoch that the voting started
     pub genesis_epoch: ChainEpoch,
     /// How often the voting should be submitted by validators
@@ -27,12 +27,12 @@ pub struct VotingInner<Vote> {
     pub epoch_vote_submissions: TCid<THamt<ChainEpoch, EpochVoteSubmissions<Vote>>>,
 }
 
-impl<Vote: UniqueVote + DeserializeOwned + Serialize> VotingInner<Vote> {
+impl<Vote: UniqueVote + DeserializeOwned + Serialize> Voting<Vote> {
     pub fn new<BS: Blockstore>(
         store: &BS,
         genesis_epoch: ChainEpoch,
         period: ChainEpoch,
-    ) -> anyhow::Result<VotingInner<Vote>> {
+    ) -> anyhow::Result<Voting<Vote>> {
         Ok(Self {
             genesis_epoch,
             submission_period: period,
@@ -144,6 +144,36 @@ impl<Vote: UniqueVote + DeserializeOwned + Serialize> VotingInner<Vote> {
         })
     }
 
+    pub fn submission_period(&self) -> ChainEpoch {
+        self.submission_period
+    }
+
+    pub fn epoch_vote_submissions(&self) -> TCid<THamt<ChainEpoch, EpochVoteSubmissions<Vote>>> {
+        self.epoch_vote_submissions.clone()
+    }
+
+    pub fn last_voting_executed_epoch(&self) -> ChainEpoch {
+        self.last_voting_executed_epoch
+    }
+
+    pub fn executable_epoch_queue(&self) -> &Option<BTreeSet<ChainEpoch>> {
+        &self.executable_epoch_queue
+    }
+
+    pub fn genesis_epoch(&self) -> ChainEpoch {
+        self.genesis_epoch
+    }
+
+    /// Checks if the current epoch is votable
+    pub fn epoch_can_vote(&self, epoch: ChainEpoch) -> bool {
+        (epoch - self.genesis_epoch) % self.submission_period == 0
+    }
+
+    /// Checks if the epoch has already executed
+    pub fn is_epoch_executed(&self, epoch: ChainEpoch) -> bool {
+        self.last_voting_executed_epoch >= epoch
+    }
+
     fn insert_executable_epoch(&mut self, epoch: ChainEpoch) {
         match self.executable_epoch_queue.as_mut() {
             None => self.executable_epoch_queue = Some(BTreeSet::from([epoch])),
@@ -151,5 +181,134 @@ impl<Vote: UniqueVote + DeserializeOwned + Serialize> VotingInner<Vote> {
                 queue.insert(epoch);
             }
         }
+    }
+}
+
+impl<V: Serialize> Serialize for Voting<V> {
+    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
+    where
+        S: Serializer,
+    {
+        let inner = (
+            &self.genesis_epoch,
+            &self.submission_period,
+            &self.last_voting_executed_epoch,
+            &self.executable_epoch_queue,
+            &self.epoch_vote_submissions,
+        );
+        inner.serialize(serde_tuple::Serializer(serializer))
+    }
+}
+
+impl<'de, V: DeserializeOwned> Deserialize<'de> for Voting<V> {
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: Deserializer<'de>,
+    {
+        type Inner<V> = (
+            ChainEpoch,
+            ChainEpoch,
+            ChainEpoch,
+            Option<BTreeSet<ChainEpoch>>,
+            TCid<THamt<ChainEpoch, EpochVoteSubmissions<V>>>,
+        );
+        let inner = <Inner<V>>::deserialize(serde_tuple::Deserializer(deserializer))?;
+        Ok(Voting {
+            genesis_epoch: inner.0,
+            submission_period: inner.1,
+            last_voting_executed_epoch: inner.2,
+            executable_epoch_queue: inner.3,
+            epoch_vote_submissions: inner.4,
+        })
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use crate::vote::voting::Voting;
+    use crate::vote::EpochVoteSubmissions;
+    use crate::vote::{UniqueBytesKey, UniqueVote};
+    use fil_actors_runtime::builtin::HAMT_BIT_WIDTH;
+    use fil_actors_runtime::fvm_ipld_hamt::BytesKey;
+    use fil_actors_runtime::make_empty_map;
+    use fvm_ipld_blockstore::MemoryBlockstore;
+    use fvm_shared::clock::ChainEpoch;
+    use primitives::{TCid, THamt};
+    use serde_tuple::{Deserialize_tuple, Serialize_tuple};
+    use std::collections::BTreeSet;
+
+    #[derive(PartialEq, Clone, Deserialize_tuple, Serialize_tuple, Debug)]
+    struct DummyVote {
+        key: UniqueBytesKey,
+    }
+
+    impl UniqueVote for DummyVote {
+        fn unique_key(&self) -> anyhow::Result<UniqueBytesKey> {
+            Ok(self.key.clone())
+        }
+    }
+
+    #[test]
+    fn test_serialization() {
+        #[derive(Deserialize_tuple, Serialize_tuple, PartialEq, Clone, Debug)]
+        struct DummyVoting {
+            genesis_epoch: ChainEpoch,
+            submission_period: ChainEpoch,
+            last_voting_executed_epoch: ChainEpoch,
+            executable_epoch_queue: Option<BTreeSet<ChainEpoch>>,
+            epoch_vote_submissions: TCid<THamt<ChainEpoch, EpochVoteSubmissions<DummyVote>>>,
+        }
+
+        let dummy_voting = DummyVoting {
+            genesis_epoch: 1,
+            submission_period: 2,
+            last_voting_executed_epoch: 3,
+            executable_epoch_queue: Some(BTreeSet::from([1])),
+            epoch_vote_submissions: Default::default(),
+        };
+
+        let voting = Voting::<DummyVote> {
+            genesis_epoch: 1,
+            submission_period: 2,
+            last_voting_executed_epoch: 3,
+            executable_epoch_queue: Some(BTreeSet::from([1])),
+            epoch_vote_submissions: Default::default(),
+        };
+
+        let json1 = serde_json::to_string(&dummy_voting).unwrap();
+        let json2 = serde_json::to_string(&voting).unwrap();
+        assert_eq!(json1, json2);
+    }
+
+    #[test]
+    fn test_storage() {
+        let store = MemoryBlockstore::new();
+        let mut hamt = make_empty_map(&store, HAMT_BIT_WIDTH);
+
+        let voting = Voting::<DummyVote> {
+            genesis_epoch: 1,
+            submission_period: 2,
+            last_voting_executed_epoch: 3,
+            executable_epoch_queue: Some(BTreeSet::from([1])),
+            epoch_vote_submissions: Default::default(),
+        };
+
+        let key = BytesKey::from("1");
+        hamt.set(key.clone(), voting.clone()).unwrap();
+        let fetched = hamt.get(&key).unwrap().unwrap();
+        assert_eq!(fetched.genesis_epoch, voting.genesis_epoch);
+        assert_eq!(fetched.submission_period, voting.submission_period);
+        assert_eq!(
+            fetched.last_voting_executed_epoch,
+            voting.last_voting_executed_epoch
+        );
+        assert_eq!(
+            fetched.executable_epoch_queue,
+            voting.executable_epoch_queue
+        );
+        assert_eq!(
+            fetched.epoch_vote_submissions,
+            voting.epoch_vote_submissions
+        );
     }
 }

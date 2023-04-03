@@ -17,9 +17,9 @@ use serde_tuple::{Deserialize_tuple, Serialize_tuple};
 use std::str::FromStr;
 
 use crate::cron::Validators;
-use ipc_sdk::vote::Voting;
 use crate::CronCheckpoint;
 use ipc_sdk::subnet_id::SubnetID;
+use ipc_sdk::vote::Voting;
 use ipc_sdk::ValidatorSet;
 
 use super::checkpoint::*;

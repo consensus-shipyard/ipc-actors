@@ -1,33 +1,33 @@
 //! Contains the inner implementation of the voting process
 
 use crate::vote::{UniqueBytesKey, UniqueVote, RATIO_DENOMINATOR, RATIO_NUMERATOR};
-use fil_actors_runtime::fvm_ipld_hamt::BytesKey;
 use anyhow::anyhow;
+use fil_actors_runtime::fvm_ipld_hamt::BytesKey;
 use fvm_ipld_blockstore::Blockstore;
 use fvm_shared::address::Address;
 use fvm_shared::econ::TokenAmount;
 use num_traits::Zero;
 use primitives::{TCid, THamt};
 use serde::de::DeserializeOwned;
-use serde::{Deserialize, Serialize};
+use serde::{Deserialize, Deserializer, Serialize, Serializer};
 use std::ops::Mul;
 
 /// Track all the vote submissions of an epoch
-#[derive(Deserialize, Serialize, PartialEq, Eq, Clone)]
-pub struct EpochVoteSubmissionsInner<Vote> {
+#[derive(PartialEq, Eq, Clone, Debug)]
+pub struct EpochVoteSubmissions<Vote> {
     /// The summation of the weights from all validator submissions
-    total_submission_weight: TokenAmount,
+    pub total_submission_weight: TokenAmount,
     /// The most submitted unique key.
-    most_voted_key: Option<UniqueBytesKey>,
+    pub most_voted_key: Option<UniqueBytesKey>,
     /// The addresses of all the submitters
-    submitters: TCid<THamt<Address, ()>>,
+    pub submitters: TCid<THamt<Address, ()>>,
     /// The map to track the submission weight of each unique key
-    submission_weights: TCid<THamt<UniqueBytesKey, TokenAmount>>,
+    pub submission_weights: TCid<THamt<UniqueBytesKey, TokenAmount>>,
     /// The different cron checkpoints, with vote's unique key as key
-    submissions: TCid<THamt<UniqueBytesKey, Vote>>,
+    pub submissions: TCid<THamt<UniqueBytesKey, Vote>>,
 }
 
-impl<Vote: UniqueVote + DeserializeOwned + Serialize> EpochVoteSubmissionsInner<Vote> {
+impl<Vote: UniqueVote + DeserializeOwned + Serialize> EpochVoteSubmissions<Vote> {
     /// Update the total submitters, returns the latest total number of submitters
     fn update_submitters<BS: Blockstore>(
         &mut self,
@@ -163,9 +163,9 @@ pub enum VoteExecutionStatus {
     ConsensusReached,
 }
 
-impl<Vote: UniqueVote + DeserializeOwned + Serialize> EpochVoteSubmissionsInner<Vote> {
+impl<Vote: UniqueVote + DeserializeOwned + Serialize> EpochVoteSubmissions<Vote> {
     pub fn new<BS: Blockstore>(store: &BS) -> anyhow::Result<Self> {
-        Ok(EpochVoteSubmissionsInner {
+        Ok(EpochVoteSubmissions {
             total_submission_weight: TokenAmount::zero(),
             submitters: TCid::new_hamt(store)?,
             most_voted_key: None,
@@ -214,10 +214,7 @@ impl<Vote: UniqueVote + DeserializeOwned + Serialize> EpochVoteSubmissionsInner<
         }
     }
 
-    pub fn most_voted_weight<BS: Blockstore>(
-        &self,
-        store: &BS,
-    ) -> anyhow::Result<TokenAmount> {
+    pub fn most_voted_weight<BS: Blockstore>(&self, store: &BS) -> anyhow::Result<TokenAmount> {
         // we will only have one entry in the `most_submitted` set if more than 2/3 has reached
         if let Some(unique_key) = &self.most_voted_key {
             Ok(self
@@ -242,6 +239,7 @@ impl<Vote: UniqueVote + DeserializeOwned + Serialize> EpochVoteSubmissionsInner<
         &self,
         total_weight: TokenAmount,
         most_voted_weight: TokenAmount,
+        ratio: (),
     ) -> VoteExecutionStatus {
         let threshold = total_weight
             .clone()
@@ -293,16 +291,60 @@ impl<Vote: UniqueVote + DeserializeOwned + Serialize> EpochVoteSubmissionsInner<
     }
 }
 
+impl<V: Serialize> Serialize for EpochVoteSubmissions<V> {
+    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
+    where
+        S: Serializer,
+    {
+        let inner = (
+            &self.total_submission_weight,
+            &self.most_voted_key,
+            &self.submitters,
+            &self.submission_weights,
+            &self.submissions,
+        );
+        serde::Serialize::serialize(&inner, serde_tuple::Serializer(serializer))
+    }
+}
+
+impl<'de, V: DeserializeOwned> Deserialize<'de> for EpochVoteSubmissions<V> {
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: Deserializer<'de>,
+    {
+        type Inner<V> = (
+            TokenAmount,
+            Option<UniqueBytesKey>,
+            TCid<THamt<Address, ()>>,
+            TCid<THamt<UniqueBytesKey, TokenAmount>>,
+            TCid<THamt<UniqueBytesKey, V>>,
+        );
+        let inner = <Inner<V>>::deserialize(serde_tuple::Deserializer(deserializer))?;
+
+        Ok(EpochVoteSubmissions {
+            total_submission_weight: inner.0,
+            most_voted_key: inner.1,
+            submitters: inner.2,
+            submission_weights: inner.3,
+            submissions: inner.4,
+        })
+    }
+}
+
 #[cfg(test)]
 mod tests {
+    use crate::vote::submission::{EpochVoteSubmissions, VoteExecutionStatus};
+    use crate::vote::{UniqueBytesKey, UniqueVote};
+    use fil_actors_runtime::builtin::HAMT_BIT_WIDTH;
+    use fil_actors_runtime::fvm_ipld_hamt::BytesKey;
+    use fil_actors_runtime::make_empty_map;
     use fvm_ipld_blockstore::MemoryBlockstore;
     use fvm_shared::address::Address;
     use fvm_shared::econ::TokenAmount;
-    use serde::{Deserialize, Serialize};
-    use crate::vote::{UniqueBytesKey, UniqueVote};
-    use crate::vote::submission::{EpochVoteSubmissionsInner, VoteExecutionStatus};
+    use primitives::{TCid, THamt};
+    use serde_tuple::{Deserialize_tuple, Serialize_tuple};
 
-    #[derive(PartialEq, Clone, Serialize, Deserialize, Debug)]
+    #[derive(PartialEq, Clone, Deserialize_tuple, Serialize_tuple, Debug)]
     struct DummyVote {
         key: UniqueBytesKey,
     }
@@ -314,16 +356,74 @@ mod tests {
     }
 
     #[test]
+    fn test_serialization() {
+        #[derive(Deserialize_tuple, Serialize_tuple, PartialEq, Eq, Clone, Debug)]
+        struct DummySubmissions {
+            total_submission_weight: TokenAmount,
+            most_voted_key: Option<UniqueBytesKey>,
+            submitters: TCid<THamt<Address, ()>>,
+            submission_weights: TCid<THamt<UniqueBytesKey, TokenAmount>>,
+            submissions: TCid<THamt<UniqueBytesKey, DummyVote>>,
+        }
+
+        let dummy_submissions = DummySubmissions {
+            total_submission_weight: TokenAmount::from_atto(100),
+            most_voted_key: Some(vec![1, 2, 3]),
+            submitters: Default::default(),
+            submission_weights: Default::default(),
+            submissions: Default::default(),
+        };
+
+        let submissions = EpochVoteSubmissions::<DummyVote> {
+            total_submission_weight: TokenAmount::from_atto(100),
+            most_voted_key: Some(vec![1, 2, 3]),
+            submitters: Default::default(),
+            submission_weights: Default::default(),
+            submissions: Default::default(),
+        };
+
+        let json1 = serde_json::to_string(&dummy_submissions).unwrap();
+        let json2 = serde_json::to_string(&submissions).unwrap();
+        assert_eq!(json1, json2);
+    }
+
+    #[test]
+    fn test_storage() {
+        let store = MemoryBlockstore::new();
+        let mut hamt = make_empty_map(&store, HAMT_BIT_WIDTH);
+
+        let submissions = EpochVoteSubmissions::<DummyVote> {
+            total_submission_weight: TokenAmount::from_atto(100),
+            most_voted_key: Some(vec![1, 2, 3, 4]),
+            submitters: Default::default(),
+            submission_weights: Default::default(),
+            submissions: Default::default(),
+        };
+
+        let key = BytesKey::from("1");
+        hamt.set(key.clone(), submissions.clone()).unwrap();
+        let fetched = hamt.get(&key).unwrap().unwrap();
+        assert_eq!(
+            fetched.total_submission_weight,
+            submissions.total_submission_weight
+        );
+        assert_eq!(fetched.most_voted_key, submissions.most_voted_key);
+        assert_eq!(fetched.submitters, submissions.submitters);
+        assert_eq!(fetched.submission_weights, submissions.submission_weights);
+        assert_eq!(fetched.submissions, submissions.submissions);
+    }
+
+    #[test]
     fn test_new_works() {
         let store = MemoryBlockstore::new();
-        let r = EpochVoteSubmissionsInner::<DummyVote>::new(&store);
+        let r = EpochVoteSubmissions::<DummyVote>::new(&store);
         assert!(r.is_ok());
     }
 
     #[test]
     fn test_update_submitters() {
         let store = MemoryBlockstore::new();
-        let mut submission = EpochVoteSubmissionsInner::<DummyVote>::new(&store).unwrap();
+        let mut submission = EpochVoteSubmissions::<DummyVote>::new(&store).unwrap();
 
         let submitter = Address::new_id(0);
         submission.update_submitters(&store, submitter).unwrap();
@@ -336,7 +436,7 @@ mod tests {
     #[test]
     fn test_insert_checkpoint() {
         let store = MemoryBlockstore::new();
-        let mut submission = EpochVoteSubmissionsInner::<DummyVote>::new(&store).unwrap();
+        let mut submission = EpochVoteSubmissions::<DummyVote>::new(&store).unwrap();
 
         let checkpoint = DummyVote { key: vec![0] };
 
@@ -355,7 +455,7 @@ mod tests {
     #[test]
     fn test_update_submission_count() {
         let store = MemoryBlockstore::new();
-        let mut submission = EpochVoteSubmissionsInner::<DummyVote>::new(&store).unwrap();
+        let mut submission = EpochVoteSubmissions::<DummyVote>::new(&store).unwrap();
 
         let hash1 = vec![1, 2, 1];
         let hash2 = vec![1, 2, 2];
@@ -436,7 +536,7 @@ mod tests {
     #[test]
     fn test_derive_execution_status() {
         let store = MemoryBlockstore::new();
-        let mut s = EpochVoteSubmissionsInner::<DummyVote>::new(&store).unwrap();
+        let mut s = EpochVoteSubmissions::<DummyVote>::new(&store).unwrap();
 
         let total_validators = TokenAmount::from_atto(35);
         let total_submissions = TokenAmount::from_atto(10);
