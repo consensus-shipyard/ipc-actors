@@ -1,6 +1,4 @@
-use crate::vote::submission::VoteExecutionStatus;
-use crate::vote::{EpochVoteSubmissions, UniqueVote};
-use crate::BytesKey;
+use fil_actors_runtime::fvm_ipld_hamt::BytesKey;
 use fvm_ipld_blockstore::Blockstore;
 use fvm_shared::address::Address;
 use fvm_shared::clock::ChainEpoch;
@@ -9,10 +7,12 @@ use primitives::{TCid, THamt};
 use serde::de::DeserializeOwned;
 use serde::{Deserialize, Serialize};
 use std::collections::BTreeSet;
+use crate::vote::{EpochVoteSubmissions, UniqueVote};
+use crate::vote::submission::VoteExecutionStatus;
 
 /// Handle the epoch voting
 #[derive(Serialize, Deserialize, PartialEq, Eq, Clone)]
-pub(crate) struct VotingInner<Vote> {
+pub struct VotingInner<Vote> {
     /// The epoch that the voting started
     pub genesis_epoch: ChainEpoch,
     /// How often the voting should be submitted by validators
@@ -28,7 +28,7 @@ pub(crate) struct VotingInner<Vote> {
 }
 
 impl<Vote: UniqueVote + DeserializeOwned + Serialize> VotingInner<Vote> {
-    pub(crate) fn new<BS: Blockstore>(
+    pub fn new<BS: Blockstore>(
         store: &BS,
         genesis_epoch: ChainEpoch,
         period: ChainEpoch,
@@ -42,7 +42,7 @@ impl<Vote: UniqueVote + DeserializeOwned + Serialize> VotingInner<Vote> {
         })
     }
 
-    pub(crate) fn submit_vote<BS: Blockstore>(
+    pub fn submit_vote<BS: Blockstore>(
         &mut self,
         store: &BS,
         vote: Vote,
@@ -101,7 +101,7 @@ impl<Vote: UniqueVote + DeserializeOwned + Serialize> VotingInner<Vote> {
         Ok(messages)
     }
 
-    pub(crate) fn dump_next_executable_vote<BS: Blockstore>(
+    pub fn dump_next_executable_vote<BS: Blockstore>(
         &mut self,
         store: &BS,
     ) -> anyhow::Result<Option<Vote>> {

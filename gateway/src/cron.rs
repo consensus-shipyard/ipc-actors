@@ -1,4 +1,4 @@
-use crate::vote::{UniqueBytesKey, UniqueVote};
+use ipc_sdk::vote::{UniqueBytesKey, UniqueVote};
 use crate::{ensure_message_sorted, StorableMsg};
 use cid::multihash::Code;
 use cid::multihash::MultihashDigest;

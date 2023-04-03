@@ -1,7 +1,6 @@
 mod submission;
 mod voting;
 
-use crate::vote::voting::VotingInner;
 use fvm_ipld_blockstore::Blockstore;
 use fvm_shared::address::Address;
 use fvm_shared::clock::ChainEpoch;
@@ -12,6 +11,7 @@ use serde::de::DeserializeOwned;
 use serde::{Deserialize, Deserializer, Serialize, Serializer};
 use std::collections::BTreeSet;
 use submission::{EpochVoteSubmissionsInner, VoteExecutionStatus};
+use crate::vote::voting::VotingInner;
 
 lazy_static! {
     pub static ref RATIO_NUMERATOR: u64 = 2;

@@ -11,6 +11,11 @@ keywords = ["filecoin", "web3", "wasm", "ipc"]
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
 [dependencies]
+anyhow = "1.0.56"
+log = "0.4.17"
+primitives = { git = "https://github.com/consensus-shipyard/fvm-utils" }
+num-traits = "0.2.14"
+fvm_ipld_blockstore = "0.1.1"
 fvm_ipld_encoding = "0.3.3"
 lazy_static = "1.4.0"
 serde_tuple = "0.5"

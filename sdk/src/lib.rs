@@ -1,3 +1,5 @@
+#![feature(map_first_last)] // For some simpler syntax for if let Some conditions
+
 use fvm_ipld_encoding::tuple::{Deserialize_tuple, Serialize_tuple};
 use fvm_shared::address::Address;
 use fvm_shared::econ::TokenAmount;
@@ -5,6 +7,7 @@ use fvm_shared::econ::TokenAmount;
 pub mod address;
 pub mod error;
 pub mod subnet_id;
+pub mod vote;
 
 pub mod account {
     /// Public key account actor method.

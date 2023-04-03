@@ -1,7 +1,7 @@
 //! Contains the inner implementation of the voting process
 
 use crate::vote::{UniqueBytesKey, UniqueVote, RATIO_DENOMINATOR, RATIO_NUMERATOR};
-use crate::BytesKey;
+use fil_actors_runtime::fvm_ipld_hamt::BytesKey;
 use anyhow::anyhow;
 use fvm_ipld_blockstore::Blockstore;
 use fvm_shared::address::Address;
@@ -14,7 +14,7 @@ use std::ops::Mul;
 
 /// Track all the vote submissions of an epoch
 #[derive(Deserialize, Serialize, PartialEq, Eq, Clone)]
-pub(crate) struct EpochVoteSubmissionsInner<Vote> {
+pub struct EpochVoteSubmissionsInner<Vote> {
     /// The summation of the weights from all validator submissions
     total_submission_weight: TokenAmount,
     /// The most submitted unique key.
@@ -164,7 +164,7 @@ pub enum VoteExecutionStatus {
 }
 
 impl<Vote: UniqueVote + DeserializeOwned + Serialize> EpochVoteSubmissionsInner<Vote> {
-    pub(crate) fn new<BS: Blockstore>(store: &BS) -> anyhow::Result<Self> {
+    pub fn new<BS: Blockstore>(store: &BS) -> anyhow::Result<Self> {
         Ok(EpochVoteSubmissionsInner {
             total_submission_weight: TokenAmount::zero(),
             submitters: TCid::new_hamt(store)?,
@@ -175,7 +175,7 @@ impl<Vote: UniqueVote + DeserializeOwned + Serialize> EpochVoteSubmissionsInner<
     }
 
     /// Abort the current round and reset the submission data.
-    pub(crate) fn abort<BS: Blockstore>(&mut self, store: &BS) -> anyhow::Result<()> {
+    pub fn abort<BS: Blockstore>(&mut self, store: &BS) -> anyhow::Result<()> {
         self.total_submission_weight = TokenAmount::zero();
         self.submitters = TCid::new_hamt(store)?;
         self.most_voted_key = None;
@@ -189,7 +189,7 @@ impl<Vote: UniqueVote + DeserializeOwned + Serialize> EpochVoteSubmissionsInner<
     }
 
     /// Submit a cron checkpoint as the submitter.
-    pub(crate) fn submit<BS: Blockstore>(
+    pub fn submit<BS: Blockstore>(
         &mut self,
         store: &BS,
         submitter: Address,
@@ -202,7 +202,7 @@ impl<Vote: UniqueVote + DeserializeOwned + Serialize> EpochVoteSubmissionsInner<
         self.update_submission_weight(store, checkpoint_hash, submitter_weight)
     }
 
-    pub(crate) fn load_most_voted_submission<BS: Blockstore>(
+    pub fn load_most_voted_submission<BS: Blockstore>(
         &self,
         store: &BS,
     ) -> anyhow::Result<Option<Vote>> {
@@ -214,7 +214,7 @@ impl<Vote: UniqueVote + DeserializeOwned + Serialize> EpochVoteSubmissionsInner<
         }
     }
 
-    pub(crate) fn most_voted_weight<BS: Blockstore>(
+    pub fn most_voted_weight<BS: Blockstore>(
         &self,
         store: &BS,
     ) -> anyhow::Result<TokenAmount> {
@@ -228,7 +228,7 @@ impl<Vote: UniqueVote + DeserializeOwned + Serialize> EpochVoteSubmissionsInner<
         }
     }
 
-    pub(crate) fn get_submission<BS: Blockstore>(
+    pub fn get_submission<BS: Blockstore>(
         &self,
         store: &BS,
         unique_key: &UniqueBytesKey,
@@ -238,7 +238,7 @@ impl<Vote: UniqueVote + DeserializeOwned + Serialize> EpochVoteSubmissionsInner<
         Ok(hamt.get(&key)?.cloned())
     }
 
-    pub(crate) fn derive_execution_status(
+    pub fn derive_execution_status(
         &self,
         total_weight: TokenAmount,
         most_voted_weight: TokenAmount,
@@ -282,7 +282,7 @@ impl<Vote: UniqueVote + DeserializeOwned + Serialize> EpochVoteSubmissionsInner<
     }
 
     /// Checks if the submitter has already submitted the checkpoint.
-    pub(crate) fn has_submitted<BS: Blockstore>(
+    pub fn has_submitted<BS: Blockstore>(
         &self,
         store: &BS,
         submitter: &Address,
@@ -295,12 +295,12 @@ impl<Vote: UniqueVote + DeserializeOwned + Serialize> EpochVoteSubmissionsInner<
 
 #[cfg(test)]
 mod tests {
-    use crate::vote::submission::{EpochVoteSubmissionsInner, VoteExecutionStatus};
-    use crate::vote::{UniqueBytesKey, UniqueVote};
     use fvm_ipld_blockstore::MemoryBlockstore;
     use fvm_shared::address::Address;
     use fvm_shared::econ::TokenAmount;
     use serde::{Deserialize, Serialize};
+    use crate::vote::{UniqueBytesKey, UniqueVote};
+    use crate::vote::submission::{EpochVoteSubmissionsInner, VoteExecutionStatus};
 
     #[derive(PartialEq, Clone, Serialize, Deserialize, Debug)]
     struct DummyVote {

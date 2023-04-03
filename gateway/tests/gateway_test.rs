@@ -11,7 +11,7 @@ use fvm_shared::econ::TokenAmount;
 use fvm_shared::error::ExitCode;
 use fvm_shared::METHOD_SEND;
 use ipc_gateway::checkpoint::BatchCrossMsgs;
-use ipc_gateway::vote::{EpochVoteSubmissions, UniqueVote};
+use ipc_sdk::vote::{EpochVoteSubmissions, UniqueVote};
 use ipc_gateway::Status::{Active, Inactive};
 use ipc_gateway::{
     get_topdown_msg, Checkpoint, CronCheckpoint, CrossMsg, IPCAddress, PostBoxItem, State,

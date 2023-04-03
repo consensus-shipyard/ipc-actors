@@ -4,7 +4,7 @@
 extern crate core;
 
 pub use self::checkpoint::{Checkpoint, CrossMsgMeta};
-pub use self::cross::{is_bottomup, CrossMsg, CrossMsgs, IPCMsgType, StorableMsg};
+pub use self::cross::{CrossMsg, CrossMsgs, IPCMsgType, is_bottomup, StorableMsg};
 pub use self::state::*;
 pub use self::subnet::*;
 pub use self::types::*;
@@ -13,18 +13,17 @@ use cross::{burn_bu_funds, cross_msg_side_effects, distribute_crossmsg_fee};
 use fil_actors_runtime::runtime::fvm::resolve_secp_bls;
 use fil_actors_runtime::runtime::{ActorCode, Runtime};
 use fil_actors_runtime::{
-    actor_dispatch, actor_error, restrict_internal_api, ActorDowncast, ActorError,
-    CALLER_TYPES_SIGNABLE, INIT_ACTOR_ADDR, SYSTEM_ACTOR_ADDR,
+    actor_dispatch, actor_error, ActorDowncast, ActorError, CALLER_TYPES_SIGNABLE,
+    INIT_ACTOR_ADDR, restrict_internal_api, SYSTEM_ACTOR_ADDR,
 };
 use fvm_ipld_encoding::RawBytes;
-use fvm_ipld_hamt::BytesKey;
 use fvm_shared::address::Address;
 use fvm_shared::bigint::Zero;
 use fvm_shared::clock::ChainEpoch;
 use fvm_shared::econ::TokenAmount;
 use fvm_shared::error::ExitCode;
 use fvm_shared::METHOD_SEND;
-use fvm_shared::{MethodNum, METHOD_CONSTRUCTOR};
+use fvm_shared::{METHOD_CONSTRUCTOR, MethodNum};
 pub use ipc_sdk::address::IPCAddress;
 pub use ipc_sdk::subnet_id::SubnetID;
 use ipc_sdk::ValidatorSet;
@@ -44,7 +43,6 @@ pub mod ext;
 mod state;
 pub mod subnet;
 mod types;
-pub mod vote;
 
 // TODO: make this into constructor!
 lazy_static! {
