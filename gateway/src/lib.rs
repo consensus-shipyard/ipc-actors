@@ -31,7 +31,6 @@ use ipc_sdk::ValidatorSet;
 use lazy_static::lazy_static;
 use num_derive::FromPrimitive;
 use num_traits::FromPrimitive;
-use primitives::TCid;
 
 #[cfg(feature = "fil-gateway-actor")]
 fil_actors_runtime::wasm_trampoline!(Actor);
@@ -704,7 +703,15 @@ impl Actor {
 
             let epoch = checkpoint.epoch;
             let total_weight = st.validators.total_weight.clone();
-            st.cron_checkpoint_voting.submit_vote(store, checkpoint, epoch, submitter, submitter_weight, total_weight)
+            st.cron_checkpoint_voting
+                .submit_vote(
+                    store,
+                    checkpoint,
+                    epoch,
+                    submitter,
+                    submitter_weight,
+                    total_weight,
+                )
                 .map_err(|e| {
                     log::error!(
                         "encountered error processing submit cron checkpoint: {:?}",
@@ -954,7 +961,8 @@ impl Actor {
     /// validator has already voted, no one can vote again to trigger the execution. Epoch 20 is stuck.
     fn execute_next_cron_epoch(rt: &mut impl Runtime) -> Result<(), ActorError> {
         let checkpoint = rt.transaction(|st: &mut State, rt| {
-            st.cron_checkpoint_voting.dump_next_executable_vote(rt.store())
+            st.cron_checkpoint_voting
+                .dump_next_executable_vote(rt.store())
                 .map_err(|e| {
                     log::error!(
                         "encountered error processing submit cron checkpoint: {:?}",

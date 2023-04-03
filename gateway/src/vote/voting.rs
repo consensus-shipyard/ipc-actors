@@ -1,5 +1,6 @@
-use crate::{BytesKey};
-use anyhow::anyhow;
+use crate::vote::submission::VoteExecutionStatus;
+use crate::vote::{EpochVoteSubmissions, UniqueVote};
+use crate::BytesKey;
 use fvm_ipld_blockstore::Blockstore;
 use fvm_shared::address::Address;
 use fvm_shared::clock::ChainEpoch;
@@ -8,8 +9,6 @@ use primitives::{TCid, THamt};
 use serde::de::DeserializeOwned;
 use serde::{Deserialize, Serialize};
 use std::collections::BTreeSet;
-use crate::vote::{EpochVoteSubmissions, UniqueVote};
-use crate::vote::submission::VoteExecutionStatus;
 
 /// Handle the epoch voting
 #[derive(Serialize, Deserialize, PartialEq, Eq, Clone)]
@@ -104,7 +103,7 @@ impl<Vote: UniqueVote + DeserializeOwned + Serialize> VotingInner<Vote> {
 
     pub(crate) fn dump_next_executable_vote<BS: Blockstore>(
         &mut self,
-        store: &BS
+        store: &BS,
     ) -> anyhow::Result<Option<Vote>> {
         let epoch_queue = match self.executable_epoch_queue.as_mut() {
             None => return Ok(None),
@@ -129,23 +128,20 @@ impl<Vote: UniqueVote + DeserializeOwned + Serialize> VotingInner<Vote> {
             self.executable_epoch_queue = None;
         }
 
-        self.epoch_vote_submissions
-            .modify(store, |hamt| {
-                let epoch_key = BytesKey::from(epoch.to_be_bytes().as_slice());
-                let submission = match hamt.get(&epoch_key)? {
-                    Some(s) => s,
-                    None => unreachable!("Submission in epoch not found, report bug"),
-                };
+        self.epoch_vote_submissions.modify(store, |hamt| {
+            let epoch_key = BytesKey::from(epoch.to_be_bytes().as_slice());
+            let submission = match hamt.get(&epoch_key)? {
+                Some(s) => s,
+                None => unreachable!("Submission in epoch not found, report bug"),
+            };
 
-                self.last_voting_executed_epoch = epoch;
+            self.last_voting_executed_epoch = epoch;
 
-                let vote = submission
-                    .load_most_voted_submission(store)?
-                    .unwrap();
-                hamt.delete(&epoch_key)?;
+            let vote = submission.load_most_voted_submission(store)?.unwrap();
+            hamt.delete(&epoch_key)?;
 
-                Ok(Some(vote))
-            })
+            Ok(Some(vote))
+        })
     }
 
     fn insert_executable_epoch(&mut self, epoch: ChainEpoch) {

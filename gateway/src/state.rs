@@ -14,12 +14,11 @@ use lazy_static::lazy_static;
 use num_traits::Zero;
 use primitives::{TCid, THamt};
 use serde_tuple::{Deserialize_tuple, Serialize_tuple};
-use std::collections::BTreeSet;
 use std::str::FromStr;
 
 use crate::cron::Validators;
 use crate::vote::Voting;
-use crate::{CronCheckpoint};
+use crate::CronCheckpoint;
 use ipc_sdk::subnet_id::SubnetID;
 use ipc_sdk::ValidatorSet;
 

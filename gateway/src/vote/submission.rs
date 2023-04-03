@@ -1,7 +1,7 @@
 //! Contains the inner implementation of the voting process
 
-use crate::vote::{UniqueBytesKey, RATIO_DENOMINATOR, RATIO_NUMERATOR, UniqueVote};
-use crate::{BytesKey};
+use crate::vote::{UniqueBytesKey, UniqueVote, RATIO_DENOMINATOR, RATIO_NUMERATOR};
+use crate::BytesKey;
 use anyhow::anyhow;
 use fvm_ipld_blockstore::Blockstore;
 use fvm_shared::address::Address;

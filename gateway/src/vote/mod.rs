@@ -2,21 +2,15 @@ mod submission;
 mod voting;
 
 use crate::vote::voting::VotingInner;
-use anyhow::anyhow;
 use fvm_ipld_blockstore::Blockstore;
-use fvm_ipld_encoding::tuple::{Deserialize_tuple, Serialize_tuple};
-use fvm_ipld_hamt::BytesKey;
 use fvm_shared::address::Address;
 use fvm_shared::clock::ChainEpoch;
 use fvm_shared::econ::TokenAmount;
 use lazy_static::lazy_static;
-use num_traits::Zero;
 use primitives::{TCid, THamt};
 use serde::de::DeserializeOwned;
 use serde::{Deserialize, Deserializer, Serialize, Serializer};
 use std::collections::BTreeSet;
-use std::marker::PhantomData;
-use std::ops::Mul;
 use submission::{EpochVoteSubmissionsInner, VoteExecutionStatus};
 
 lazy_static! {
@@ -81,7 +75,7 @@ impl<Vote: UniqueVote + DeserializeOwned + Serialize> Voting<Vote> {
 
     pub fn dump_next_executable_vote<BS: Blockstore>(
         &mut self,
-        store: &BS
+        store: &BS,
     ) -> anyhow::Result<Option<Vote>> {
         self.inner.dump_next_executable_vote(store)
     }
@@ -172,6 +166,10 @@ impl<Vote: UniqueVote + DeserializeOwned + Serialize> EpochVoteSubmissions<Vote>
         self.inner.has_submitted(store, submitter)
     }
 }
+
+// TODO: need manually impl the serialization because Serialize_tuple and Deserialize_tuple is causing
+// TODO: generic type constraint not picking up. Directly impl serialize and deserialize without using
+// TODO: inner types.
 
 impl<V: Serialize> Serialize for EpochVoteSubmissions<V> {
     fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
