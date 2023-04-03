@@ -239,7 +239,6 @@ impl<Vote: UniqueVote + DeserializeOwned + Serialize> EpochVoteSubmissions<Vote>
         &self,
         total_weight: TokenAmount,
         most_voted_weight: TokenAmount,
-        ratio: (),
     ) -> VoteExecutionStatus {
         let threshold = total_weight
             .clone()
