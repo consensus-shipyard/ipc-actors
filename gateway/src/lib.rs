@@ -696,7 +696,7 @@ impl Actor {
 
         let to_execute = rt.transaction(|st: &mut State, rt| {
             let submitter = rt.message().caller();
-            let submitter_weight = Self::validate_submitter(st, checkpoint.epoch, &submitter)?;
+            let submitter_weight = Self::validate_submitter(st, &submitter)?;
             let store = rt.store();
 
             let epoch = checkpoint.epoch;
@@ -823,19 +823,8 @@ impl Actor {
     /// Validate the submitter's submission against the state, also returns the weight of the validator
     fn validate_submitter(
         st: &State,
-        epoch: ChainEpoch,
         submitter: &Address,
     ) -> Result<TokenAmount, ActorError> {
-        // first we check the epoch is the correct one, we process only it's multiple
-        // of cron_period since genesis_epoch
-        if !st.cron_checkpoint_voting.epoch_can_vote(epoch) {
-            return Err(actor_error!(illegal_argument, "epoch not allowed"));
-        }
-
-        if st.cron_checkpoint_voting.is_epoch_executed(epoch) {
-            return Err(actor_error!(illegal_argument, "epoch already executed"));
-        }
-
         st.validators
             .get_validator_weight(submitter)
             .ok_or_else(|| actor_error!(illegal_argument, "caller not validator"))
@@ -960,7 +949,7 @@ impl Actor {
     fn execute_next_cron_epoch(rt: &mut impl Runtime) -> Result<(), ActorError> {
         let checkpoint = rt.transaction(|st: &mut State, rt| {
             st.cron_checkpoint_voting
-                .dump_next_executable_vote(rt.store())
+                .try_next_executable_vote(rt.store())
                 .map_err(|e| {
                     log::error!(
                         "encountered error processing submit cron checkpoint: {:?}",

@@ -1,6 +1,6 @@
 //! Contains the inner implementation of the voting process
 
-use crate::vote::{UniqueBytesKey, UniqueVote, RATIO_DENOMINATOR, RATIO_NUMERATOR};
+use crate::vote::{UniqueBytesKey, UniqueVote};
 use anyhow::anyhow;
 use fil_actors_runtime::fvm_ipld_hamt::BytesKey;
 use fvm_ipld_blockstore::Blockstore;
@@ -11,6 +11,8 @@ use primitives::{TCid, THamt};
 use serde::de::DeserializeOwned;
 use serde::{Deserialize, Deserializer, Serialize, Serializer};
 use std::ops::Mul;
+
+pub type Ratio = (u64, u64);
 
 /// Track all the vote submissions of an epoch
 #[derive(PartialEq, Eq, Clone, Debug)]
@@ -239,11 +241,12 @@ impl<Vote: UniqueVote + DeserializeOwned + Serialize> EpochVoteSubmissions<Vote>
         &self,
         total_weight: TokenAmount,
         most_voted_weight: TokenAmount,
+        ratio: &Ratio,
     ) -> VoteExecutionStatus {
         let threshold = total_weight
             .clone()
-            .mul(*RATIO_NUMERATOR)
-            .div_floor(*RATIO_DENOMINATOR);
+            .mul(ratio.0)
+            .div_floor(ratio.1);
 
         // note that we require THRESHOLD to be surpassed, equality is not enough!
         if self.total_submission_weight <= threshold {
@@ -543,7 +546,7 @@ mod tests {
 
         s.total_submission_weight = total_submissions;
         assert_eq!(
-            s.derive_execution_status(total_validators, most_voted_count),
+            s.derive_execution_status(total_validators, most_voted_count, &(2, 3)),
             VoteExecutionStatus::ThresholdNotReached,
         );
 
@@ -558,7 +561,7 @@ mod tests {
         let most_voted_count = TokenAmount::from_atto(2);
         s.total_submission_weight = total_submissions.clone();
         assert_eq!(
-            s.derive_execution_status(total_submissions.clone(), most_voted_count),
+            s.derive_execution_status(total_submissions.clone(), most_voted_count, &(2, 3)),
             VoteExecutionStatus::RoundAbort,
         );
 
@@ -568,7 +571,7 @@ mod tests {
         let most_voted_count = TokenAmount::from_atto(4);
         s.total_submission_weight = total_submissions;
         assert_eq!(
-            s.derive_execution_status(total_validators.clone(), most_voted_count),
+            s.derive_execution_status(total_validators.clone(), most_voted_count, &(2, 3)),
             VoteExecutionStatus::ConsensusReached,
         );
 
@@ -580,7 +583,7 @@ mod tests {
         let most_voted_count = TokenAmount::from_atto(3);
         s.total_submission_weight = total_submissions;
         assert_eq!(
-            s.derive_execution_status(total_validators, most_voted_count),
+            s.derive_execution_status(total_validators, most_voted_count, &(2, 3)),
             VoteExecutionStatus::ReachingConsensus,
         );
     }

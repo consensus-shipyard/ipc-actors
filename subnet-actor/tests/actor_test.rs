@@ -727,12 +727,6 @@ mod test {
         let sender = miners.get(0).cloned().unwrap();
         send_checkpoint(&mut runtime, sender.clone(), &checkpoint_0, false).unwrap();
 
-        let st: State = runtime.get_state();
-        let votes = st
-            .get_votes(runtime.store(), &checkpoint_0.cid())
-            .unwrap()
-            .unwrap();
-        assert_eq!(votes.validators, vec![sender.clone()]);
         expect_abort(
             ExitCode::USR_ILLEGAL_STATE,
             send_checkpoint(&mut runtime, sender.clone(), &checkpoint_0, false),
@@ -740,13 +734,12 @@ mod test {
 
         // Send second checkpoint
         let sender2 = miners.get(1).cloned().unwrap();
+
+        // trigger commit
         send_checkpoint(&mut runtime, sender2.clone(), &checkpoint_0, true).unwrap();
 
-        let st: State = runtime.get_state();
-        let votes = st.get_votes(runtime.store(), &checkpoint_0.cid()).unwrap();
-        assert_eq!(votes.is_none(), true);
-
-        // Trying to submit an already committed checkpoint should fail
+        // Trying to submit an already committed checkpoint should fail, i.e. if the epoch is already
+        // committed, then we should not allow voting again
         let sender2 = miners.get(2).cloned().unwrap();
         runtime.set_caller(*ACCOUNT_ACTOR_CODE_ID, sender2.clone());
         runtime.expect_validate_caller_type(SIG_TYPES.clone());
@@ -758,7 +751,8 @@ mod test {
             ),
         );
 
-        // If the epoch is wrong in the next checkpoint, it should be rejected.
+        // If the epoch is wrong in the next checkpoint, it should be rejected. Not multiple of the
+        // execution period.
         let prev_cid = checkpoint_0.cid();
         let mut checkpoint_1 = Checkpoint::new(subnet.clone(), epoch + 1);
         checkpoint_1.data.prev_check = TCid::from(prev_cid.clone());
@@ -772,21 +766,22 @@ mod test {
             ),
         );
 
-        // Submit checkpoint with invalid previous cid
-        let epoch = 20;
-        let mut checkpoint_3 = Checkpoint::new(subnet.clone(), epoch);
-        checkpoint_3.data.prev_check = TCid::from(Cid::default());
-        runtime.set_caller(*ACCOUNT_ACTOR_CODE_ID, sender.clone());
-        runtime.expect_validate_caller_type(SIG_TYPES.clone());
-        expect_abort(
-            ExitCode::USR_ILLEGAL_STATE,
-            runtime.call::<Actor>(
-                Method::SubmitCheckpoint as u64,
-                IpldBlock::serialize_cbor(&checkpoint_3).unwrap(),
-            ),
-        );
+        // NO LONGER NEEDED, REPLACE WITH EXECUTION WITH FAILED PREVIOUS CHECKPOINT
+        // // Submit checkpoint with invalid previous cid
+        // let epoch = 20;
+        // let mut checkpoint_3 = Checkpoint::new(subnet.clone(), epoch);
+        // checkpoint_3.data.prev_check = TCid::from(Cid::default());
+        // runtime.set_caller(*ACCOUNT_ACTOR_CODE_ID, sender.clone());
+        // runtime.expect_validate_caller_type(SIG_TYPES.clone());
+        // expect_abort(
+        //     ExitCode::USR_ILLEGAL_STATE,
+        //     runtime.call::<Actor>(
+        //         Method::SubmitCheckpoint as u64,
+        //         IpldBlock::serialize_cbor(&checkpoint_3).unwrap(),
+        //     ),
+        // );
 
-        // Send correct payload
+        // Start the voting for a new epoch, checking we can proceed with new epoch number.
         let epoch = 20;
         let prev_cid = checkpoint_0.cid();
         let mut checkpoint_4 = Checkpoint::new(subnet.clone(), epoch);

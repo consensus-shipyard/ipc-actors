@@ -10,6 +10,7 @@ use fvm_shared::bigint::Zero;
 use fvm_shared::clock::ChainEpoch;
 use fvm_shared::econ::TokenAmount;
 use ipc_gateway::{Checkpoint, SubnetID, DEFAULT_CHECKPOINT_PERIOD, MIN_COLLATERAL_AMOUNT};
+use ipc_sdk::vote::Voting;
 use ipc_sdk::{Validator, ValidatorSet};
 use lazy_static::lazy_static;
 use num::rational::Ratio;
@@ -42,12 +43,13 @@ pub struct State {
     #[serde(with = "serde_bytes")]
     pub genesis: Vec<u8>,
     pub finality_threshold: ChainEpoch,
-    pub check_period: ChainEpoch,
     pub checkpoints: TCid<THamt<ChainEpoch, Checkpoint>>,
     pub window_checks: TCid<THamt<Cid, Votes>>,
     pub validator_set: ValidatorSet,
     pub min_validators: u64,
     pub genesis_epoch: ChainEpoch,
+    pub previous_executed_checkpoint_cid: Option<Cid>,
+    pub epoch_checkpoint_voting: Voting<Checkpoint>,
 }
 
 /// We should probably have a derive macro to mark an object as a state object,
@@ -60,7 +62,11 @@ impl State {
         current_epoch: ChainEpoch,
     ) -> anyhow::Result<State> {
         let min_stake = TokenAmount::from_atto(MIN_COLLATERAL_AMOUNT);
-
+        let check_period = if params.check_period < DEFAULT_CHECKPOINT_PERIOD {
+            DEFAULT_CHECKPOINT_PERIOD
+        } else {
+            params.check_period
+        };
         let state = State {
             name: params.name,
             parent_id: params.parent,
@@ -74,11 +80,6 @@ impl State {
             },
             min_validators: params.min_validators,
             finality_threshold: params.finality_threshold,
-            check_period: if params.check_period < DEFAULT_CHECKPOINT_PERIOD {
-                DEFAULT_CHECKPOINT_PERIOD
-            } else {
-                params.check_period
-            },
             genesis: params.genesis,
             status: Status::Instantiated,
             checkpoints: TCid::new_hamt(store)?,
@@ -86,6 +87,14 @@ impl State {
             window_checks: TCid::new_hamt(store)?,
             validator_set: ValidatorSet::default(),
             genesis_epoch: current_epoch,
+            previous_executed_checkpoint_cid: None,
+            epoch_checkpoint_voting: Voting::<Checkpoint>::new_with_ratio(
+                store,
+                current_epoch,
+                check_period,
+                1,
+            2,
+            )?,
         };
 
         Ok(state)
@@ -310,23 +319,12 @@ impl State {
             ));
         }
 
-        // check that a checkpoint for the epoch doesn't exist already.
-        if self.get_checkpoint(rt.store(), &ch.epoch())?.is_some() {
-            return Err(anyhow!("cannot submit checkpoint for epoch"));
-        };
-
-        // check that the epoch is correct
-        if ch.epoch() % self.check_period != 0 {
-            return Err(anyhow!(
-                "epoch in checkpoint doesn't correspond with a signing window"
-            ));
-        }
-
         // check the source is correct
         if *ch.source() != SubnetID::new_from_parent(&self.parent_id, rt.message().receiver()) {
             return Err(anyhow!("submitting checkpoint with the wrong source"));
         }
 
+        if ch.epoch() == self.epoch_checkpoint_voting.last_voting_executed_epoch +  let Some()
         // check previous checkpoint
         if self.prev_checkpoint_cid(rt.store(), &ch.epoch())? != ch.prev_check().cid() {
             return Err(anyhow!(
@@ -392,7 +390,6 @@ impl Default for State {
             min_validator_stake: TokenAmount::from_atto(MIN_COLLATERAL_AMOUNT),
             total_stake: TokenAmount::zero(),
             finality_threshold: 5,
-            check_period: 10,
             genesis: Vec::new(),
             status: Status::Instantiated,
             checkpoints: TCid::default(),
@@ -401,6 +398,15 @@ impl Default for State {
             validator_set: ValidatorSet::default(),
             min_validators: 0,
             genesis_epoch: 0,
+            previous_executed_checkpoint_cid: None,
+            epoch_checkpoint_voting: Voting {
+                genesis_epoch: 0,
+                submission_period: 0,
+                last_voting_executed_epoch: 0,
+                executable_epoch_queue: None,
+                epoch_vote_submissions: TCid::default(),
+                threshold_ratio: (2, 3)
+            }
         }
     }
 }

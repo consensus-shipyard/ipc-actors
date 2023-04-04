@@ -1,4 +1,4 @@
-use crate::vote::submission::VoteExecutionStatus;
+use crate::vote::submission::{Ratio, VoteExecutionStatus};
 use crate::vote::{EpochVoteSubmissions, UniqueVote};
 use fil_actors_runtime::fvm_ipld_hamt::BytesKey;
 use fvm_ipld_blockstore::Blockstore;
@@ -9,9 +9,12 @@ use primitives::{TCid, THamt};
 use serde::de::DeserializeOwned;
 use serde::{Deserialize, Deserializer, Serialize, Serializer};
 use std::collections::BTreeSet;
+use anyhow::anyhow; // numerator and denominator
+
+const DEFAULT_THRESHOLD_RATIO: (u64, u64) = (2, 3);
 
 /// Handle the epoch voting
-#[derive(PartialEq, Eq, Clone)]
+#[derive(PartialEq, Eq, Clone, Debug)]
 pub struct Voting<Vote> {
     /// The epoch that the voting started
     pub genesis_epoch: ChainEpoch,
@@ -25,6 +28,21 @@ pub struct Voting<Vote> {
     /// Option instead of empty BTreeSet just to save some storage space.
     pub executable_epoch_queue: Option<BTreeSet<ChainEpoch>>,
     pub epoch_vote_submissions: TCid<THamt<ChainEpoch, EpochVoteSubmissions<Vote>>>,
+    /// The voting execution threshold
+    pub threshold_ratio: Ratio,
+}
+
+impl <V: UniqueVote + DeserializeOwned + Serialize> Default for Voting<V> {
+    fn default() -> Self {
+        Voting {
+            genesis_epoch: 0,
+            submission_period: 0,
+            last_voting_executed_epoch: 0,
+            executable_epoch_queue: None,
+            epoch_vote_submissions: TCid::default(),
+            threshold_ratio: DEFAULT_THRESHOLD_RATIO
+        }
+    }
 }
 
 impl<Vote: UniqueVote + DeserializeOwned + Serialize> Voting<Vote> {
@@ -33,12 +51,23 @@ impl<Vote: UniqueVote + DeserializeOwned + Serialize> Voting<Vote> {
         genesis_epoch: ChainEpoch,
         period: ChainEpoch,
     ) -> anyhow::Result<Voting<Vote>> {
+        Self::new_with_ratio(store, genesis_epoch, period, DEFAULT_THRESHOLD_RATIO.0, DEFAULT_THRESHOLD_RATIO.1)
+    }
+
+    pub fn new_with_ratio<BS: Blockstore>(
+        store: &BS,
+        genesis_epoch: ChainEpoch,
+        period: ChainEpoch,
+        ratio_numerator: u64,
+        ratio_denominator: u64,
+    ) -> anyhow::Result<Voting<Vote>> {
         Ok(Self {
             genesis_epoch,
             submission_period: period,
             last_voting_executed_epoch: genesis_epoch,
             executable_epoch_queue: None,
             epoch_vote_submissions: TCid::new_hamt(store)?,
+            threshold_ratio: (ratio_numerator, ratio_denominator)
         })
     }
 
@@ -51,19 +80,30 @@ impl<Vote: UniqueVote + DeserializeOwned + Serialize> Voting<Vote> {
         submitter_weight: TokenAmount,
         total_weight: TokenAmount,
     ) -> anyhow::Result<Option<Vote>> {
+        // first we check the epoch is the correct one, we process only it's multiple
+        // of cron_period since genesis_epoch
+        if !self.epoch_can_vote(epoch) {
+            return Err(anyhow!("epoch not allowed"));
+        }
+
+        if self.is_epoch_executed(epoch) {
+            return Err(anyhow!("epoch already executed"));
+        }
+
         // We are doing this manually because we have to modify `state` while processing the `hamt`.
         // The current `self.epoch_vote_submissions.modify(...)` does not allow us to modify state in the
         // function closure passed to modify.
         let mut hamt = self.epoch_vote_submissions.load(store)?;
 
-        let epoch_key = BytesKey::from(epoch.to_be_bytes().as_slice());
+
+        let epoch_key = epoch_key(epoch);
         let mut submission = match hamt.get(&epoch_key)? {
             Some(s) => s.clone(),
             None => EpochVoteSubmissions::<Vote>::new(store)?,
         };
 
         let most_voted_weight = submission.submit(store, submitter, submitter_weight, vote)?;
-        let execution_status = submission.derive_execution_status(total_weight, most_voted_weight);
+        let execution_status = submission.derive_execution_status(total_weight, most_voted_weight, &self.threshold_ratio);
 
         let messages = match execution_status {
             VoteExecutionStatus::ThresholdNotReached | VoteExecutionStatus::ReachingConsensus => {
@@ -85,10 +125,9 @@ impl<Vote: UniqueVote + DeserializeOwned + Serialize> Voting<Vote> {
                     return Ok(None);
                 }
 
-                // we reach consensus in the checkpoints submission
-                self.last_voting_executed_epoch = epoch;
-
                 let msgs = submission.load_most_voted_submission(store)?.unwrap();
+
+                self.last_voting_executed_epoch = epoch;
                 hamt.delete(&epoch_key)?;
 
                 Some(msgs)
@@ -101,7 +140,24 @@ impl<Vote: UniqueVote + DeserializeOwned + Serialize> Voting<Vote> {
         Ok(messages)
     }
 
-    pub fn dump_next_executable_vote<BS: Blockstore>(
+    pub fn is_next_executable_epoch(&self, epoch: ChainEpoch) -> bool {
+        self.last_voting_executed_epoch + self.submission_period == epoch
+    }
+
+    pub fn mark_epoch_executed<BS: Blockstore>(
+        &mut self,
+        store: &BS,
+        epoch: ChainEpoch,
+    ) -> anyhow::Result<()> {
+        if !self.is_next_executable_epoch(epoch) {
+            return Err(anyhow!("epoch not the next executable epoch"))
+        }
+
+        // we reach consensus in the checkpoints submission
+        self.last_voting_executed_epoch = epoch;
+    }
+
+    pub fn try_next_executable_vote<BS: Blockstore>(
         &mut self,
         store: &BS,
     ) -> anyhow::Result<Option<Vote>> {
@@ -195,6 +251,7 @@ impl<V: Serialize> Serialize for Voting<V> {
             &self.last_voting_executed_epoch,
             &self.executable_epoch_queue,
             &self.epoch_vote_submissions,
+            &self.threshold_ratio
         );
         inner.serialize(serde_tuple::Serializer(serializer))
     }
@@ -211,6 +268,7 @@ impl<'de, V: DeserializeOwned> Deserialize<'de> for Voting<V> {
             ChainEpoch,
             Option<BTreeSet<ChainEpoch>>,
             TCid<THamt<ChainEpoch, EpochVoteSubmissions<V>>>,
+            Ratio,
         );
         let inner = <Inner<V>>::deserialize(serde_tuple::Deserializer(deserializer))?;
         Ok(Voting {
@@ -219,6 +277,7 @@ impl<'de, V: DeserializeOwned> Deserialize<'de> for Voting<V> {
             last_voting_executed_epoch: inner.2,
             executable_epoch_queue: inner.3,
             epoch_vote_submissions: inner.4,
+            threshold_ratio: inner.5
         })
     }
 }

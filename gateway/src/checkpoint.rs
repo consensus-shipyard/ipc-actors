@@ -9,6 +9,7 @@ use ipc_sdk::subnet_id::SubnetID;
 use num_traits::Zero;
 use primitives::{TCid, TLink};
 use serde_tuple::{Deserialize_tuple, Serialize_tuple};
+use ipc_sdk::vote::{UniqueBytesKey, UniqueVote};
 
 use crate::{ensure_message_sorted, CrossMsg, CrossMsgs};
 
@@ -17,6 +18,12 @@ pub struct Checkpoint {
     pub data: CheckData,
     #[serde(with = "serde_bytes")]
     sig: Vec<u8>,
+}
+
+impl UniqueVote for Checkpoint {
+    fn unique_key(&self) -> anyhow::Result<UniqueBytesKey> {
+        Ok(self.cid().to_bytes())
+    }
 }
 
 impl Checkpoint {
