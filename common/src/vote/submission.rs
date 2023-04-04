@@ -16,7 +16,7 @@ pub type Ratio = (u64, u64);
 
 /// Track all the vote submissions of an epoch
 #[derive(PartialEq, Eq, Clone, Debug)]
-pub struct EpochVoteSubmissions<Vote> {
+pub struct EpochVoteSubmissions<T> {
     /// The summation of the weights from all validator submissions
     pub total_submission_weight: TokenAmount,
     /// The most submitted unique key.
@@ -26,10 +26,150 @@ pub struct EpochVoteSubmissions<Vote> {
     /// The map to track the submission weight of each unique key
     pub submission_weights: TCid<THamt<UniqueBytesKey, TokenAmount>>,
     /// The different cron checkpoints, with vote's unique key as key
-    pub submissions: TCid<THamt<UniqueBytesKey, Vote>>,
+    pub submissions: TCid<THamt<UniqueBytesKey, T>>,
 }
 
-impl<Vote: UniqueVote + DeserializeOwned + Serialize> EpochVoteSubmissions<Vote> {
+/// The status indicating if the voting should be executed
+#[derive(Eq, PartialEq, Debug)]
+pub enum VoteExecutionStatus {
+    /// The execution threshold has yet to be reached
+    ThresholdNotReached,
+    /// The voting threshold has reached, but consensus has yet to be reached, needs more
+    /// voting to reach consensus
+    ReachingConsensus,
+    /// Consensus cannot be reached in this round
+    RoundAbort,
+    /// Execution threshold reached
+    ConsensusReached,
+}
+
+impl<T: UniqueVote + DeserializeOwned + Serialize> EpochVoteSubmissions<T> {
+    pub fn new<BS: Blockstore>(store: &BS) -> anyhow::Result<Self> {
+        Ok(EpochVoteSubmissions {
+            total_submission_weight: TokenAmount::zero(),
+            submitters: TCid::new_hamt(store)?,
+            most_voted_key: None,
+            submission_weights: TCid::new_hamt(store)?,
+            submissions: TCid::new_hamt(store)?,
+        })
+    }
+
+    /// Abort the current round and reset the submission data.
+    pub fn abort<BS: Blockstore>(&mut self, store: &BS) -> anyhow::Result<()> {
+        self.total_submission_weight = TokenAmount::zero();
+        self.submitters = TCid::new_hamt(store)?;
+        self.most_voted_key = None;
+        self.submission_weights = TCid::new_hamt(store)?;
+
+        // no need reset `self.submissions`, we can still reuse the previous self.submissions
+        // new submissions will be inserted, old submission will not be inserted to save
+        // gas.
+
+        Ok(())
+    }
+
+    /// Submit a cron checkpoint as the submitter.
+    pub fn submit<BS: Blockstore>(
+        &mut self,
+        store: &BS,
+        submitter: Address,
+        submitter_weight: TokenAmount,
+        vote: T,
+    ) -> anyhow::Result<TokenAmount> {
+        self.update_submitters(store, submitter)?;
+        self.total_submission_weight += &submitter_weight;
+        let checkpoint_hash = self.insert_vote(store, vote)?;
+        self.update_submission_weight(store, checkpoint_hash, submitter_weight)
+    }
+
+    pub fn load_most_voted_submission<BS: Blockstore>(
+        &self,
+        store: &BS,
+    ) -> anyhow::Result<Option<T>> {
+        // we will only have one entry in the `most_submitted` set if more than 2/3 has reached
+        if let Some(unique_key) = &self.most_voted_key {
+            self.get_submission(store, unique_key)
+        } else {
+            Ok(None)
+        }
+    }
+
+    pub fn most_voted_weight<BS: Blockstore>(&self, store: &BS) -> anyhow::Result<TokenAmount> {
+        // we will only have one entry in the `most_submitted` set if more than 2/3 has reached
+        if let Some(unique_key) = &self.most_voted_key {
+            Ok(self
+                .get_submission_weight(store, unique_key)?
+                .unwrap_or_else(TokenAmount::zero))
+        } else {
+            Ok(TokenAmount::zero())
+        }
+    }
+
+    pub fn get_submission<BS: Blockstore>(
+        &self,
+        store: &BS,
+        unique_key: &UniqueBytesKey,
+    ) -> anyhow::Result<Option<T>> {
+        let hamt = self.submissions.load(store)?;
+        let key = BytesKey::from(unique_key.as_slice());
+        Ok(hamt.get(&key)?.cloned())
+    }
+
+    pub fn derive_execution_status(
+        &self,
+        total_weight: TokenAmount,
+        most_voted_weight: TokenAmount,
+        ratio: &Ratio,
+    ) -> VoteExecutionStatus {
+        let threshold = total_weight.clone().mul(ratio.0).div_floor(ratio.1);
+
+        // note that we require THRESHOLD to be surpassed, equality is not enough!
+        if self.total_submission_weight <= threshold {
+            return VoteExecutionStatus::ThresholdNotReached;
+        }
+
+        // now we have reached the threshold
+
+        // consensus reached
+        if most_voted_weight > threshold {
+            return VoteExecutionStatus::ConsensusReached;
+        }
+
+        // now the total submissions has reached the threshold, but the most submitted vote
+        // has yet to reach the threshold, that means consensus has not reached.
+
+        // we do a early termination check, to see if consensus will ever be reached.
+        //
+        // consider an example that consensus will never be reached:
+        //
+        // -------- | -------------------------|--------------- | ------------- |
+        //     MOST_VOTED                 THRESHOLD     TOTAL_SUBMISSIONS  TOTAL_WEIGHT
+        //
+        // we see MOST_VOTED is smaller than THRESHOLD, TOTAL_SUBMISSIONS and TOTAL_WEIGHT, if
+        // the potential extra votes any vote can obtain, i.e. TOTAL_WEIGHT - TOTAL_SUBMISSIONS,
+        // is smaller than or equal to the potential extra vote the most voted can obtain, i.e.
+        // THRESHOLD - MOST_VOTED, then consensus will never be reached, no point voting, just abort.
+        if threshold - most_voted_weight >= total_weight - &self.total_submission_weight {
+            VoteExecutionStatus::RoundAbort
+        } else {
+            VoteExecutionStatus::ReachingConsensus
+        }
+    }
+
+    /// Checks if the submitter has already submitted the checkpoint.
+    pub fn has_submitted<BS: Blockstore>(
+        &self,
+        store: &BS,
+        submitter: &Address,
+    ) -> anyhow::Result<bool> {
+        let addr_byte_key = BytesKey::from(submitter.to_bytes());
+        let hamt = self.submitters.load(store)?;
+        Ok(hamt.contains_key(&addr_byte_key)?)
+    }
+}
+
+
+impl<T: UniqueVote + DeserializeOwned + Serialize> EpochVoteSubmissions<T> {
     /// Update the total submitters, returns the latest total number of submitters
     fn update_submitters<BS: Blockstore>(
         &mut self,
@@ -54,7 +194,7 @@ impl<Vote: UniqueVote + DeserializeOwned + Serialize> EpochVoteSubmissions<Vote>
     fn insert_vote<BS: Blockstore>(
         &mut self,
         store: &BS,
-        vote: Vote,
+        vote: T,
     ) -> anyhow::Result<UniqueBytesKey> {
         let unique_key = vote.unique_key()?;
         let hash_key = BytesKey::from(unique_key.as_slice());
@@ -151,146 +291,7 @@ impl<Vote: UniqueVote + DeserializeOwned + Serialize> EpochVoteSubmissions<Vote>
     }
 }
 
-/// The status indicating if the voting should be executed
-#[derive(Eq, PartialEq, Debug)]
-pub enum VoteExecutionStatus {
-    /// The execution threshold has yet to be reached
-    ThresholdNotReached,
-    /// The voting threshold has reached, but consensus has yet to be reached, needs more
-    /// voting to reach consensus
-    ReachingConsensus,
-    /// Consensus cannot be reached in this round
-    RoundAbort,
-    /// Execution threshold reached
-    ConsensusReached,
-}
-
-impl<Vote: UniqueVote + DeserializeOwned + Serialize> EpochVoteSubmissions<Vote> {
-    pub fn new<BS: Blockstore>(store: &BS) -> anyhow::Result<Self> {
-        Ok(EpochVoteSubmissions {
-            total_submission_weight: TokenAmount::zero(),
-            submitters: TCid::new_hamt(store)?,
-            most_voted_key: None,
-            submission_weights: TCid::new_hamt(store)?,
-            submissions: TCid::new_hamt(store)?,
-        })
-    }
-
-    /// Abort the current round and reset the submission data.
-    pub fn abort<BS: Blockstore>(&mut self, store: &BS) -> anyhow::Result<()> {
-        self.total_submission_weight = TokenAmount::zero();
-        self.submitters = TCid::new_hamt(store)?;
-        self.most_voted_key = None;
-        self.submission_weights = TCid::new_hamt(store)?;
-
-        // no need reset `self.submissions`, we can still reuse the previous self.submissions
-        // new submissions will be inserted, old submission will not be inserted to save
-        // gas.
-
-        Ok(())
-    }
-
-    /// Submit a cron checkpoint as the submitter.
-    pub fn submit<BS: Blockstore>(
-        &mut self,
-        store: &BS,
-        submitter: Address,
-        submitter_weight: TokenAmount,
-        vote: Vote,
-    ) -> anyhow::Result<TokenAmount> {
-        self.update_submitters(store, submitter)?;
-        self.total_submission_weight += &submitter_weight;
-        let checkpoint_hash = self.insert_vote(store, vote)?;
-        self.update_submission_weight(store, checkpoint_hash, submitter_weight)
-    }
-
-    pub fn load_most_voted_submission<BS: Blockstore>(
-        &self,
-        store: &BS,
-    ) -> anyhow::Result<Option<Vote>> {
-        // we will only have one entry in the `most_submitted` set if more than 2/3 has reached
-        if let Some(unique_key) = &self.most_voted_key {
-            self.get_submission(store, unique_key)
-        } else {
-            Ok(None)
-        }
-    }
-
-    pub fn most_voted_weight<BS: Blockstore>(&self, store: &BS) -> anyhow::Result<TokenAmount> {
-        // we will only have one entry in the `most_submitted` set if more than 2/3 has reached
-        if let Some(unique_key) = &self.most_voted_key {
-            Ok(self
-                .get_submission_weight(store, unique_key)?
-                .unwrap_or_else(TokenAmount::zero))
-        } else {
-            Ok(TokenAmount::zero())
-        }
-    }
-
-    pub fn get_submission<BS: Blockstore>(
-        &self,
-        store: &BS,
-        unique_key: &UniqueBytesKey,
-    ) -> anyhow::Result<Option<Vote>> {
-        let hamt = self.submissions.load(store)?;
-        let key = BytesKey::from(unique_key.as_slice());
-        Ok(hamt.get(&key)?.cloned())
-    }
-
-    pub fn derive_execution_status(
-        &self,
-        total_weight: TokenAmount,
-        most_voted_weight: TokenAmount,
-        ratio: &Ratio,
-    ) -> VoteExecutionStatus {
-        let threshold = total_weight.clone().mul(ratio.0).div_floor(ratio.1);
-
-        // note that we require THRESHOLD to be surpassed, equality is not enough!
-        if self.total_submission_weight <= threshold {
-            return VoteExecutionStatus::ThresholdNotReached;
-        }
-
-        // now we have reached the threshold
-
-        // consensus reached
-        if most_voted_weight > threshold {
-            return VoteExecutionStatus::ConsensusReached;
-        }
-
-        // now the total submissions has reached the threshold, but the most submitted vote
-        // has yet to reach the threshold, that means consensus has not reached.
-
-        // we do a early termination check, to see if consensus will ever be reached.
-        //
-        // consider an example that consensus will never be reached:
-        //
-        // -------- | -------------------------|--------------- | ------------- |
-        //     MOST_VOTED                 THRESHOLD     TOTAL_SUBMISSIONS  TOTAL_WEIGHT
-        //
-        // we see MOST_VOTED is smaller than THRESHOLD, TOTAL_SUBMISSIONS and TOTAL_WEIGHT, if
-        // the potential extra votes any vote can obtain, i.e. TOTAL_WEIGHT - TOTAL_SUBMISSIONS,
-        // is smaller than or equal to the potential extra vote the most voted can obtain, i.e.
-        // THRESHOLD - MOST_VOTED, then consensus will never be reached, no point voting, just abort.
-        if threshold - most_voted_weight >= total_weight - &self.total_submission_weight {
-            VoteExecutionStatus::RoundAbort
-        } else {
-            VoteExecutionStatus::ReachingConsensus
-        }
-    }
-
-    /// Checks if the submitter has already submitted the checkpoint.
-    pub fn has_submitted<BS: Blockstore>(
-        &self,
-        store: &BS,
-        submitter: &Address,
-    ) -> anyhow::Result<bool> {
-        let addr_byte_key = BytesKey::from(submitter.to_bytes());
-        let hamt = self.submitters.load(store)?;
-        Ok(hamt.contains_key(&addr_byte_key)?)
-    }
-}
-
-impl<V: Serialize> Serialize for EpochVoteSubmissions<V> {
+impl<T: Serialize> Serialize for EpochVoteSubmissions<T> {
     fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
     where
         S: Serializer,
@@ -306,7 +307,7 @@ impl<V: Serialize> Serialize for EpochVoteSubmissions<V> {
     }
 }
 
-impl<'de, V: DeserializeOwned> Deserialize<'de> for EpochVoteSubmissions<V> {
+impl<'de, T: DeserializeOwned> Deserialize<'de> for EpochVoteSubmissions<T> {
     fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
     where
         D: Deserializer<'de>,
@@ -318,7 +319,7 @@ impl<'de, V: DeserializeOwned> Deserialize<'de> for EpochVoteSubmissions<V> {
             TCid<THamt<UniqueBytesKey, TokenAmount>>,
             TCid<THamt<UniqueBytesKey, V>>,
         );
-        let inner = <Inner<V>>::deserialize(serde_tuple::Deserializer(deserializer))?;
+        let inner = <Inner<T>>::deserialize(serde_tuple::Deserializer(deserializer))?;
 
         Ok(EpochVoteSubmissions {
             total_submission_weight: inner.0,
