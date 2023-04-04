@@ -1,16 +1,15 @@
-use crate::vote::submission::{Ratio, VoteExecutionStatus};
-use crate::vote::{EpochVoteSubmissions, UniqueVote};
-use fil_actors_runtime::fvm_ipld_hamt::BytesKey;
+use crate::vote::submission::{EpochVoteSubmissions, Ratio, VoteExecutionStatus};
+use crate::vote::UniqueVote;
+use anyhow::anyhow;
 use fvm_ipld_blockstore::Blockstore;
 use fvm_shared::address::Address;
 use fvm_shared::clock::ChainEpoch;
 use fvm_shared::econ::TokenAmount;
+use ipc_sdk::epoch_key;
 use primitives::{TCid, THamt};
 use serde::de::DeserializeOwned;
 use serde::{Deserialize, Deserializer, Serialize, Serializer};
-use std::collections::BTreeSet;
-use anyhow::anyhow;
-use crate::epoch_key; // numerator and denominator
+use std::collections::BTreeSet; // numerator and denominator
 
 const DEFAULT_THRESHOLD_RATIO: (u64, u64) = (2, 3);
 
@@ -33,7 +32,7 @@ pub struct Voting<Vote> {
     pub threshold_ratio: Ratio,
 }
 
-impl <V: UniqueVote + DeserializeOwned + Serialize> Default for Voting<V> {
+impl<V: UniqueVote + DeserializeOwned + Serialize> Default for Voting<V> {
     fn default() -> Self {
         Voting {
             genesis_epoch: 0,
@@ -41,7 +40,7 @@ impl <V: UniqueVote + DeserializeOwned + Serialize> Default for Voting<V> {
             last_voting_executed_epoch: 0,
             executable_epoch_queue: None,
             epoch_vote_submissions: TCid::default(),
-            threshold_ratio: DEFAULT_THRESHOLD_RATIO
+            threshold_ratio: DEFAULT_THRESHOLD_RATIO,
         }
     }
 }
@@ -52,7 +51,13 @@ impl<Vote: UniqueVote + DeserializeOwned + Serialize> Voting<Vote> {
         genesis_epoch: ChainEpoch,
         period: ChainEpoch,
     ) -> anyhow::Result<Voting<Vote>> {
-        Self::new_with_ratio(store, genesis_epoch, period, DEFAULT_THRESHOLD_RATIO.0, DEFAULT_THRESHOLD_RATIO.1)
+        Self::new_with_ratio(
+            store,
+            genesis_epoch,
+            period,
+            DEFAULT_THRESHOLD_RATIO.0,
+            DEFAULT_THRESHOLD_RATIO.1,
+        )
     }
 
     pub fn new_with_ratio<BS: Blockstore>(
@@ -68,7 +73,7 @@ impl<Vote: UniqueVote + DeserializeOwned + Serialize> Voting<Vote> {
             last_voting_executed_epoch: genesis_epoch,
             executable_epoch_queue: None,
             epoch_vote_submissions: TCid::new_hamt(store)?,
-            threshold_ratio: (ratio_numerator, ratio_denominator)
+            threshold_ratio: (ratio_numerator, ratio_denominator),
         })
     }
 
@@ -103,7 +108,11 @@ impl<Vote: UniqueVote + DeserializeOwned + Serialize> Voting<Vote> {
         };
 
         let most_voted_weight = submission.submit(store, submitter, submitter_weight, vote)?;
-        let execution_status = submission.derive_execution_status(total_weight, most_voted_weight, &self.threshold_ratio);
+        let execution_status = submission.derive_execution_status(
+            total_weight,
+            most_voted_weight,
+            &self.threshold_ratio,
+        );
 
         let messages = match execution_status {
             VoteExecutionStatus::ThresholdNotReached | VoteExecutionStatus::ReachingConsensus => {
@@ -167,12 +176,12 @@ impl<Vote: UniqueVote + DeserializeOwned + Serialize> Voting<Vote> {
         epoch: ChainEpoch,
     ) -> anyhow::Result<()> {
         if !self.is_next_executable_epoch(epoch) {
-            return Err(anyhow!("epoch not the next executable epoch"))
+            return Err(anyhow!("epoch not the next executable epoch"));
         }
 
         if let Some(queue) = &self.executable_epoch_queue {
-            if queue.contains(&epoch) && queue.first() != Some(&epoch){
-                return Err(anyhow!("epoch not the next executable epoch queue"))
+            if queue.contains(&epoch) && queue.first() != Some(&epoch) {
+                return Err(anyhow!("epoch not the next executable epoch queue"));
             }
         }
 
@@ -224,10 +233,7 @@ impl<Vote: UniqueVote + DeserializeOwned + Serialize> Voting<Vote> {
                 None => unreachable!("Submission in epoch not found, report bug"),
             };
 
-            self.last_voting_executed_epoch = epoch;
-
             let vote = submission.load_most_voted_submission(store)?.unwrap();
-            hamt.delete(&epoch_key)?;
 
             Ok(Some(vote))
         })
@@ -284,7 +290,7 @@ impl<V: Serialize> Serialize for Voting<V> {
             &self.last_voting_executed_epoch,
             &self.executable_epoch_queue,
             &self.epoch_vote_submissions,
-            &self.threshold_ratio
+            &self.threshold_ratio,
         );
         inner.serialize(serde_tuple::Serializer(serializer))
     }
@@ -310,16 +316,15 @@ impl<'de, V: DeserializeOwned> Deserialize<'de> for Voting<V> {
             last_voting_executed_epoch: inner.2,
             executable_epoch_queue: inner.3,
             epoch_vote_submissions: inner.4,
-            threshold_ratio: inner.5
+            threshold_ratio: inner.5,
         })
     }
 }
 
 #[cfg(test)]
 mod tests {
-    use crate::vote::voting::Voting;
-    use crate::vote::EpochVoteSubmissions;
-    use crate::vote::{UniqueBytesKey, UniqueVote};
+    use crate::vote::submission::Ratio;
+    use crate::vote::{EpochVoteSubmissions, UniqueBytesKey, UniqueVote, Voting};
     use fil_actors_runtime::builtin::HAMT_BIT_WIDTH;
     use fil_actors_runtime::fvm_ipld_hamt::BytesKey;
     use fil_actors_runtime::make_empty_map;
@@ -349,6 +354,7 @@ mod tests {
             last_voting_executed_epoch: ChainEpoch,
             executable_epoch_queue: Option<BTreeSet<ChainEpoch>>,
             epoch_vote_submissions: TCid<THamt<ChainEpoch, EpochVoteSubmissions<DummyVote>>>,
+            threshold_ratio: Ratio,
         }
 
         let dummy_voting = DummyVoting {
@@ -357,6 +363,7 @@ mod tests {
             last_voting_executed_epoch: 3,
             executable_epoch_queue: Some(BTreeSet::from([1])),
             epoch_vote_submissions: Default::default(),
+            threshold_ratio: (2, 3),
         };
 
         let voting = Voting::<DummyVote> {
@@ -365,7 +372,7 @@ mod tests {
             last_voting_executed_epoch: 3,
             executable_epoch_queue: Some(BTreeSet::from([1])),
             epoch_vote_submissions: Default::default(),
-            threshold_ratio: (2, 3)
+            threshold_ratio: (2, 3),
         };
 
         let json1 = serde_json::to_string(&dummy_voting).unwrap();
@@ -384,7 +391,7 @@ mod tests {
             last_voting_executed_epoch: 3,
             executable_epoch_queue: Some(BTreeSet::from([1])),
             epoch_vote_submissions: Default::default(),
-            threshold_ratio: (2, 3)
+            threshold_ratio: (2, 3),
         };
 
         let key = BytesKey::from("1");

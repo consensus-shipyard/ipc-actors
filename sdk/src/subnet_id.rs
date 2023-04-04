@@ -6,6 +6,7 @@ use std::path::{Path, PathBuf};
 use std::str::FromStr;
 
 use crate::error::Error;
+use crate::set_network_from_env;
 
 #[derive(PartialEq, Eq, Hash, Clone, Debug, Serialize_tuple, Deserialize_tuple)]
 pub struct SubnetID {
@@ -154,6 +155,13 @@ impl SubnetID {
 
 impl fmt::Display for SubnetID {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        // FIXME: This is a horrible hack, and it makes me feel dirty,
+        // but it is the only way to ensure that we are picking up
+        // the right network address for the environment.
+        // Future fix being tracked here:
+        // https://github.com/consensus-shipyard/ipc-actors/issues/78
+        set_network_from_env();
+
         if self.parent == "/root" && self.actor == Address::new_id(0) {
             return write!(f, "{}", self.parent);
         }
@@ -221,7 +229,7 @@ mod tests {
         let act = Address::new_id(1001);
         let sub_id = SubnetID::new_from_parent(&ROOTNET_ID.clone(), act);
         let sub_id_str = sub_id.to_string();
-        assert_eq!(sub_id_str, "/root/f01001");
+        assert_eq!(sub_id_str, "/root/t01001");
 
         let rtt_id = SubnetID::from_str(&sub_id_str).unwrap();
         assert_eq!(sub_id, rtt_id);
@@ -234,20 +242,20 @@ mod tests {
 
     #[test]
     fn test_common_parent() {
-        common_parent("/root/f01", "/root/f01/f02", "/root/f01", 2);
-        common_parent("/root/f01/f02/f03", "/root/f01/f02", "/root/f01/f02", 3);
-        common_parent("/root/f01/f03/f04", "/root/f02/f03/f04", "/root", 1);
+        common_parent("/root/t01", "/root/t01/t02", "/root/t01", 2);
+        common_parent("/root/t01/t02/t03", "/root/t01/t02", "/root/t01/t02", 3);
+        common_parent("/root/t01/t03/t04", "/root/t02/t03/t04", "/root", 1);
         common_parent(
-            "/root/f01/f03/f04",
-            "/root/f01/f03/f04/f05",
-            "/root/f01/f03/f04",
+            "/root/t01/t03/t04",
+            "/root/t01/t03/t04/t05",
+            "/root/t01/t03/t04",
             4,
         );
         // The common parent of the same subnet is the current subnet
         common_parent(
-            "/root/f01/f03/f04",
-            "/root/f01/f03/f04",
-            "/root/f01/f03/f04",
+            "/root/t01/t03/t04",
+            "/root/t01/t03/t04",
+            "/root/t01/t03/t04",
             4,
         );
     }
@@ -255,49 +263,49 @@ mod tests {
     #[test]
     fn test_down() {
         down(
-            "/root/f01/f02/f03",
-            "/root/f01",
-            Some(SubnetID::from_str("/root/f01/f02").unwrap()),
+            "/root/t01/t02/t03",
+            "/root/t01",
+            Some(SubnetID::from_str("/root/t01/t02").unwrap()),
         );
         down(
-            "/root/f01/f02/f03",
-            "/root/f01/f02",
-            Some(SubnetID::from_str("/root/f01/f02/f03").unwrap()),
+            "/root/t01/t02/t03",
+            "/root/t01/t02",
+            Some(SubnetID::from_str("/root/t01/t02/t03").unwrap()),
         );
         down(
-            "/root/f01/f03/f04",
-            "/root/f01/f03",
-            Some(SubnetID::from_str("/root/f01/f03/f04").unwrap()),
+            "/root/t01/t03/t04",
+            "/root/t01/t03",
+            Some(SubnetID::from_str("/root/t01/t03/t04").unwrap()),
         );
-        down("/root", "/root/f01", None);
-        down("/root/f01", "/root/f01", None);
-        down("/root/f02/f03", "/root/f01/f03/f04", None);
-        down("/root", "/root/f01", None);
+        down("/root", "/root/t01", None);
+        down("/root/t01", "/root/t01", None);
+        down("/root/t02/t03", "/root/t01/t03/t04", None);
+        down("/root", "/root/t01", None);
     }
 
     #[test]
     fn test_up() {
         up(
-            "/root/f01/f02/f03",
-            "/root/f01",
+            "/root/t01/t02/t03",
+            "/root/t01",
             Some(SubnetID::from_str("/root").unwrap()),
         );
         up(
-            "/root/f01/f02/f03",
-            "/root/f01/f02",
-            Some(SubnetID::from_str("/root/f01").unwrap()),
+            "/root/t01/t02/t03",
+            "/root/t01/t02",
+            Some(SubnetID::from_str("/root/t01").unwrap()),
         );
-        up("/root", "/root/f01", None);
-        up("/root/f02/f03", "/root/f01/f03/f04", None);
+        up("/root", "/root/t01", None);
+        up("/root/t02/t03", "/root/t01/t03/t04", None);
         up(
-            "/root/f01/f02/f03",
-            "/root/f01/f02",
-            Some(SubnetID::from_str("/root/f01").unwrap()),
+            "/root/t01/t02/t03",
+            "/root/t01/t02",
+            Some(SubnetID::from_str("/root/t01").unwrap()),
         );
         up(
-            "/root/f01/f02/f03",
-            "/root/f01/f02/f03",
-            Some(SubnetID::from_str("/root/f01/f02").unwrap()),
+            "/root/t01/t02/t03",
+            "/root/t01/t02/t03",
+            Some(SubnetID::from_str("/root/t01/t02").unwrap()),
         );
     }
 

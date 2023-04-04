@@ -1,9 +1,8 @@
 #![feature(let_chains)]
-#![feature(map_first_last)] // For some simpler syntax for if let Some conditions
 
 extern crate core;
 
-pub use self::checkpoint::{Checkpoint, CrossMsgMeta};
+pub use self::checkpoint::{Checkpoint, CHECKPOINT_GENESIS_CID};
 pub use self::cross::{is_bottomup, CrossMsg, CrossMsgs, IPCMsgType, StorableMsg};
 pub use self::state::*;
 pub use self::subnet::*;
@@ -19,7 +18,6 @@ use fil_actors_runtime::{
 use fvm_ipld_encoding::RawBytes;
 use fvm_shared::address::Address;
 use fvm_shared::bigint::Zero;
-use fvm_shared::clock::ChainEpoch;
 use fvm_shared::econ::TokenAmount;
 use fvm_shared::error::ExitCode;
 use fvm_shared::METHOD_SEND;
@@ -80,7 +78,7 @@ impl Actor {
         let st = State::new(rt.store(), params).map_err(|e| {
             e.downcast_default(
                 ExitCode::USR_ILLEGAL_STATE,
-                "Failed to create SCA actor state",
+                "Failed to create gateway actor state",
             )
         })?;
         rt.create(&st)?;
@@ -701,7 +699,8 @@ impl Actor {
 
             let epoch = checkpoint.epoch;
             let total_weight = st.validators.total_weight.clone();
-            st.cron_checkpoint_voting
+            let ch = st
+                .cron_checkpoint_voting
                 .submit_vote(
                     store,
                     checkpoint,
@@ -716,7 +715,17 @@ impl Actor {
                         e
                     );
                     actor_error!(unhandled_message, e.to_string())
-                })
+                })?;
+            if ch.is_some() {
+                st.cron_checkpoint_voting
+                    .mark_epoch_executed(store, epoch)
+                    .map_err(|e| {
+                        log::error!("encountered error marking epoch executed: {:?}", e);
+                        actor_error!(unhandled_message, e.to_string())
+                    })?;
+            }
+
+            Ok(ch)
         })?;
 
         // we only `execute_next_cron_epoch(rt)` if there is no execution for the current submission
@@ -821,10 +830,7 @@ impl Actor {
 /// All the validator code for the actor calls
 impl Actor {
     /// Validate the submitter's submission against the state, also returns the weight of the validator
-    fn validate_submitter(
-        st: &State,
-        submitter: &Address,
-    ) -> Result<TokenAmount, ActorError> {
+    fn validate_submitter(st: &State, submitter: &Address) -> Result<TokenAmount, ActorError> {
         st.validators
             .get_validator_weight(submitter)
             .ok_or_else(|| actor_error!(illegal_argument, "caller not validator"))
@@ -948,15 +954,26 @@ impl Actor {
     /// validator has already voted, no one can vote again to trigger the execution. Epoch 20 is stuck.
     fn execute_next_cron_epoch(rt: &mut impl Runtime) -> Result<(), ActorError> {
         let checkpoint = rt.transaction(|st: &mut State, rt| {
-            st.cron_checkpoint_voting
-                .try_next_executable_vote(rt.store())
+            let cp = st
+                .cron_checkpoint_voting
+                .get_next_executable_vote(rt.store())
                 .map_err(|e| {
                     log::error!(
                         "encountered error processing submit cron checkpoint: {:?}",
                         e
                     );
                     actor_error!(unhandled_message, e.to_string())
-                })
+                })?;
+            if let Some(cp) = &cp {
+                st.cron_checkpoint_voting
+                    .mark_epoch_executed(rt.store(), cp.epoch)
+                    .map_err(|e| {
+                        log::error!("encountered error marking epoch executed: {:?}", e);
+                        actor_error!(unhandled_message, e.to_string())
+                    })?;
+            }
+
+            Ok(cp)
         })?;
 
         if let Some(checkpoint) = checkpoint {

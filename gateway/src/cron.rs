@@ -6,7 +6,7 @@ use fvm_ipld_encoding::tuple::{Deserialize_tuple, Serialize_tuple};
 use fvm_shared::address::Address;
 use fvm_shared::clock::ChainEpoch;
 use fvm_shared::econ::TokenAmount;
-use ipc_sdk::vote::{UniqueBytesKey, UniqueVote};
+use ipc_actor_common::vote::{UniqueBytesKey, UniqueVote};
 use ipc_sdk::ValidatorSet;
 use num_traits::Zero;
 

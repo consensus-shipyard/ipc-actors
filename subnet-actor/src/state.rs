@@ -9,10 +9,9 @@ use fvm_shared::address::Address;
 use fvm_shared::bigint::Zero;
 use fvm_shared::clock::ChainEpoch;
 use fvm_shared::econ::TokenAmount;
-use ipc_gateway::checkpoint::CHECKPOINT_GENESIS_CID;
+use ipc_actor_common::vote::Voting;
 use ipc_gateway::{Checkpoint, SubnetID, DEFAULT_CHECKPOINT_PERIOD, MIN_COLLATERAL_AMOUNT};
 use ipc_sdk::epoch_key;
-use ipc_sdk::vote::Voting;
 use ipc_sdk::{Validator, ValidatorSet};
 use lazy_static::lazy_static;
 use num::rational::Ratio;
@@ -45,10 +44,16 @@ pub struct State {
     #[serde(with = "serde_bytes")]
     pub genesis: Vec<u8>,
     pub finality_threshold: ChainEpoch,
+
+    // duplicated definition for easier data access in client applications
+    pub check_period: ChainEpoch,
+    pub genesis_epoch: ChainEpoch,
+
+    // FIXME: Consider making checkpoints a HAMT instead of an AMT so we use
+    // the AMT index instead of and epoch k for object indexing.
     pub committed_checkpoints: TCid<THamt<ChainEpoch, Checkpoint>>,
     pub validator_set: ValidatorSet,
     pub min_validators: u64,
-    pub genesis_epoch: ChainEpoch,
     pub previous_executed_checkpoint_cid: Option<Cid>,
     pub epoch_checkpoint_voting: Voting<Checkpoint>,
 }
@@ -81,9 +86,10 @@ impl State {
             },
             min_validators: params.min_validators,
             finality_threshold: params.finality_threshold,
+            check_period,
+            committed_checkpoints: TCid::new_hamt(store)?,
             genesis: params.genesis,
             status: Status::Instantiated,
-            committed_checkpoints: TCid::new_hamt(store)?,
             stake: TCid::new_hamt(store)?,
             validator_set: ValidatorSet::default(),
             genesis_epoch: current_epoch,
@@ -98,53 +104,6 @@ impl State {
         };
 
         Ok(state)
-    }
-
-    pub fn get_votes<BS: Blockstore>(
-        &self,
-        store: &BS,
-        cid: &Cid,
-    ) -> Result<Option<Votes>, ActorError> {
-        let hamt = self
-            .window_checks
-            .load(store)
-            .map_err(|_| actor_error!(illegal_state, "cannot load votes hamt"))?;
-        let votes = hamt
-            .get(&BytesKey::from(cid.to_bytes()))
-            .map_err(|_| actor_error!(illegal_state, "cannot read votes"))?;
-        Ok(votes.cloned())
-    }
-
-    pub fn remove_votes<BS: Blockstore>(
-        &mut self,
-        store: &BS,
-        cid: &Cid,
-    ) -> Result<(), ActorError> {
-        self.window_checks
-            .modify(store, |hamt| {
-                hamt.delete(&BytesKey::from(cid.to_bytes()))
-                    .map_err(|_| actor_error!(illegal_state, "cannot remove votes from hamt"))?;
-                Ok(true)
-            })
-            .map_err(|_| actor_error!(illegal_state, "cannot modify window checks"))?;
-
-        Ok(())
-    }
-
-    pub fn set_votes<BS: Blockstore>(
-        &mut self,
-        store: &BS,
-        cid: &Cid,
-        votes: Votes,
-    ) -> Result<(), ActorError> {
-        self.window_checks
-            .modify(store, |hamt| {
-                hamt.set(BytesKey::from(cid.to_bytes()), votes)
-                    .map_err(|_| actor_error!(illegal_state, "cannot set votes in hamt"))?;
-                Ok(true)
-            })
-            .map_err(|_| actor_error!(illegal_state, "cannot modify window checks"))?;
-        Ok(())
     }
 
     /// Get the stake of an address.
@@ -287,22 +246,6 @@ impl State {
         }
     }
 
-    fn get_checkpoint<BS: Blockstore>(
-        &self,
-        store: &BS,
-        epoch: ChainEpoch,
-    ) -> anyhow::Result<Option<Checkpoint>> {
-        let hamt = self
-            .committed_checkpoints
-            .load(store)
-            .map_err(|e| anyhow!("failed to load checkpoints: {}", e))?;
-        let checkpoint = hamt
-            .get(&epoch_key(epoch))
-            .map_err(|e| anyhow!("failed to get checkpoint for id {}: {:?}", epoch, e))?
-            .cloned();
-        Ok(checkpoint)
-    }
-
     pub fn is_validator(&self, addr: &Address) -> bool {
         self.validator_set
             .validators()
@@ -346,32 +289,15 @@ impl State {
         &mut self,
         store: &impl Blockstore,
         ch: &Checkpoint,
-    ) -> Result<bool, ActorError> {
+    ) -> anyhow::Result<bool> {
         if let Some(previous_cid) = &self.previous_executed_checkpoint_cid {
-            if previous_cid != ch.prev_check().cid() {
+            if *previous_cid != ch.prev_check().cid() {
                 self.epoch_checkpoint_voting
                     .abort_epoch(store, ch.data.epoch)?;
                 return Ok(false);
             }
         }
         Ok(true)
-    }
-
-    fn prev_checkpoint_cid<BS: Blockstore>(
-        &self,
-        store: &BS,
-        epoch: &ChainEpoch,
-    ) -> anyhow::Result<Cid> {
-        let mut epoch = epoch - self.check_period;
-        while epoch >= 0 {
-            match self.get_checkpoint(store, epoch)? {
-                Some(ch) => return Ok(ch.cid()),
-                None => {
-                    epoch -= self.check_period;
-                }
-            }
-        }
-        Ok(CHECKPOINT_GENESIS_CID.clone())
     }
 
     pub fn flush_checkpoint<BS: Blockstore>(
@@ -399,9 +325,9 @@ impl Default for State {
             min_validator_stake: TokenAmount::from_atto(MIN_COLLATERAL_AMOUNT),
             total_stake: TokenAmount::zero(),
             finality_threshold: 5,
+            check_period: 0,
             genesis: Vec::new(),
             status: Status::Instantiated,
-            committed_checkpoints: TCid::default(),
             stake: TCid::default(),
             validator_set: ValidatorSet::default(),
             min_validators: 0,
@@ -415,6 +341,7 @@ impl Default for State {
                 epoch_vote_submissions: TCid::default(),
                 threshold_ratio: (2, 3),
             },
+            committed_checkpoints: TCid::default(),
         }
     }
 }

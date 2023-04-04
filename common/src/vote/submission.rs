@@ -243,10 +243,7 @@ impl<Vote: UniqueVote + DeserializeOwned + Serialize> EpochVoteSubmissions<Vote>
         most_voted_weight: TokenAmount,
         ratio: &Ratio,
     ) -> VoteExecutionStatus {
-        let threshold = total_weight
-            .clone()
-            .mul(ratio.0)
-            .div_floor(ratio.1);
+        let threshold = total_weight.clone().mul(ratio.0).div_floor(ratio.1);
 
         // note that we require THRESHOLD to be surpassed, equality is not enough!
         if self.total_submission_weight <= threshold {
@@ -335,8 +332,8 @@ impl<'de, V: DeserializeOwned> Deserialize<'de> for EpochVoteSubmissions<V> {
 
 #[cfg(test)]
 mod tests {
-    use crate::vote::submission::{EpochVoteSubmissions, VoteExecutionStatus};
-    use crate::vote::{UniqueBytesKey, UniqueVote};
+    use crate::vote::submission::VoteExecutionStatus;
+    use crate::vote::{EpochVoteSubmissions, UniqueBytesKey, UniqueVote};
     use fil_actors_runtime::builtin::HAMT_BIT_WIDTH;
     use fil_actors_runtime::fvm_ipld_hamt::BytesKey;
     use fil_actors_runtime::make_empty_map;

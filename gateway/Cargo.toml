@@ -19,6 +19,7 @@ frc42_dispatch = "3.0.0"
 primitives = { git = "https://github.com/consensus-shipyard/fvm-utils" }
 fvm_shared = { version = "=3.0.0-alpha.17", default-features = false }
 ipc-sdk = { path = "../sdk" }
+ipc-actor-common = { path = "../common" }
 fvm_ipld_hamt = "0.5.1"
 num-traits = "0.2.14"
 num-derive = "0.3.3"

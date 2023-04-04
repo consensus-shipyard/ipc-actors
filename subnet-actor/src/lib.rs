@@ -3,8 +3,6 @@
 pub mod state;
 pub mod types;
 
-use anyhow::anyhow;
-use cid::Cid;
 use fil_actors_runtime::runtime::{ActorCode, Runtime};
 use fil_actors_runtime::{
     actor_dispatch, actor_error, restrict_internal_api, ActorDowncast, ActorError,
@@ -17,7 +15,6 @@ use fvm_shared::econ::TokenAmount;
 use fvm_shared::error::ExitCode;
 use fvm_shared::{MethodNum, METHOD_CONSTRUCTOR, METHOD_SEND};
 use ipc_gateway::{Checkpoint, FundParams, MIN_COLLATERAL_AMOUNT};
-use ipc_sdk::vote::Voting;
 use num::BigInt;
 use num_derive::FromPrimitive;
 use num_traits::{FromPrimitive, Zero};
@@ -263,12 +260,9 @@ impl SubnetActor for Actor {
             return Err(actor_error!(illegal_state, "not validator"));
         }
 
-        state.verify_checkpoint(rt, &ch).map_err(|e| {
-            actor_error!(
-                illegal_state,
-                format!("checkpoint failed: {}", e.to_string())
-            )
-        })?;
+        state
+            .verify_checkpoint(rt, &ch)
+            .map_err(|e| actor_error!(illegal_state, format!("checkpoint failed: {}", e)))?;
 
         let msg = rt.transaction(|st: &mut State, rt| {
             let store = rt.store();
@@ -403,9 +397,17 @@ fn commit_checkpoint(
     store: &impl Blockstore,
     ch: &Checkpoint,
 ) -> Result<Option<CrossActorPayload>, ActorError> {
-    if st.ensure_checkpoint_chained(store, &ch)? {
-        return Ok(None);
-    }
+    match st.ensure_checkpoint_chained(store, ch) {
+        Ok(is_chained) => {
+            if !is_chained {
+                return Ok(None);
+            }
+        }
+        Err(e) => {
+            log::error!("encountered error checking epoch chained: {:?}", e);
+            return Err(actor_error!(unhandled_message, e.to_string()));
+        }
+    };
 
     st.epoch_checkpoint_voting
         .mark_epoch_executed(store, ch.epoch())
@@ -413,6 +415,8 @@ fn commit_checkpoint(
             log::error!("encountered error marking epoch executed: {:?}", e);
             actor_error!(unhandled_message, e.to_string())
         })?;
+
+    st.previous_executed_checkpoint_cid = Some(ch.cid());
 
     // commit checkpoint
     st.flush_checkpoint(store, ch)

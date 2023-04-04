@@ -3,13 +3,13 @@ use fil_actors_runtime::runtime::Runtime;
 use fil_actors_runtime::test_utils::MockRuntime;
 use fil_actors_runtime::BURNT_FUNDS_ACTOR_ADDR;
 use fvm_ipld_encoding::RawBytes;
-use fvm_ipld_hamt::BytesKey;
 use fvm_shared::address::Address;
 use fvm_shared::bigint::Zero;
 use fvm_shared::clock::ChainEpoch;
 use fvm_shared::econ::TokenAmount;
 use fvm_shared::error::ExitCode;
 use fvm_shared::METHOD_SEND;
+use ipc_actor_common::vote::{EpochVoteSubmissions, UniqueVote};
 use ipc_gateway::checkpoint::BatchCrossMsgs;
 use ipc_gateway::Status::{Active, Inactive};
 use ipc_gateway::{
@@ -17,8 +17,7 @@ use ipc_gateway::{
     StorableMsg, CROSS_MSG_FEE, DEFAULT_CHECKPOINT_PERIOD, SUBNET_ACTOR_REWARD_METHOD,
 };
 use ipc_sdk::subnet_id::SubnetID;
-use ipc_sdk::vote::{EpochVoteSubmissions, UniqueVote};
-use ipc_sdk::{Validator, ValidatorSet};
+use ipc_sdk::{epoch_key, Validator, ValidatorSet};
 use primitives::TCid;
 use std::collections::BTreeSet;
 use std::ops::Mul;
@@ -493,7 +492,7 @@ fn test_send_cross() {
         .unwrap();
 
     // top-down
-    let sub = SubnetID::from_str("/root/f0101/f0101").unwrap();
+    let sub = SubnetID::from_str("/root/t0101/t0101").unwrap();
     h.send_cross(
         &mut rt,
         &from,
@@ -506,7 +505,7 @@ fn test_send_cross() {
         &value,
     )
     .unwrap();
-    let sub = SubnetID::from_str("/root/f0101/f0101").unwrap();
+    let sub = SubnetID::from_str("/root/t0101/t0101").unwrap();
     let circ_sup = 2 * &value;
     h.send_cross(
         &mut rt,
@@ -520,7 +519,7 @@ fn test_send_cross() {
         &circ_sup,
     )
     .unwrap();
-    let sub = SubnetID::from_str("/root/f0101/f0101/f01002").unwrap();
+    let sub = SubnetID::from_str("/root/t0101/t0101/t01002").unwrap();
     let circ_sup = circ_sup.clone() + &value;
     h.send_cross(
         &mut rt,
@@ -537,7 +536,7 @@ fn test_send_cross() {
 
     // bottom-up
     rt.set_balance(3 * &value);
-    let sub = SubnetID::from_str("/root/f0102/f0101").unwrap();
+    let sub = SubnetID::from_str("/root/t0102/t0101").unwrap();
     let zero = TokenAmount::zero();
     h.send_cross(
         &mut rt,
@@ -551,7 +550,7 @@ fn test_send_cross() {
         &zero,
     )
     .unwrap();
-    let sub = SubnetID::from_str("/root/f0102/f0101").unwrap();
+    let sub = SubnetID::from_str("/root/t0102/t0101").unwrap();
     h.send_cross(
         &mut rt,
         &from,
@@ -1306,6 +1305,16 @@ fn test_submit_cron_checking_errors() {
     setup_membership(&h, &mut rt);
 
     let submitter = Address::new_id(10000);
+
+    let checkpoint = CronCheckpoint {
+        epoch: *DEFAULT_GENESIS_EPOCH + *DEFAULT_CRON_PERIOD,
+        top_down_msgs: vec![],
+    };
+    let r = h.submit_cron(&mut rt, submitter, checkpoint);
+    assert!(r.is_err());
+    assert_eq!(r.unwrap_err().msg(), "caller not validator");
+
+    let submitter = Address::new_id(0);
     let checkpoint = CronCheckpoint {
         epoch: *DEFAULT_GENESIS_EPOCH + 1,
         top_down_msgs: vec![],
@@ -1321,14 +1330,6 @@ fn test_submit_cron_checking_errors() {
     let r = h.submit_cron(&mut rt, submitter, checkpoint);
     assert!(r.is_err());
     assert_eq!(r.unwrap_err().msg(), "epoch already executed");
-
-    let checkpoint = CronCheckpoint {
-        epoch: *DEFAULT_GENESIS_EPOCH + *DEFAULT_CRON_PERIOD,
-        top_down_msgs: vec![],
-    };
-    let r = h.submit_cron(&mut rt, submitter, checkpoint);
-    assert!(r.is_err());
-    assert_eq!(r.unwrap_err().msg(), "caller not validator");
 }
 
 fn get_epoch_submissions(
@@ -1341,7 +1342,7 @@ fn get_epoch_submissions(
         .epoch_vote_submissions()
         .load(rt.store())
         .unwrap();
-    let bytes_key = BytesKey::from(epoch.to_be_bytes().as_slice());
+    let bytes_key = epoch_key(epoch);
     hamt.get(&bytes_key).unwrap().cloned()
 }
 
