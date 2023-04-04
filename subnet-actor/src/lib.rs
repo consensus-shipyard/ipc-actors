@@ -4,6 +4,7 @@ pub mod state;
 pub mod types;
 
 use anyhow::anyhow;
+use cid::Cid;
 use fil_actors_runtime::runtime::{ActorCode, Runtime};
 use fil_actors_runtime::{
     actor_dispatch, actor_error, restrict_internal_api, ActorDowncast, ActorError,
@@ -16,6 +17,7 @@ use fvm_shared::econ::TokenAmount;
 use fvm_shared::error::ExitCode;
 use fvm_shared::{MethodNum, METHOD_CONSTRUCTOR, METHOD_SEND};
 use ipc_gateway::{Checkpoint, FundParams, MIN_COLLATERAL_AMOUNT};
+use ipc_sdk::vote::Voting;
 use num::BigInt;
 use num_derive::FromPrimitive;
 use num_traits::{FromPrimitive, Zero};
@@ -261,9 +263,12 @@ impl SubnetActor for Actor {
             return Err(actor_error!(illegal_state, "not validator"));
         }
 
-        state
-            .verify_checkpoint(rt, &ch)
-            .map_err(|_| actor_error!(illegal_state, "checkpoint failed"))?;
+        state.verify_checkpoint(rt, &ch).map_err(|e| {
+            actor_error!(
+                illegal_state,
+                format!("checkpoint failed: {}", e.to_string())
+            )
+        })?;
 
         let msg = rt.transaction(|st: &mut State, rt| {
             let store = rt.store();
@@ -294,7 +299,7 @@ impl SubnetActor for Actor {
                 commit_checkpoint(st, store, &ch)
             } else if let Some(ch) = st
                 .epoch_checkpoint_voting
-                .try_next_executable_vote(store)
+                .get_next_executable_vote(store)
                 .map_err(|_| actor_error!(illegal_state, "cannot check previous checkpoint"))?
             {
                 commit_checkpoint(st, store, &ch)
@@ -303,7 +308,7 @@ impl SubnetActor for Actor {
             }
         })?;
 
-        // propagate to sca
+        // propagate to gateway
         if let Some(p) = msg {
             rt.send(&p.to, p.method, p.params, p.value)?;
         }
@@ -392,18 +397,22 @@ impl ActorCode for Actor {
     }
 }
 
-pub enum CommitCheckpointStatus {
-    Success(Option<CrossActorPayload>),
-    PreviousCheckpointMismatch,
-}
-
 /// The checkpoint to be committed should be the same as the previous executed checkpoint's cid before execution
-fn commit_checkpoint(st: &mut State, store: & impl Blockstore, ch: &Checkpoint) -> Result<CommitCheckpointStatus, ActorError> {
-    if let Some(previous_ch_cid) = st.previous_executed_checkpoint_cid {
-        if previous_ch_cid != ch.prev_check().cid() {
-            return Ok(CommitCheckpointStatus::PreviousCheckpointMismatch)
-        }
+fn commit_checkpoint(
+    st: &mut State,
+    store: &impl Blockstore,
+    ch: &Checkpoint,
+) -> Result<Option<CrossActorPayload>, ActorError> {
+    if st.ensure_checkpoint_chained(store, &ch)? {
+        return Ok(None);
     }
+
+    st.epoch_checkpoint_voting
+        .mark_epoch_executed(store, ch.epoch())
+        .map_err(|e| {
+            log::error!("encountered error marking epoch executed: {:?}", e);
+            actor_error!(unhandled_message, e.to_string())
+        })?;
 
     // commit checkpoint
     st.flush_checkpoint(store, ch)
@@ -416,5 +425,6 @@ fn commit_checkpoint(st: &mut State, store: & impl Blockstore, ch: &Checkpoint) 
         IpldBlock::serialize_cbor(&ch)?,
         TokenAmount::zero(),
     ));
-    Ok(CommitCheckpointStatus::Success(msg))
+
+    Ok(msg)
 }

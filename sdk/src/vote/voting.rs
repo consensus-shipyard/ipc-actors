@@ -9,7 +9,8 @@ use primitives::{TCid, THamt};
 use serde::de::DeserializeOwned;
 use serde::{Deserialize, Deserializer, Serialize, Serializer};
 use std::collections::BTreeSet;
-use anyhow::anyhow; // numerator and denominator
+use anyhow::anyhow;
+use crate::epoch_key; // numerator and denominator
 
 const DEFAULT_THRESHOLD_RATIO: (u64, u64) = (2, 3);
 
@@ -95,7 +96,6 @@ impl<Vote: UniqueVote + DeserializeOwned + Serialize> Voting<Vote> {
         // function closure passed to modify.
         let mut hamt = self.epoch_vote_submissions.load(store)?;
 
-
         let epoch_key = epoch_key(epoch);
         let mut submission = match hamt.get(&epoch_key)? {
             Some(s) => s.clone(),
@@ -126,10 +126,6 @@ impl<Vote: UniqueVote + DeserializeOwned + Serialize> Voting<Vote> {
                 }
 
                 let msgs = submission.load_most_voted_submission(store)?.unwrap();
-
-                self.last_voting_executed_epoch = epoch;
-                hamt.delete(&epoch_key)?;
-
                 Some(msgs)
             }
         };
@@ -144,6 +140,27 @@ impl<Vote: UniqueVote + DeserializeOwned + Serialize> Voting<Vote> {
         self.last_voting_executed_epoch + self.submission_period == epoch
     }
 
+    pub fn abort_epoch<BS: Blockstore>(
+        &mut self,
+        store: &BS,
+        epoch: ChainEpoch,
+    ) -> anyhow::Result<()> {
+        self.remove_epoch_from_queue(epoch);
+
+        let epoch_key = epoch_key(epoch);
+        self.epoch_vote_submissions.modify(store, |hamt| {
+            let mut submission = match hamt.get(&epoch_key)? {
+                Some(s) => s.clone(),
+                None => return Ok(()),
+            };
+
+            submission.abort(store)?;
+            hamt.set(epoch_key, submission)?;
+
+            Ok(())
+        })
+    }
+
     pub fn mark_epoch_executed<BS: Blockstore>(
         &mut self,
         store: &BS,
@@ -153,11 +170,32 @@ impl<Vote: UniqueVote + DeserializeOwned + Serialize> Voting<Vote> {
             return Err(anyhow!("epoch not the next executable epoch"))
         }
 
-        // we reach consensus in the checkpoints submission
+        if let Some(queue) = &self.executable_epoch_queue {
+            if queue.contains(&epoch) && queue.first() != Some(&epoch){
+                return Err(anyhow!("epoch not the next executable epoch queue"))
+            }
+        }
+
         self.last_voting_executed_epoch = epoch;
+        self.remove_epoch_from_queue(epoch);
+
+        let epoch_key = epoch_key(epoch);
+        self.epoch_vote_submissions.modify(store, |hamt| {
+            hamt.delete(&epoch_key)?;
+            Ok(())
+        })
     }
 
-    pub fn try_next_executable_vote<BS: Blockstore>(
+    fn remove_epoch_from_queue(&mut self, epoch: ChainEpoch) {
+        if let Some(queue) = self.executable_epoch_queue.as_mut() {
+            queue.remove(&epoch);
+            if queue.is_empty() {
+                self.executable_epoch_queue = None;
+            }
+        }
+    }
+
+    pub fn get_next_executable_vote<BS: Blockstore>(
         &mut self,
         store: &BS,
     ) -> anyhow::Result<Option<Vote>> {
@@ -166,7 +204,7 @@ impl<Vote: UniqueVote + DeserializeOwned + Serialize> Voting<Vote> {
             Some(queue) => queue,
         };
 
-        match epoch_queue.first() {
+        let epoch = match epoch_queue.first() {
             None => {
                 unreachable!("`epoch_queue` is not None, it should not be empty, report bug")
             }
@@ -175,17 +213,12 @@ impl<Vote: UniqueVote + DeserializeOwned + Serialize> Voting<Vote> {
                     log::debug!("earliest executable epoch not the same cron period");
                     return Ok(None);
                 }
+                *epoch
             }
-        }
-
-        let epoch = epoch_queue.pop_first().unwrap();
-
-        if epoch_queue.is_empty() {
-            self.executable_epoch_queue = None;
-        }
+        };
 
         self.epoch_vote_submissions.modify(store, |hamt| {
-            let epoch_key = BytesKey::from(epoch.to_be_bytes().as_slice());
+            let epoch_key = epoch_key(epoch);
             let submission = match hamt.get(&epoch_key)? {
                 Some(s) => s,
                 None => unreachable!("Submission in epoch not found, report bug"),
@@ -332,6 +365,7 @@ mod tests {
             last_voting_executed_epoch: 3,
             executable_epoch_queue: Some(BTreeSet::from([1])),
             epoch_vote_submissions: Default::default(),
+            threshold_ratio: (2, 3)
         };
 
         let json1 = serde_json::to_string(&dummy_voting).unwrap();
@@ -350,6 +384,7 @@ mod tests {
             last_voting_executed_epoch: 3,
             executable_epoch_queue: Some(BTreeSet::from([1])),
             epoch_vote_submissions: Default::default(),
+            threshold_ratio: (2, 3)
         };
 
         let key = BytesKey::from("1");
