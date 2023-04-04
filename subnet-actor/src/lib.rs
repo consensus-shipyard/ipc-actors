@@ -261,9 +261,12 @@ impl SubnetActor for Actor {
             return Err(actor_error!(illegal_state, "not validator"));
         }
 
-        state
-            .verify_checkpoint(rt, &ch)
-            .map_err(|_| actor_error!(illegal_state, "checkpoint failed"))?;
+        state.verify_checkpoint(rt, &ch).map_err(|e| {
+            actor_error!(
+                illegal_state,
+                format!("checkpoint failed: {}", e.to_string())
+            )
+        })?;
 
         let msg = rt.transaction(|st: &mut State, rt| {
             let store = rt.store();
@@ -303,7 +306,7 @@ impl SubnetActor for Actor {
             }
         })?;
 
-        // propagate to sca
+        // propagate to gateway
         if let Some(p) = msg {
             rt.send(&p.to, p.method, p.params, p.value)?;
         }
@@ -366,9 +369,10 @@ impl Actor {
                 .iter()
                 .position(|x| x.addr == caller)
             {
-                if let Some(x) = st.validator_set.validators_mut().get_mut(index) {
-                    x.net_addr = params.validator_net_addr;
-                }
+                st.validator_set
+                    .validators_mut()
+                    .get_mut(index)
+                    .map(|x| x.net_addr = params.validator_net_addr);
             } else {
                 return Err(actor_error!(forbidden, "caller is not a validator"));
             }

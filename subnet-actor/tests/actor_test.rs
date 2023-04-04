@@ -15,7 +15,7 @@ mod test {
     use fvm_shared::econ::TokenAmount;
     use fvm_shared::error::ExitCode;
     use fvm_shared::METHOD_SEND;
-    use ipc_gateway::{Checkpoint, FundParams, SubnetID, MIN_COLLATERAL_AMOUNT};
+    use ipc_gateway::{get_checkpoint, Checkpoint, FundParams, SubnetID, MIN_COLLATERAL_AMOUNT};
     use ipc_subnet_actor::{
         Actor, ConsensusType, ConstructParams, JoinParams, Method, State, Status,
     };

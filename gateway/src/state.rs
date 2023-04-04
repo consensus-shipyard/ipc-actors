@@ -10,6 +10,7 @@ use fvm_shared::address::Address;
 use fvm_shared::clock::ChainEpoch;
 use fvm_shared::econ::TokenAmount;
 use fvm_shared::error::ExitCode;
+use ipc_sdk::epoch_key;
 use lazy_static::lazy_static;
 use num_traits::Zero;
 use primitives::{TCid, THamt};
@@ -40,6 +41,8 @@ pub struct State {
     pub min_stake: TokenAmount,
     pub subnets: TCid<THamt<SubnetID, Subnet>>,
     pub check_period: ChainEpoch,
+    // FIXME: Consider making checkpoints a HAMT instead of an AMT so we use
+    // the AMT index instead of and epoch k for object indexing.
     pub checkpoints: TCid<THamt<ChainEpoch, Checkpoint>>,
     /// `postbox` keeps track for an EOA of all the cross-net messages triggered by
     /// an actor that need to be propagated further through the hierarchy.
@@ -178,7 +181,7 @@ impl State {
         let ch_epoch = checkpoint_epoch(epoch, self.check_period);
         let checkpoints = self.checkpoints.load(store)?;
 
-        Ok(match get_checkpoint(&checkpoints, &ch_epoch)? {
+        Ok(match get_checkpoint(&checkpoints, ch_epoch)? {
             Some(ch) => ch.clone(),
             None => Checkpoint::new(self.network_name.clone(), ch_epoch),
         })
@@ -398,17 +401,17 @@ pub fn set_checkpoint<BS: Blockstore>(
 ) -> anyhow::Result<()> {
     let epoch = ch.epoch();
     checkpoints
-        .set(BytesKey::from(epoch.to_ne_bytes().to_vec()), ch)
+        .set(epoch_key(epoch), ch)
         .map_err(|e| e.downcast_wrap(format!("failed to set checkpoint for epoch {}", epoch)))?;
     Ok(())
 }
 
-fn get_checkpoint<'m, BS: Blockstore>(
+pub fn get_checkpoint<'m, BS: Blockstore>(
     checkpoints: &'m Map<BS, Checkpoint>,
-    epoch: &ChainEpoch,
+    epoch: ChainEpoch,
 ) -> anyhow::Result<Option<&'m Checkpoint>> {
     checkpoints
-        .get(&BytesKey::from(epoch.to_ne_bytes().to_vec()))
+        .get(&epoch_key(epoch))
         .map_err(|e| e.downcast_wrap(format!("failed to get checkpoint for id {}", epoch)))
 }
 
