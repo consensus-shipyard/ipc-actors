@@ -121,6 +121,8 @@ impl<T: UniqueVote + DeserializeOwned + Serialize> EpochVoteSubmissions<T> {
         most_voted_weight: TokenAmount,
         ratio: &Ratio,
     ) -> VoteExecutionStatus {
+        // threshold keeps track of the weight of validators that have already
+        // voted for the checkpoint
         let threshold = total_weight.clone().mul(ratio.0).div_floor(ratio.1);
 
         // note that we require THRESHOLD to be surpassed, equality is not enough!
@@ -168,7 +170,6 @@ impl<T: UniqueVote + DeserializeOwned + Serialize> EpochVoteSubmissions<T> {
     }
 }
 
-
 impl<T: UniqueVote + DeserializeOwned + Serialize> EpochVoteSubmissions<T> {
     /// Update the total submitters, returns the latest total number of submitters
     fn update_submitters<BS: Blockstore>(
@@ -204,7 +205,7 @@ impl<T: UniqueVote + DeserializeOwned + Serialize> EpochVoteSubmissions<T> {
             return Ok(unique_key);
         }
 
-        // checkpoint has not submitted before
+        // checkpoint has not been submitted before
         self.submissions.modify(store, |hamt| {
             hamt.set(hash_key, vote)?;
             Ok(())
