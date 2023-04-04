@@ -17,8 +17,8 @@ The FVM does not currently support the deployment of user-defined native actors,
 make build
 # Clone our fork of builtin-actors including custom bundling code.
 git https://github.com/adlrocha/builtin-actors
-# We are currently building the v10 bundle from the `next` branch
-git checkout next
+# Checkout the current branch compatible with ipc-actors
+git checkout ipc-actors
 # We need to point to the directory where the IPC actors have been compiled so they can be picked update
 # by the builtin-actors bundling script
 export IPC_ACTORS_PATH="<path_to>/ipc-actors/output"

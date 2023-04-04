@@ -492,7 +492,7 @@ fn test_send_cross() {
         .unwrap();
 
     // top-down
-    let sub = SubnetID::from_str("/root/f0101/f0101").unwrap();
+    let sub = SubnetID::from_str("/root/t0101/t0101").unwrap();
     h.send_cross(
         &mut rt,
         &from,
@@ -505,7 +505,7 @@ fn test_send_cross() {
         &value,
     )
     .unwrap();
-    let sub = SubnetID::from_str("/root/f0101/f0101").unwrap();
+    let sub = SubnetID::from_str("/root/t0101/t0101").unwrap();
     let circ_sup = 2 * &value;
     h.send_cross(
         &mut rt,
@@ -519,7 +519,7 @@ fn test_send_cross() {
         &circ_sup,
     )
     .unwrap();
-    let sub = SubnetID::from_str("/root/f0101/f0101/f01002").unwrap();
+    let sub = SubnetID::from_str("/root/t0101/t0101/t01002").unwrap();
     let circ_sup = circ_sup.clone() + &value;
     h.send_cross(
         &mut rt,
@@ -536,7 +536,7 @@ fn test_send_cross() {
 
     // bottom-up
     rt.set_balance(3 * &value);
-    let sub = SubnetID::from_str("/root/f0102/f0101").unwrap();
+    let sub = SubnetID::from_str("/root/t0102/t0101").unwrap();
     let zero = TokenAmount::zero();
     h.send_cross(
         &mut rt,
@@ -550,7 +550,7 @@ fn test_send_cross() {
         &zero,
     )
     .unwrap();
-    let sub = SubnetID::from_str("/root/f0102/f0101").unwrap();
+    let sub = SubnetID::from_str("/root/t0102/t0101").unwrap();
     h.send_cross(
         &mut rt,
         &from,

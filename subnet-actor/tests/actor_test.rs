@@ -15,7 +15,7 @@ mod test {
     use fvm_shared::econ::TokenAmount;
     use fvm_shared::error::ExitCode;
     use fvm_shared::METHOD_SEND;
-    use ipc_gateway::{Checkpoint, FundParams, SubnetID, MIN_COLLATERAL_AMOUNT};
+    use ipc_gateway::{get_checkpoint, Checkpoint, FundParams, SubnetID, MIN_COLLATERAL_AMOUNT};
     use ipc_subnet_actor::{
         Actor, ConsensusType, ConstructParams, JoinParams, Method, State, Status,
     };
@@ -745,6 +745,9 @@ mod test {
         let st: State = runtime.get_state();
         let votes = st.get_votes(runtime.store(), &checkpoint_0.cid()).unwrap();
         assert_eq!(votes.is_none(), true);
+        // check if the checkpoint is committed
+        let checkpoints = st.checkpoints.load(runtime.store()).unwrap();
+        get_checkpoint(&checkpoints, epoch).unwrap();
 
         // Trying to submit an already committed checkpoint should fail
         let sender2 = miners.get(2).cloned().unwrap();

@@ -1,5 +1,6 @@
 fn main() {
     use wasm_builder::WasmBuilder;
+
     WasmBuilder::new()
         .with_current_project()
         .import_memory()
