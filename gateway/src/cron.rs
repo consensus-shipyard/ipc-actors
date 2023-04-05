@@ -10,7 +10,7 @@ use ipc_actor_common::vote::{UniqueBytesKey, UniqueVote};
 use ipc_sdk::ValidatorSet;
 use num_traits::Zero;
 
-/// Validators tracks all the validator in the subnet. It is useful in handling cron checkpoints.
+/// Validators tracks all the validator in the subnet. It is useful in handling top-down checkpoints.
 #[derive(Clone, Debug, Serialize_tuple, Deserialize_tuple)]
 pub struct Validators {
     /// The validator set that holds all the validators
@@ -44,18 +44,18 @@ impl Validators {
 /// Checkpoints propagated from parent to child to signal the "final view" of the parent chain
 /// from the different validators in the subnet.
 #[derive(Clone, Debug, Serialize_tuple, Deserialize_tuple, PartialEq, Eq)]
-pub struct CronCheckpoint {
+pub struct TopDownCheckpoint {
     pub epoch: ChainEpoch,
     pub top_down_msgs: Vec<StorableMsg>,
 }
 
-impl UniqueVote for CronCheckpoint {
+impl UniqueVote for TopDownCheckpoint {
     /// Derive the unique key of the checkpoint using hash function.
     ///
-    /// To compare the cron checkpoint and ensure they are the same, we need to make sure the
+    /// To compare the top-down checkpoint and ensure they are the same, we need to make sure the
     /// top_down_msgs are the same. However, the top_down_msgs are vec, they may contain the same
     /// content, but their orders are different. In this case, we need to ensure the same order is
-    /// maintained in the cron checkpoint submission.
+    /// maintained in the top-down checkpoint submission.
     ///
     /// To ensure we have the same consistent output for different submissions, we require:
     ///     - top down messages are sorted by `nonce` in descending order

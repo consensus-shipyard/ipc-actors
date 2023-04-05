@@ -13,8 +13,8 @@ use ipc_actor_common::vote::{EpochVoteSubmissions, UniqueVote};
 use ipc_gateway::checkpoint::BatchCrossMsgs;
 use ipc_gateway::Status::{Active, Inactive};
 use ipc_gateway::{
-    get_topdown_msg, Checkpoint, CronCheckpoint, CrossMsg, IPCAddress, PostBoxItem, State,
-    StorableMsg, CROSS_MSG_FEE, DEFAULT_CHECKPOINT_PERIOD, SUBNET_ACTOR_REWARD_METHOD,
+    get_topdown_msg, BottomUpCheckpoint, CrossMsg, IPCAddress, PostBoxItem, State, StorableMsg,
+    TopDownCheckpoint, CROSS_MSG_FEE, DEFAULT_CHECKPOINT_PERIOD, SUBNET_ACTOR_REWARD_METHOD,
 };
 use ipc_sdk::subnet_id::SubnetID;
 use ipc_sdk::{epoch_key, Validator, ValidatorSet};
@@ -258,7 +258,7 @@ fn checkpoint_commit() {
     // Commit first checkpoint for first window in first subnet
     let epoch: ChainEpoch = 10;
     rt.set_epoch(epoch);
-    let ch = Checkpoint::new(shid.clone(), epoch + 9);
+    let ch = BottomUpCheckpoint::new(shid.clone(), epoch + 9);
 
     h.commit_child_check(&mut rt, &shid, &ch, ExitCode::OK)
         .unwrap();
@@ -275,7 +275,7 @@ fn checkpoint_commit() {
     let prev_cid = ch.cid();
 
     // Append a new checkpoint for the same subnet
-    let mut ch = Checkpoint::new(shid.clone(), epoch + 11);
+    let mut ch = BottomUpCheckpoint::new(shid.clone(), epoch + 11);
     ch.data.prev_check = TCid::from(prev_cid);
     h.commit_child_check(&mut rt, &shid, &ch, ExitCode::OK)
         .unwrap();
@@ -298,14 +298,14 @@ fn checkpoint_commit() {
     h.check_state();
 
     // Trying to commit from the wrong subnet
-    let ch = Checkpoint::new(shid.clone(), epoch + 9);
+    let ch = BottomUpCheckpoint::new(shid.clone(), epoch + 9);
     h.commit_child_check(&mut rt, &shid_two, &ch, ExitCode::USR_ILLEGAL_ARGUMENT)
         .unwrap();
 
     // Commit first checkpoint for first window in second subnet
     let epoch: ChainEpoch = 10;
     rt.set_epoch(epoch);
-    let ch = Checkpoint::new(shid_two.clone(), epoch + 9);
+    let ch = BottomUpCheckpoint::new(shid_two.clone(), epoch + 9);
 
     h.commit_child_check(&mut rt, &shid_two, &ch, ExitCode::OK)
         .unwrap();
@@ -353,7 +353,7 @@ fn checkpoint_crossmsgs() {
     // Commit first checkpoint for first window in first subnet
     let epoch: ChainEpoch = 10;
     rt.set_epoch(epoch);
-    let mut ch = Checkpoint::new(shid.clone(), epoch + 9);
+    let mut ch = BottomUpCheckpoint::new(shid.clone(), epoch + 9);
     // and include some fees.
     let fee = TokenAmount::from_atto(5);
     ch.data.cross_msgs = BatchCrossMsgs {
@@ -629,7 +629,7 @@ fn test_commit_child_check_bu_target_subnet() {
 
     let epoch: ChainEpoch = 10;
     rt.set_epoch(epoch);
-    let mut ch = Checkpoint::new(shid.clone(), epoch + 9);
+    let mut ch = BottomUpCheckpoint::new(shid.clone(), epoch + 9);
     // and include some fees.
     let fee = TokenAmount::from_atto(5);
     ch.data.cross_msgs = BatchCrossMsgs {
@@ -712,7 +712,7 @@ fn test_commit_child_check_bu_not_target_subnet() {
 
     let epoch: ChainEpoch = 10;
     rt.set_epoch(epoch);
-    let mut ch = Checkpoint::new(shid.clone(), epoch + 9);
+    let mut ch = BottomUpCheckpoint::new(shid.clone(), epoch + 9);
     // and include some fees.
     let fee = TokenAmount::from_atto(5);
     ch.data.cross_msgs = BatchCrossMsgs {
@@ -842,7 +842,7 @@ fn test_propagate_with_remainder() {
 
     let epoch: ChainEpoch = 10;
     rt.set_epoch(epoch);
-    let mut ch = Checkpoint::new(shid.clone(), epoch + 9);
+    let mut ch = BottomUpCheckpoint::new(shid.clone(), epoch + 9);
     // and include some fees.
     let fee = TokenAmount::from_atto(5);
     ch.data.cross_msgs = BatchCrossMsgs {
@@ -1078,7 +1078,7 @@ fn test_commit_child_check_tp_target_subnet() {
     };
     let epoch: ChainEpoch = 10;
     rt.set_epoch(epoch);
-    let mut ch = Checkpoint::new(shid.clone(), epoch + 9);
+    let mut ch = BottomUpCheckpoint::new(shid.clone(), epoch + 9);
     // and include some fees.
     let fee = TokenAmount::from_atto(5);
     ch.data.cross_msgs = BatchCrossMsgs {
@@ -1152,7 +1152,7 @@ fn test_commit_child_check_tp_not_target_subnet() {
     };
     let epoch: ChainEpoch = 10;
     rt.set_epoch(epoch);
-    let mut ch = Checkpoint::new(shid.clone(), epoch + 9);
+    let mut ch = BottomUpCheckpoint::new(shid.clone(), epoch + 9);
     // and include some fees.
     let fee = TokenAmount::from_atto(5);
     ch.data.cross_msgs = BatchCrossMsgs {
@@ -1299,35 +1299,35 @@ fn setup_membership(h: &Harness, rt: &mut MockRuntime) {
 }
 
 #[test]
-fn test_submit_cron_checking_errors() {
+fn test_submit_topdown_check_checking_errors() {
     let (h, mut rt) = setup_root();
 
     setup_membership(&h, &mut rt);
 
     let submitter = Address::new_id(10000);
 
-    let checkpoint = CronCheckpoint {
-        epoch: *DEFAULT_GENESIS_EPOCH + *DEFAULT_CRON_PERIOD,
+    let checkpoint = TopDownCheckpoint {
+        epoch: *DEFAULT_GENESIS_EPOCH + *DEFAULT_TOPDOWN_PERIOD,
         top_down_msgs: vec![],
     };
-    let r = h.submit_cron(&mut rt, submitter, checkpoint);
+    let r = h.submit_topdown_check(&mut rt, submitter, checkpoint);
     assert!(r.is_err());
     assert_eq!(r.unwrap_err().msg(), "caller not validator");
 
     let submitter = Address::new_id(0);
-    let checkpoint = CronCheckpoint {
+    let checkpoint = TopDownCheckpoint {
         epoch: *DEFAULT_GENESIS_EPOCH + 1,
         top_down_msgs: vec![],
     };
-    let r = h.submit_cron(&mut rt, submitter, checkpoint);
+    let r = h.submit_topdown_check(&mut rt, submitter, checkpoint);
     assert!(r.is_err());
     assert_eq!(r.unwrap_err().msg(), "epoch not allowed");
 
-    let checkpoint = CronCheckpoint {
+    let checkpoint = TopDownCheckpoint {
         epoch: *DEFAULT_GENESIS_EPOCH,
         top_down_msgs: vec![],
     };
-    let r = h.submit_cron(&mut rt, submitter, checkpoint);
+    let r = h.submit_topdown_check(&mut rt, submitter, checkpoint);
     assert!(r.is_err());
     assert_eq!(r.unwrap_err().msg(), "epoch already executed");
 }
@@ -1335,10 +1335,10 @@ fn test_submit_cron_checking_errors() {
 fn get_epoch_submissions(
     rt: &mut MockRuntime,
     epoch: ChainEpoch,
-) -> Option<EpochVoteSubmissions<CronCheckpoint>> {
+) -> Option<EpochVoteSubmissions<TopDownCheckpoint>> {
     let st: State = rt.get_state();
     let hamt = st
-        .cron_checkpoint_voting
+        .topdown_checkpoint_voting
         .epoch_vote_submissions()
         .load(rt.store())
         .unwrap();
@@ -1347,21 +1347,21 @@ fn get_epoch_submissions(
 }
 
 #[test]
-fn test_submit_cron_works_with_execution() {
+fn test_submit_topdown_check_works_with_execution() {
     let (h, mut rt) = setup_root();
 
     setup_membership(&h, &mut rt);
 
-    let epoch = *DEFAULT_GENESIS_EPOCH + *DEFAULT_CRON_PERIOD;
+    let epoch = *DEFAULT_GENESIS_EPOCH + *DEFAULT_TOPDOWN_PERIOD;
     let msg = storable_msg(0);
-    let checkpoint = CronCheckpoint {
+    let checkpoint = TopDownCheckpoint {
         epoch,
         top_down_msgs: vec![msg.clone()],
     };
 
     // first submission
     let submitter = Address::new_id(0);
-    let r = h.submit_cron(&mut rt, submitter, checkpoint.clone());
+    let r = h.submit_topdown_check(&mut rt, submitter, checkpoint.clone());
     assert!(r.is_ok());
     let submission = get_epoch_submissions(&mut rt, epoch).unwrap();
     assert_eq!(
@@ -1373,19 +1373,19 @@ fn test_submit_cron_works_with_execution() {
     );
     let st: State = rt.get_state();
     assert_eq!(
-        st.cron_checkpoint_voting.last_voting_executed_epoch(),
+        st.topdown_checkpoint_voting.last_voting_executed_epoch(),
         *DEFAULT_GENESIS_EPOCH
     ); // not executed yet
 
     // already submitted
     let submitter = Address::new_id(0);
-    let r = h.submit_cron(&mut rt, submitter, checkpoint.clone());
+    let r = h.submit_topdown_check(&mut rt, submitter, checkpoint.clone());
     assert!(r.is_err());
     assert_eq!(r.unwrap_err().msg(), "already submitted");
 
     // second submission
     let submitter = Address::new_id(1);
-    let r = h.submit_cron(&mut rt, submitter, checkpoint.clone());
+    let r = h.submit_topdown_check(&mut rt, submitter, checkpoint.clone());
     assert!(r.is_ok());
     let submission = get_epoch_submissions(&mut rt, epoch).unwrap();
     assert_eq!(
@@ -1397,13 +1397,13 @@ fn test_submit_cron_works_with_execution() {
     );
     let st: State = rt.get_state();
     assert_eq!(
-        st.cron_checkpoint_voting.last_voting_executed_epoch(),
+        st.topdown_checkpoint_voting.last_voting_executed_epoch(),
         *DEFAULT_GENESIS_EPOCH
     ); // not executed yet
 
     // third submission
     let submitter = Address::new_id(2);
-    let r = h.submit_cron(&mut rt, submitter, checkpoint.clone());
+    let r = h.submit_topdown_check(&mut rt, submitter, checkpoint.clone());
     assert!(r.is_ok());
     let submission = get_epoch_submissions(&mut rt, epoch).unwrap();
     assert_eq!(
@@ -1415,7 +1415,7 @@ fn test_submit_cron_works_with_execution() {
     );
     let st: State = rt.get_state();
     assert_eq!(
-        st.cron_checkpoint_voting.last_voting_executed_epoch(),
+        st.topdown_checkpoint_voting.last_voting_executed_epoch(),
         *DEFAULT_GENESIS_EPOCH
     ); // not executed yet
 
@@ -1429,13 +1429,13 @@ fn test_submit_cron_works_with_execution() {
         None,
         ExitCode::OK,
     );
-    let r = h.submit_cron(&mut rt, submitter, checkpoint.clone());
+    let r = h.submit_topdown_check(&mut rt, submitter, checkpoint.clone());
     assert!(r.is_ok());
     let submission = get_epoch_submissions(&mut rt, epoch);
     assert!(submission.is_none());
     let st: State = rt.get_state();
     assert_eq!(
-        st.cron_checkpoint_voting.last_voting_executed_epoch(),
+        st.topdown_checkpoint_voting.last_voting_executed_epoch(),
         epoch
     );
 }
@@ -1452,53 +1452,53 @@ fn storable_msg(nonce: u64) -> StorableMsg {
 }
 
 #[test]
-fn test_submit_cron_abort() {
+fn test_submit_topdown_check_abort() {
     let (h, mut rt) = setup_root();
 
     setup_membership(&h, &mut rt);
 
-    let epoch = *DEFAULT_GENESIS_EPOCH + *DEFAULT_CRON_PERIOD;
+    let epoch = *DEFAULT_GENESIS_EPOCH + *DEFAULT_TOPDOWN_PERIOD;
 
     // first submission
     let submitter = Address::new_id(0);
-    let checkpoint = CronCheckpoint {
+    let checkpoint = TopDownCheckpoint {
         epoch,
         top_down_msgs: vec![],
     };
-    let r = h.submit_cron(&mut rt, submitter, checkpoint.clone());
+    let r = h.submit_topdown_check(&mut rt, submitter, checkpoint.clone());
     assert!(r.is_ok());
 
     // second submission
     let submitter = Address::new_id(1);
-    let checkpoint = CronCheckpoint {
+    let checkpoint = TopDownCheckpoint {
         epoch,
         top_down_msgs: vec![storable_msg(1)],
     };
-    let r = h.submit_cron(&mut rt, submitter, checkpoint.clone());
+    let r = h.submit_topdown_check(&mut rt, submitter, checkpoint.clone());
     assert!(r.is_ok());
 
     // third submission
     let submitter = Address::new_id(2);
-    let checkpoint = CronCheckpoint {
+    let checkpoint = TopDownCheckpoint {
         epoch,
         top_down_msgs: vec![storable_msg(1), storable_msg(2)],
     };
-    let r = h.submit_cron(&mut rt, submitter, checkpoint.clone());
+    let r = h.submit_topdown_check(&mut rt, submitter, checkpoint.clone());
     assert!(r.is_ok());
 
     // fourth submission, aborted
     let submitter = Address::new_id(3);
-    let checkpoint = CronCheckpoint {
+    let checkpoint = TopDownCheckpoint {
         epoch,
         top_down_msgs: vec![storable_msg(1), storable_msg(2), storable_msg(3)],
     };
-    let r = h.submit_cron(&mut rt, submitter, checkpoint.clone());
+    let r = h.submit_topdown_check(&mut rt, submitter, checkpoint.clone());
     assert!(r.is_ok());
 
     // check aborted
     let st: State = rt.get_state();
     assert_eq!(
-        st.cron_checkpoint_voting.last_voting_executed_epoch(),
+        st.topdown_checkpoint_voting.last_voting_executed_epoch(),
         *DEFAULT_GENESIS_EPOCH
     ); // not executed yet
     let submission = get_epoch_submissions(&mut rt, epoch).unwrap();
@@ -1513,65 +1513,65 @@ fn test_submit_cron_abort() {
 }
 
 #[test]
-fn test_submit_cron_sequential_execution() {
+fn test_submit_topdown_check_sequential_execution() {
     let (h, mut rt) = setup_root();
 
     setup_membership(&h, &mut rt);
 
-    let pending_epoch = *DEFAULT_GENESIS_EPOCH + *DEFAULT_CRON_PERIOD * 2;
-    let checkpoint = CronCheckpoint {
+    let pending_epoch = *DEFAULT_GENESIS_EPOCH + *DEFAULT_TOPDOWN_PERIOD * 2;
+    let checkpoint = TopDownCheckpoint {
         epoch: pending_epoch,
         top_down_msgs: vec![],
     };
 
     // first submission
     let submitter = Address::new_id(0);
-    h.submit_cron(&mut rt, submitter, checkpoint.clone())
+    h.submit_topdown_check(&mut rt, submitter, checkpoint.clone())
         .unwrap();
 
     // second submission
     let submitter = Address::new_id(1);
-    h.submit_cron(&mut rt, submitter, checkpoint.clone())
+    h.submit_topdown_check(&mut rt, submitter, checkpoint.clone())
         .unwrap();
 
     // third submission
     let submitter = Address::new_id(2);
-    h.submit_cron(&mut rt, submitter, checkpoint.clone())
+    h.submit_topdown_check(&mut rt, submitter, checkpoint.clone())
         .unwrap();
 
     // fourth submission, not executed
     let submitter = Address::new_id(3);
-    h.submit_cron(&mut rt, submitter, checkpoint.clone())
+    h.submit_topdown_check(&mut rt, submitter, checkpoint.clone())
         .unwrap();
     let st: State = rt.get_state();
     assert_eq!(
-        st.cron_checkpoint_voting.last_voting_executed_epoch(),
+        st.topdown_checkpoint_voting.last_voting_executed_epoch(),
         *DEFAULT_GENESIS_EPOCH
     ); // not executed yet
     assert_eq!(
-        *st.cron_checkpoint_voting.executable_epoch_queue(),
+        *st.topdown_checkpoint_voting.executable_epoch_queue(),
         Some(BTreeSet::from([pending_epoch]))
     ); // not executed yet
 
     // now we execute the previous epoch
     let msg = storable_msg(0);
-    let epoch = *DEFAULT_GENESIS_EPOCH + *DEFAULT_CRON_PERIOD;
-    let checkpoint = CronCheckpoint {
+    let epoch = *DEFAULT_GENESIS_EPOCH + *DEFAULT_TOPDOWN_PERIOD;
+    let checkpoint = TopDownCheckpoint {
         epoch,
         top_down_msgs: vec![msg.clone()],
     };
 
     // first submission
     let submitter = Address::new_id(0);
-    h.submit_cron(&mut rt, submitter, checkpoint.clone())
+    h.submit_topdown_check(&mut rt, submitter, checkpoint.clone())
         .unwrap();
     // second submission
     let submitter = Address::new_id(1);
-    h.submit_cron(&mut rt, submitter, checkpoint.clone())
+    h.submit_topdown_check(&mut rt, submitter, checkpoint.clone())
         .unwrap();
     // third submission
     let submitter = Address::new_id(2);
-    h.submit_cron(&mut rt, submitter, checkpoint.clone())
+    h.submit_topdown_check(&mut rt, submitter, checkpoint.clone())
         .unwrap();
     // fourth submission, executed
     let submitter = Address::new_id(3);
@@ -1584,28 +1584,28 @@ fn test_submit_cron_sequential_execution() {
         None,
         ExitCode::OK,
     );
-    h.submit_cron(&mut rt, submitter, checkpoint.clone())
+    h.submit_topdown_check(&mut rt, submitter, checkpoint.clone())
         .unwrap();
     let submission = get_epoch_submissions(&mut rt, epoch);
     assert!(submission.is_none());
     let st: State = rt.get_state();
     assert_eq!(
-        st.cron_checkpoint_voting.last_voting_executed_epoch(),
+        st.topdown_checkpoint_voting.last_voting_executed_epoch(),
         epoch
     );
 
     // now we submit to the next epoch
-    let epoch = *DEFAULT_GENESIS_EPOCH + *DEFAULT_CRON_PERIOD * 3;
-    let checkpoint = CronCheckpoint {
+    let epoch = *DEFAULT_GENESIS_EPOCH + *DEFAULT_TOPDOWN_PERIOD * 3;
+    let checkpoint = TopDownCheckpoint {
         epoch,
         top_down_msgs: vec![],
     };
-    h.submit_cron(&mut rt, submitter, checkpoint.clone())
+    h.submit_topdown_check(&mut rt, submitter, checkpoint.clone())
         .unwrap();
     let st: State = rt.get_state();
     assert_eq!(
-        st.cron_checkpoint_voting.last_voting_executed_epoch(),
+        st.topdown_checkpoint_voting.last_voting_executed_epoch(),
         pending_epoch
     );
-    assert_eq!(*st.cron_checkpoint_voting.executable_epoch_queue(), None);
+    assert_eq!(*st.topdown_checkpoint_voting.executable_epoch_queue(), None);
 }

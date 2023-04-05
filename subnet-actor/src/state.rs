@@ -11,7 +11,8 @@ use fvm_shared::clock::ChainEpoch;
 use fvm_shared::econ::TokenAmount;
 use ipc_actor_common::vote::Voting;
 use ipc_gateway::{
-    Checkpoint, SubnetID, CHECKPOINT_GENESIS_CID, DEFAULT_CHECKPOINT_PERIOD, MIN_COLLATERAL_AMOUNT,
+    BottomUpCheckpoint, SubnetID, CHECKPOINT_GENESIS_CID, DEFAULT_CHECKPOINT_PERIOD,
+    MIN_COLLATERAL_AMOUNT,
 };
 use ipc_sdk::epoch_key;
 use ipc_sdk::{Validator, ValidatorSet};
@@ -45,19 +46,19 @@ pub struct State {
     pub status: Status,
     #[serde(with = "serde_bytes")]
     pub genesis: Vec<u8>,
-    pub finality_threshold: ChainEpoch,
 
     // duplicated definition for easier data access in client applications
-    pub check_period: ChainEpoch,
+    pub bottomup_check_period: ChainEpoch,
+    pub topdown_check_period: ChainEpoch,
     pub genesis_epoch: ChainEpoch,
 
     // FIXME: Consider making checkpoints a HAMT instead of an AMT so we use
     // the AMT index instead of and epoch k for object indexing.
-    pub committed_checkpoints: TCid<THamt<ChainEpoch, Checkpoint>>,
+    pub committed_checkpoints: TCid<THamt<ChainEpoch, BottomUpCheckpoint>>,
     pub validator_set: ValidatorSet,
     pub min_validators: u64,
     pub previous_executed_checkpoint_cid: Cid,
-    pub epoch_checkpoint_voting: Voting<Checkpoint>,
+    pub epoch_checkpoint_voting: Voting<BottomUpCheckpoint>,
 }
 
 /// We should probably have a derive macro to mark an object as a state object,
@@ -70,10 +71,15 @@ impl State {
         current_epoch: ChainEpoch,
     ) -> anyhow::Result<State> {
         let min_stake = TokenAmount::from_atto(MIN_COLLATERAL_AMOUNT);
-        let check_period = if params.check_period < DEFAULT_CHECKPOINT_PERIOD {
+        let bottomup_check_period = if params.bottomup_check_period < DEFAULT_CHECKPOINT_PERIOD {
             DEFAULT_CHECKPOINT_PERIOD
         } else {
-            params.check_period
+            params.bottomup_check_period
+        };
+        let topdown_check_period = if params.topdown_check_period < DEFAULT_CHECKPOINT_PERIOD {
+            DEFAULT_CHECKPOINT_PERIOD
+        } else {
+            params.topdown_check_period
         };
         let state = State {
             name: params.name,
@@ -87,8 +93,8 @@ impl State {
                 params.min_validator_stake
             },
             min_validators: params.min_validators,
-            finality_threshold: params.finality_threshold,
-            check_period,
+            bottomup_check_period,
+            topdown_check_period,
             committed_checkpoints: TCid::new_hamt(store)?,
             genesis: params.genesis,
             status: Status::Instantiated,
@@ -96,12 +102,12 @@ impl State {
             validator_set: ValidatorSet::default(),
             genesis_epoch: current_epoch,
             previous_executed_checkpoint_cid: *CHECKPOINT_GENESIS_CID,
-            epoch_checkpoint_voting: Voting::<Checkpoint>::new_with_ratio(
+            epoch_checkpoint_voting: Voting::<BottomUpCheckpoint>::new_with_ratio(
                 store,
                 current_epoch,
-                check_period,
-                1,
+                bottomup_check_period,
                 2,
+                3,
             )?,
         };
 
@@ -256,7 +262,11 @@ impl State {
     }
 
     /// Do not call this function in transaction
-    pub fn verify_checkpoint(&self, rt: &mut impl Runtime, ch: &Checkpoint) -> anyhow::Result<()> {
+    pub fn verify_checkpoint(
+        &self,
+        rt: &mut impl Runtime,
+        ch: &BottomUpCheckpoint,
+    ) -> anyhow::Result<()> {
         // check that subnet is active
         if self.status != Status::Active {
             return Err(anyhow!(
@@ -301,7 +311,7 @@ impl State {
     pub fn ensure_checkpoint_chained(
         &mut self,
         store: &impl Blockstore,
-        ch: &Checkpoint,
+        ch: &BottomUpCheckpoint,
     ) -> anyhow::Result<bool> {
         Ok(
             if self.previous_executed_checkpoint_cid != ch.prev_check().cid() {
@@ -317,7 +327,7 @@ impl State {
     pub fn flush_checkpoint<BS: Blockstore>(
         &mut self,
         store: &BS,
-        ch: &Checkpoint,
+        ch: &BottomUpCheckpoint,
     ) -> anyhow::Result<()> {
         let epoch = ch.epoch();
         self.committed_checkpoints.modify(store, |hamt| {
@@ -338,8 +348,8 @@ impl Default for State {
             consensus: ConsensusType::Delegated,
             min_validator_stake: TokenAmount::from_atto(MIN_COLLATERAL_AMOUNT),
             total_stake: TokenAmount::zero(),
-            finality_threshold: 5,
-            check_period: 0,
+            bottomup_check_period: 0,
+            topdown_check_period: 0,
             genesis: Vec::new(),
             status: Status::Instantiated,
             stake: TCid::default(),

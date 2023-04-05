@@ -23,11 +23,11 @@ use fvm_shared::MethodNum;
 use fvm_shared::METHOD_SEND;
 use ipc_gateway::checkpoint::ChildCheck;
 use ipc_gateway::{
-    ext, get_topdown_msg, is_bottomup, Actor, Checkpoint, ConstructorParams, CrossMsg,
+    ext, get_topdown_msg, is_bottomup, Actor, BottomUpCheckpoint, ConstructorParams, CrossMsg,
     CrossMsgParams, FundParams, IPCAddress, Method, PropagateParams, State, StorableMsg, Subnet,
-    SubnetID, CROSS_MSG_FEE, DEFAULT_CHECKPOINT_PERIOD, MIN_COLLATERAL_AMOUNT,
+    SubnetID, TopDownCheckpoint, CROSS_MSG_FEE, DEFAULT_CHECKPOINT_PERIOD, MIN_COLLATERAL_AMOUNT,
+    SUBNET_ACTOR_REWARD_METHOD,
 };
-use ipc_gateway::{CronCheckpoint, SUBNET_ACTOR_REWARD_METHOD};
 use ipc_sdk::ValidatorSet;
 use lazy_static::lazy_static;
 use primitives::{TCid, TCidContent};
@@ -43,7 +43,7 @@ lazy_static! {
         Address::new_bls(&[1; fvm_shared::address::BLS_PUB_LEN]).unwrap();
     pub static ref ACTOR: Address = Address::new_actor("actor".as_bytes());
     pub static ref SIG_TYPES: Vec<Cid> = vec![*ACCOUNT_ACTOR_CODE_ID, *MULTISIG_ACTOR_CODE_ID];
-    pub static ref DEFAULT_CRON_PERIOD: ChainEpoch = 20;
+    pub static ref DEFAULT_TOPDOWN_PERIOD: ChainEpoch = 20;
     pub static ref DEFAULT_GENESIS_EPOCH: ChainEpoch = 1;
 }
 
@@ -81,8 +81,8 @@ impl Harness {
         rt.expect_validate_caller_addr(vec![INIT_ACTOR_ADDR]);
         let params = ConstructorParams {
             network_name: self.net_name.to_string(),
-            checkpoint_period: 10,
-            cron_period: *DEFAULT_CRON_PERIOD,
+            bottomup_check_period: 10,
+            topdown_check_period: *DEFAULT_TOPDOWN_PERIOD,
             genesis_epoch: *DEFAULT_GENESIS_EPOCH,
         };
         rt.set_caller(*INIT_ACTOR_CODE_ID, INIT_ACTOR_ADDR);
@@ -100,18 +100,18 @@ impl Harness {
 
         assert_eq!(st.network_name, self.net_name);
         assert_eq!(st.min_stake, TokenAmount::from_atto(MIN_COLLATERAL_AMOUNT));
-        assert_eq!(st.check_period, DEFAULT_CHECKPOINT_PERIOD);
+        assert_eq!(st.bottomup_check_period, DEFAULT_CHECKPOINT_PERIOD);
         assert_eq!(st.applied_bottomup_nonce, 0);
         assert_eq!(
-            st.cron_checkpoint_voting.submission_period(),
-            *DEFAULT_CRON_PERIOD
+            st.topdown_checkpoint_voting.submission_period(),
+            *DEFAULT_TOPDOWN_PERIOD
         );
         assert_eq!(
-            st.cron_checkpoint_voting.genesis_epoch(),
+            st.topdown_checkpoint_voting.genesis_epoch(),
             *DEFAULT_GENESIS_EPOCH
         );
         verify_empty_map(rt, st.subnets.cid());
-        verify_empty_map(rt, st.checkpoints.cid());
+        verify_empty_map(rt, st.bottomup_checkpoints.cid());
     }
 
     pub fn register(
@@ -244,7 +244,7 @@ impl Harness {
         &self,
         rt: &mut MockRuntime,
         id: &SubnetID,
-        ch: &Checkpoint,
+        ch: &BottomUpCheckpoint,
         code: ExitCode,
     ) -> Result<(), ActorError> {
         rt.set_caller(*SUBNET_ACTOR_CODE_ID, id.subnet_actor());
@@ -554,17 +554,17 @@ impl Harness {
         Ok(())
     }
 
-    pub fn submit_cron(
+    pub fn submit_topdown_check(
         &self,
         rt: &mut MockRuntime,
         submitter: Address,
-        checkpoint: CronCheckpoint,
+        checkpoint: TopDownCheckpoint,
     ) -> Result<(), ActorError> {
         rt.set_caller(*ACCOUNT_ACTOR_CODE_ID, submitter);
         rt.expect_validate_caller_type(SIG_TYPES.clone());
 
         rt.call::<Actor>(
-            Method::SubmitCron as MethodNum,
+            Method::SubmitTopDownCheckpoint as MethodNum,
             IpldBlock::serialize_cbor(&checkpoint).unwrap(),
         )?;
 

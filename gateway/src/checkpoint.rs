@@ -1,19 +1,20 @@
+use crate::{ensure_message_sorted, CrossMsg, StorableMsg};
 use anyhow::anyhow;
 use cid::multihash::Code;
 use cid::multihash::MultihashDigest;
 use cid::Cid;
 use fvm_ipld_encoding::DAG_CBOR;
 use fvm_ipld_encoding::{serde_bytes, to_vec};
+use fvm_shared::address::Address;
 use fvm_shared::clock::ChainEpoch;
 use fvm_shared::econ::TokenAmount;
 use ipc_actor_common::vote::{UniqueBytesKey, UniqueVote};
 use ipc_sdk::subnet_id::SubnetID;
+use ipc_sdk::ValidatorSet;
 use lazy_static::lazy_static;
 use num_traits::Zero;
 use primitives::{TCid, TLink};
 use serde_tuple::{Deserialize_tuple, Serialize_tuple};
-
-use crate::{ensure_message_sorted, CrossMsg};
 
 lazy_static! {
     // Default CID used for the genesis checkpoint. Using
@@ -24,19 +25,19 @@ lazy_static! {
 }
 
 #[derive(PartialEq, Eq, Clone, Debug, Serialize_tuple, Deserialize_tuple)]
-pub struct Checkpoint {
+pub struct BottomUpCheckpoint {
     pub data: CheckData,
     #[serde(with = "serde_bytes")]
     pub sig: Vec<u8>,
 }
 
-impl UniqueVote for Checkpoint {
+impl UniqueVote for BottomUpCheckpoint {
     fn unique_key(&self) -> anyhow::Result<UniqueBytesKey> {
         Ok(self.cid().to_bytes())
     }
 }
 
-impl Checkpoint {
+impl BottomUpCheckpoint {
     pub fn new(id: SubnetID, epoch: ChainEpoch) -> Self {
         Self {
             data: CheckData::new(id, epoch),
@@ -76,7 +77,7 @@ impl Checkpoint {
     }
 
     /// return the cid of the previous checkpoint this checkpoint points to.
-    pub fn prev_check(&self) -> &TCid<TLink<Checkpoint>> {
+    pub fn prev_check(&self) -> &TCid<TLink<BottomUpCheckpoint>> {
         &self.data.prev_check
     }
 
@@ -122,7 +123,7 @@ impl Checkpoint {
 
     /// Add the cid of a checkpoint from a child subnet for further propagation
     /// to the upper layerse of the hierarchy.
-    pub fn add_child_check(&mut self, commit: &Checkpoint) -> anyhow::Result<()> {
+    pub fn add_child_check(&mut self, commit: &BottomUpCheckpoint) -> anyhow::Result<()> {
         let cid = TCid::from(commit.cid());
         match self
             .data
@@ -162,7 +163,7 @@ pub struct CheckData {
     #[serde(with = "serde_bytes")]
     pub proof: Vec<u8>,
     pub epoch: ChainEpoch,
-    pub prev_check: TCid<TLink<Checkpoint>>,
+    pub prev_check: TCid<TLink<BottomUpCheckpoint>>,
     pub children: Vec<ChildCheck>,
     pub cross_msgs: BatchCrossMsgs,
 }
@@ -189,7 +190,7 @@ impl CheckData {
 #[derive(PartialEq, Eq, Clone, Debug, Serialize_tuple, Deserialize_tuple)]
 pub struct ChildCheck {
     pub source: SubnetID,
-    pub checks: Vec<TCid<TLink<Checkpoint>>>,
+    pub checks: Vec<TCid<TLink<BottomUpCheckpoint>>>,
 }
 
 /// CheckpointEpoch returns the epoch of the next checkpoint
@@ -209,4 +210,66 @@ pub fn checkpoint_epoch(epoch: ChainEpoch, period: ChainEpoch) -> ChainEpoch {
 pub fn window_epoch(epoch: ChainEpoch, period: ChainEpoch) -> ChainEpoch {
     let ind = epoch / period;
     period * (ind + 1)
+}
+
+/// Validators tracks all the validator in the subnet. It is useful in handling top-down checkpoints.
+#[derive(Clone, Debug, Serialize_tuple, Deserialize_tuple)]
+pub struct Validators {
+    /// The validator set that holds all the validators
+    pub validators: ValidatorSet,
+    /// Tracks the total weight of the validators
+    pub total_weight: TokenAmount,
+}
+
+impl Validators {
+    pub fn new(validators: ValidatorSet) -> Self {
+        let mut weight = TokenAmount::zero();
+        for v in validators.validators() {
+            weight += v.weight.clone();
+        }
+        Self {
+            validators,
+            total_weight: weight,
+        }
+    }
+
+    /// Get the weight of a validator
+    pub fn get_validator_weight(&self, addr: &Address) -> Option<TokenAmount> {
+        self.validators
+            .validators()
+            .iter()
+            .find(|x| x.addr == *addr)
+            .map(|v| v.weight.clone())
+    }
+}
+
+/// Checkpoints propagated from parent to child to signal the "final view" of the parent chain
+/// from the different validators in the subnet.
+#[derive(Clone, Debug, Serialize_tuple, Deserialize_tuple, PartialEq, Eq)]
+pub struct TopDownCheckpoint {
+    pub epoch: ChainEpoch,
+    pub top_down_msgs: Vec<StorableMsg>,
+}
+
+impl UniqueVote for TopDownCheckpoint {
+    /// Derive the unique key of the checkpoint using hash function.
+    ///
+    /// To compare the top-down checkpoint and ensure they are the same, we need to make sure the
+    /// top_down_msgs are the same. However, the top_down_msgs are vec, they may contain the same
+    /// content, but their orders are different. In this case, we need to ensure the same order is
+    /// maintained in the top-down checkpoint submission.
+    ///
+    /// To ensure we have the same consistent output for different submissions, we require:
+    ///     - top down messages are sorted by `nonce` in descending order
+    ///
+    /// Actor will not perform sorting to save gas. Client should do it, actor just check.
+    fn unique_key(&self) -> anyhow::Result<UniqueBytesKey> {
+        ensure_message_sorted(&self.top_down_msgs)?;
+
+        let mh_code = Code::Blake2b256;
+        // TODO: to avoid serialization again, maybe we should perform deserialization in the actor
+        // TODO: dispatch call to save gas? The actor dispatching contains the raw serialized data,
+        // TODO: which we dont have to serialize here again
+        Ok(mh_code.digest(&to_vec(self).unwrap()).to_bytes())
+    }
 }

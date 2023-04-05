@@ -12,7 +12,6 @@ use multihash::MultihashDigest;
 use primitives::CodeType;
 use std::cmp::Ordering;
 
-use crate::checkpoint::Checkpoint;
 use crate::cross::CrossMsg;
 
 /// ID used in the builtin-actors bundle manifest
@@ -35,19 +34,14 @@ pub trait ExecutableMessage {
 #[derive(Serialize_tuple, Deserialize_tuple)]
 pub struct ConstructorParams {
     pub network_name: String,
-    pub checkpoint_period: ChainEpoch,
-    pub cron_period: ChainEpoch,
+    pub bottomup_check_period: ChainEpoch,
+    pub topdown_check_period: ChainEpoch,
     pub genesis_epoch: ChainEpoch,
 }
 
 #[derive(Serialize_tuple, Deserialize_tuple, Clone)]
 pub struct FundParams {
     pub value: TokenAmount,
-}
-
-#[derive(Debug, Serialize_tuple, Deserialize_tuple)]
-pub struct CheckpointParams {
-    pub checkpoint: Checkpoint,
 }
 
 #[derive(Serialize_tuple, Deserialize_tuple, Clone)]
@@ -128,8 +122,8 @@ mod tests {
     fn serialize_params() {
         let p = ConstructorParams {
             network_name: "/root".to_string(),
-            checkpoint_period: 100,
-            cron_period: 20,
+            bottomup_check_period: 100,
+            topdown_check_period: 20,
             genesis_epoch: 10,
         };
         let bytes = fil_actors_runtime::util::cbor::serialize(&p, "").unwrap();
@@ -141,8 +135,8 @@ mod tests {
                 .unwrap();
 
         assert_eq!(p.network_name, deserialized.network_name);
-        assert_eq!(p.checkpoint_period, deserialized.checkpoint_period);
-        assert_eq!(p.cron_period, deserialized.cron_period);
+        assert_eq!(p.bottomup_check_period, deserialized.bottomup_check_period);
+        assert_eq!(p.topdown_check_period, deserialized.topdown_check_period);
         assert_eq!(p.genesis_epoch, deserialized.genesis_epoch);
     }
 }

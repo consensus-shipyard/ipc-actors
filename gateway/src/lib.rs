@@ -2,12 +2,12 @@
 
 extern crate core;
 
-pub use self::checkpoint::{Checkpoint, CHECKPOINT_GENESIS_CID};
+pub use self::checkpoint::{BottomUpCheckpoint, CHECKPOINT_GENESIS_CID};
 pub use self::cross::{is_bottomup, CrossMsg, CrossMsgs, IPCMsgType, StorableMsg};
 pub use self::state::*;
 pub use self::subnet::*;
 pub use self::types::*;
-pub use cron::CronCheckpoint;
+pub use checkpoint::TopDownCheckpoint;
 use cross::{burn_bu_funds, cross_msg_side_effects, distribute_crossmsg_fee};
 use fil_actors_runtime::runtime::fvm::resolve_secp_bls;
 use fil_actors_runtime::runtime::{ActorCode, Runtime};
@@ -33,7 +33,6 @@ use num_traits::FromPrimitive;
 fil_actors_runtime::wasm_trampoline!(Actor);
 
 pub mod checkpoint;
-mod cron;
 mod cross;
 mod error;
 #[doc(hidden)]
@@ -63,7 +62,7 @@ pub enum Method {
     SendCross = frc42_dispatch::method_hash!("SendCross"),
     Propagate = frc42_dispatch::method_hash!("Propagate"),
     WhiteListPropagator = frc42_dispatch::method_hash!("WhiteListPropagator"),
-    SubmitCron = frc42_dispatch::method_hash!("SubmitCron"),
+    SubmitTopDownCheckpoint = frc42_dispatch::method_hash!("SubmitTopDownCheckpoint"),
     SetMembership = frc42_dispatch::method_hash!("SetMembership"),
 }
 
@@ -271,7 +270,10 @@ impl Actor {
 
     /// CommitChildCheck propagates the commitment of a checkpoint from a child subnet,
     /// process the cross-messages directed to the subnet.
-    fn commit_child_check(rt: &mut impl Runtime, mut commit: Checkpoint) -> Result<(), ActorError> {
+    fn commit_child_check(
+        rt: &mut impl Runtime,
+        mut commit: BottomUpCheckpoint,
+    ) -> Result<(), ActorError> {
         // This must be called by a subnet actor, once we have a way to identify subnet actor,
         // we should update here.
         rt.validate_immediate_caller_accept_any()?;
@@ -677,19 +679,19 @@ impl Actor {
         })
     }
 
-    /// Submit a new cron checkpoint
+    /// Submit a new topdown checkpoint
     ///
-    /// It only accepts submission at multiples of `cron_period` since `genesis_epoch`, which are
+    /// It only accepts submission at multiples of `topdown_check_period` since `genesis_epoch`, which are
     /// set during construction. Each checkpoint will have its number of submissions tracked. The
     /// same address cannot submit twice. Once the number of submissions is more than or equal to 2/3
     /// of the total number of validators, the messages will be applied.
     ///
-    /// Each cron checkpoint will be checked against each other using blake hashing.
-    fn submit_cron(
+    /// Each topdown checkpoint will be checked against each other using blake hashing.
+    fn submit_topdown_check(
         rt: &mut impl Runtime,
-        checkpoint: CronCheckpoint,
+        checkpoint: TopDownCheckpoint,
     ) -> Result<RawBytes, ActorError> {
-        // submit cron can only be performed by signable addresses
+        // submit topdown can only be performed by signable addresses
         rt.validate_immediate_caller_type(CALLER_TYPES_SIGNABLE.iter())?;
 
         let to_execute = rt.transaction(|st: &mut State, rt| {
@@ -700,7 +702,7 @@ impl Actor {
             let epoch = checkpoint.epoch;
             let total_weight = st.validators.total_weight.clone();
             let ch = st
-                .cron_checkpoint_voting
+                .topdown_checkpoint_voting
                 .submit_vote(
                     store,
                     checkpoint,
@@ -711,13 +713,13 @@ impl Actor {
                 )
                 .map_err(|e| {
                     log::error!(
-                        "encountered error processing submit cron checkpoint: {:?}",
+                        "encountered error processing submit topdown checkpoint: {:?}",
                         e
                     );
                     actor_error!(unhandled_message, e.to_string())
                 })?;
             if ch.is_some() {
-                st.cron_checkpoint_voting
+                st.topdown_checkpoint_voting
                     .mark_epoch_executed(store, epoch)
                     .map_err(|e| {
                         log::error!("encountered error marking epoch executed: {:?}", e);
@@ -728,11 +730,11 @@ impl Actor {
             Ok(ch)
         })?;
 
-        // we only `execute_next_cron_epoch(rt)` if there is no execution for the current submission
+        // we only `execute_next_topdown_epoch(rt)` if there is no execution for the current submission
         // so that we don't blow up the gas.
         if let Some(checkpoint) = to_execute {
             if checkpoint.top_down_msgs.is_empty() {
-                Self::execute_next_cron_epoch(rt)?;
+                Self::execute_next_topdown_epoch(rt)?;
             }
             for m in checkpoint.top_down_msgs {
                 Self::apply_msg_inner(
@@ -744,7 +746,7 @@ impl Actor {
                 )?;
             }
         } else {
-            Self::execute_next_cron_epoch(rt)?;
+            Self::execute_next_topdown_epoch(rt)?;
         }
 
         Ok(RawBytes::default())
@@ -945,27 +947,27 @@ impl Actor {
         Ok(RawBytes::new(cid.to_bytes()))
     }
 
-    /// Execute the next approved cron checkpoint.
+    /// Execute the next approved topdown checkpoint.
     /// This is an edge case to ensure none of the epoches will be stuck. Consider the following example:
     ///
-    /// Epoch 10 and 20 are two cron epoch to be executed. However, all the validators have submitted
+    /// Epoch 10 and 20 are two topdown epoch to be executed. However, all the validators have submitted
     /// epoch 20, and the status is to be executed, however, epoch 10 has yet to be executed. Now,
     /// epoch 10 has reached consensus and executed, but epoch 20 cannot be executed because every
     /// validator has already voted, no one can vote again to trigger the execution. Epoch 20 is stuck.
-    fn execute_next_cron_epoch(rt: &mut impl Runtime) -> Result<(), ActorError> {
+    fn execute_next_topdown_epoch(rt: &mut impl Runtime) -> Result<(), ActorError> {
         let checkpoint = rt.transaction(|st: &mut State, rt| {
             let cp = st
-                .cron_checkpoint_voting
+                .topdown_checkpoint_voting
                 .get_next_executable_vote(rt.store())
                 .map_err(|e| {
                     log::error!(
-                        "encountered error processing submit cron checkpoint: {:?}",
+                        "encountered error processing submit topdown checkpoint: {:?}",
                         e
                     );
                     actor_error!(unhandled_message, e.to_string())
                 })?;
             if let Some(cp) = &cp {
-                st.cron_checkpoint_voting
+                st.topdown_checkpoint_voting
                     .mark_epoch_executed(rt.store(), cp.epoch)
                     .map_err(|e| {
                         log::error!("encountered error marking epoch executed: {:?}", e);
@@ -1006,7 +1008,7 @@ impl ActorCode for Actor {
         SendCross => send_cross,
         Propagate => propagate,
         WhiteListPropagator => whitelist_propagator,
-        SubmitCron => submit_cron,
+        SubmitTopDownCheckpoint => submit_topdown_check,
         SetMembership => set_membership,
     }
 }

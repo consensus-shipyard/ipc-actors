@@ -25,7 +25,7 @@ pub struct EpochVoteSubmissions<T> {
     pub submitters: TCid<THamt<Address, ()>>,
     /// The map to track the submission weight of each unique key
     pub submission_weights: TCid<THamt<UniqueBytesKey, TokenAmount>>,
-    /// The different cron checkpoints, with vote's unique key as key
+    /// The different checkpoints, with vote's unique key as key
     pub submissions: TCid<THamt<UniqueBytesKey, T>>,
 }
 
@@ -346,7 +346,7 @@ mod tests {
     use primitives::{TCid, THamt};
     use serde_tuple::{Deserialize_tuple, Serialize_tuple};
 
-    #[derive(PartialEq, Clone, Deserialize_tuple, Serialize_tuple, Debug)]
+    #[derive(PartialEq, Eq, Clone, Deserialize_tuple, Serialize_tuple, Debug)]
     struct DummyVote {
         key: UniqueBytesKey,
     }

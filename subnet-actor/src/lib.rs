@@ -14,7 +14,7 @@ use fvm_ipld_encoding::RawBytes;
 use fvm_shared::econ::TokenAmount;
 use fvm_shared::error::ExitCode;
 use fvm_shared::{MethodNum, METHOD_CONSTRUCTOR, METHOD_SEND};
-use ipc_gateway::{Checkpoint, FundParams, MIN_COLLATERAL_AMOUNT};
+use ipc_gateway::{BottomUpCheckpoint, FundParams, MIN_COLLATERAL_AMOUNT};
 use num::BigInt;
 use num_derive::FromPrimitive;
 use num_traits::{FromPrimitive, Zero};
@@ -60,7 +60,7 @@ pub trait SubnetActor {
     /// Submits a new checkpoint for the subnet.
     fn submit_checkpoint(
         rt: &mut impl Runtime,
-        ch: Checkpoint,
+        ch: BottomUpCheckpoint,
     ) -> Result<Option<RawBytes>, ActorError>;
 
     /// Distributes the rewards for the subnet to validators.
@@ -249,7 +249,7 @@ impl SubnetActor for Actor {
     /// votes from 2/3 of miners with collateral.
     fn submit_checkpoint(
         rt: &mut impl Runtime,
-        ch: Checkpoint,
+        ch: BottomUpCheckpoint,
     ) -> Result<Option<RawBytes>, ActorError> {
         rt.validate_immediate_caller_type(CALLER_TYPES_SIGNABLE.iter())?;
 
@@ -395,7 +395,7 @@ impl ActorCode for Actor {
 fn commit_checkpoint(
     st: &mut State,
     store: &impl Blockstore,
-    ch: &Checkpoint,
+    ch: &BottomUpCheckpoint,
 ) -> Result<Option<CrossActorPayload>, ActorError> {
     match st.ensure_checkpoint_chained(store, ch) {
         Ok(is_chained) => {

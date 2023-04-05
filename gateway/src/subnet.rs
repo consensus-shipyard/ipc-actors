@@ -28,7 +28,7 @@ pub struct Subnet {
     pub topdown_nonce: u64,
     pub circ_supply: TokenAmount,
     pub status: Status,
-    pub prev_checkpoint: Option<Checkpoint>,
+    pub prev_checkpoint: Option<BottomUpCheckpoint>,
 }
 
 impl Subnet {

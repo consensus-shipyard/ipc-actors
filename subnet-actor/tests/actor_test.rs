@@ -16,7 +16,7 @@ mod test {
     use fvm_shared::error::ExitCode;
     use fvm_shared::METHOD_SEND;
     use ipc_gateway::{
-        Checkpoint, FundParams, SubnetID, CHECKPOINT_GENESIS_CID, MIN_COLLATERAL_AMOUNT,
+        BottomUpCheckpoint, FundParams, SubnetID, CHECKPOINT_GENESIS_CID, MIN_COLLATERAL_AMOUNT,
     };
     use ipc_subnet_actor::{
         Actor, ConsensusType, ConstructParams, JoinParams, Method, State, Status,
@@ -45,8 +45,8 @@ mod test {
             consensus: ConsensusType::Dummy,
             min_validator_stake: Default::default(),
             min_validators: 0,
-            finality_threshold: 0,
-            check_period: 0,
+            topdown_check_period: 0,
+            bottomup_check_period: 0,
             genesis: vec![],
         }
     }
@@ -707,7 +707,7 @@ mod test {
         let subnet = SubnetID::new_from_parent(&root_subnet, test_actor_address);
         // we are targeting the next submission period
         let epoch = DEFAULT_CHAIN_EPOCH + st.epoch_checkpoint_voting.submission_period;
-        let mut checkpoint_0 = Checkpoint::new(subnet.clone(), epoch);
+        let mut checkpoint_0 = BottomUpCheckpoint::new(subnet.clone(), epoch);
         checkpoint_0.set_signature(
             RawBytes::serialize(Signature::new_secp256k1(vec![1, 2, 3, 4]))
                 .unwrap()
@@ -760,7 +760,7 @@ mod test {
         // If the epoch is wrong in the next checkpoint, it should be rejected. Not multiple of the
         // execution period.
         let prev_cid = checkpoint_0.cid();
-        let mut checkpoint_1 = Checkpoint::new(subnet.clone(), epoch + 1);
+        let mut checkpoint_1 = BottomUpCheckpoint::new(subnet.clone(), epoch + 1);
         checkpoint_1.data.prev_check = TCid::from(prev_cid.clone());
         runtime.set_caller(*ACCOUNT_ACTOR_CODE_ID, sender.clone());
         runtime.expect_validate_caller_type(SIG_TYPES.clone());
@@ -775,7 +775,7 @@ mod test {
         // Start the voting for a new epoch, checking we can proceed with new epoch number.
         let epoch = DEFAULT_CHAIN_EPOCH + st.epoch_checkpoint_voting.submission_period * 2;
         let prev_cid = checkpoint_0.cid();
-        let mut checkpoint_4 = Checkpoint::new(subnet.clone(), epoch);
+        let mut checkpoint_4 = BottomUpCheckpoint::new(subnet.clone(), epoch);
         checkpoint_4.data.prev_check = TCid::from(prev_cid);
         checkpoint_4.set_signature(
             RawBytes::serialize(Signature::new_secp256k1(vec![1, 2, 3, 4]))
@@ -852,7 +852,7 @@ mod test {
         let subnet = SubnetID::new_from_parent(&root_subnet, test_actor_address);
         // we are targeting the next submission period
         let epoch = DEFAULT_CHAIN_EPOCH + st.epoch_checkpoint_voting.submission_period;
-        let mut checkpoint_0 = Checkpoint::new(subnet.clone(), epoch);
+        let mut checkpoint_0 = BottomUpCheckpoint::new(subnet.clone(), epoch);
         checkpoint_0.data.prev_check = TCid::default();
         checkpoint_0.set_signature(
             RawBytes::serialize(Signature::new_secp256k1(vec![1, 2, 3, 4]))
@@ -963,7 +963,7 @@ mod test {
         let st: State = runtime.get_state();
         let epoch_2 = DEFAULT_CHAIN_EPOCH + st.epoch_checkpoint_voting.submission_period * 2;
         let prev_cid = Cid::default();
-        let mut checkpoint_2 = Checkpoint::new(subnet.clone(), epoch_2);
+        let mut checkpoint_2 = BottomUpCheckpoint::new(subnet.clone(), epoch_2);
         checkpoint_2.data.prev_check = TCid::from(prev_cid);
         checkpoint_2.set_signature(
             RawBytes::serialize(Signature::new_secp256k1(vec![1, 2, 3, 4]))
@@ -1004,7 +1004,7 @@ mod test {
 
         // Step 3
         let epoch_1 = DEFAULT_CHAIN_EPOCH + st.epoch_checkpoint_voting.submission_period * 1;
-        let mut checkpoint_1 = Checkpoint::new(subnet.clone(), epoch_1);
+        let mut checkpoint_1 = BottomUpCheckpoint::new(subnet.clone(), epoch_1);
         checkpoint_1.set_signature(
             RawBytes::serialize(Signature::new_secp256k1(vec![1, 2, 3, 4]))
                 .unwrap()
@@ -1058,7 +1058,7 @@ mod test {
     fn send_checkpoint(
         runtime: &mut MockRuntime,
         sender: Address,
-        checkpoint: &Checkpoint,
+        checkpoint: &BottomUpCheckpoint,
         is_commit: bool,
     ) -> Result<Option<IpldBlock>, ActorError> {
         runtime.set_caller(*ACCOUNT_ACTOR_CODE_ID, sender.clone());

@@ -17,8 +17,8 @@ use primitives::{TCid, THamt};
 use serde_tuple::{Deserialize_tuple, Serialize_tuple};
 use std::str::FromStr;
 
-use crate::cron::Validators;
-use crate::CronCheckpoint;
+use crate::checkpoint::Validators;
+use crate::TopDownCheckpoint;
 use ipc_actor_common::vote::Voting;
 use ipc_sdk::subnet_id::SubnetID;
 use ipc_sdk::ValidatorSet;
@@ -40,17 +40,18 @@ pub struct State {
     pub total_subnets: u64,
     pub min_stake: TokenAmount,
     pub subnets: TCid<THamt<SubnetID, Subnet>>,
-    pub check_period: ChainEpoch,
+    pub bottomup_check_period: ChainEpoch,
+    pub topdown_check_period: ChainEpoch,
     // FIXME: Consider making checkpoints a HAMT instead of an AMT so we use
     // the AMT index instead of and epoch k for object indexing.
-    pub checkpoints: TCid<THamt<ChainEpoch, Checkpoint>>,
+    pub bottomup_checkpoints: TCid<THamt<ChainEpoch, BottomUpCheckpoint>>,
     /// `postbox` keeps track for an EOA of all the cross-net messages triggered by
     /// an actor that need to be propagated further through the hierarchy.
     pub postbox: PostBox,
     pub bottomup_nonce: u64,
     pub applied_bottomup_nonce: u64,
     pub applied_topdown_nonce: u64,
-    pub cron_checkpoint_voting: Voting<CronCheckpoint>,
+    pub topdown_checkpoint_voting: Voting<TopDownCheckpoint>,
     pub validators: Validators,
 }
 
@@ -65,21 +66,25 @@ impl State {
             total_subnets: Default::default(),
             min_stake: MIN_SUBNET_COLLATERAL.clone(),
             subnets: TCid::new_hamt(store)?,
-            check_period: match params.checkpoint_period > DEFAULT_CHECKPOINT_PERIOD {
-                true => params.checkpoint_period,
+            bottomup_check_period: match params.bottomup_check_period > DEFAULT_CHECKPOINT_PERIOD {
+                true => params.bottomup_check_period,
                 false => DEFAULT_CHECKPOINT_PERIOD,
             },
-            checkpoints: TCid::new_hamt(store)?,
+            topdown_check_period: match params.topdown_check_period > DEFAULT_CHECKPOINT_PERIOD {
+                true => params.topdown_check_period,
+                false => DEFAULT_CHECKPOINT_PERIOD,
+            },
+            bottomup_checkpoints: TCid::new_hamt(store)?,
             postbox: TCid::new_hamt(store)?,
             bottomup_nonce: Default::default(),
             // This way we ensure that the first message to execute has nonce= 0, if not it would expect 1 and fail for the first nonce
             // We first increase to the subsequent and then execute for bottom-up messages
             applied_bottomup_nonce: Default::default(),
             applied_topdown_nonce: Default::default(),
-            cron_checkpoint_voting: Voting::<CronCheckpoint>::new(
+            topdown_checkpoint_voting: Voting::<TopDownCheckpoint>::new(
                 store,
                 params.genesis_epoch,
-                params.cron_period,
+                params.topdown_check_period,
             )?,
             validators: Validators::new(ValidatorSet::default()),
         })
@@ -163,9 +168,9 @@ impl State {
     pub(crate) fn flush_checkpoint<BS: Blockstore>(
         &mut self,
         store: &BS,
-        ch: &Checkpoint,
+        ch: &BottomUpCheckpoint,
     ) -> anyhow::Result<()> {
-        self.checkpoints
+        self.bottomup_checkpoints
             .update(store, |checkpoints| set_checkpoint(checkpoints, ch.clone()))
     }
 
@@ -174,16 +179,16 @@ impl State {
         &self,
         store: &BS,
         epoch: ChainEpoch,
-    ) -> anyhow::Result<Checkpoint> {
+    ) -> anyhow::Result<BottomUpCheckpoint> {
         if epoch < 0 {
             return Err(anyhow!("epoch can't be negative"));
         }
-        let ch_epoch = checkpoint_epoch(epoch, self.check_period);
-        let checkpoints = self.checkpoints.load(store)?;
+        let ch_epoch = checkpoint_epoch(epoch, self.bottomup_check_period);
+        let checkpoints = self.bottomup_checkpoints.load(store)?;
 
         Ok(match get_checkpoint(&checkpoints, ch_epoch)? {
             Some(ch) => ch.clone(),
-            None => Checkpoint::new(self.network_name.clone(), ch_epoch),
+            None => BottomUpCheckpoint::new(self.network_name.clone(), ch_epoch),
         })
     }
 
@@ -396,8 +401,8 @@ fn get_subnet<'m, BS: Blockstore>(
 }
 
 pub fn set_checkpoint<BS: Blockstore>(
-    checkpoints: &mut Map<BS, Checkpoint>,
-    ch: Checkpoint,
+    checkpoints: &mut Map<BS, BottomUpCheckpoint>,
+    ch: BottomUpCheckpoint,
 ) -> anyhow::Result<()> {
     let epoch = ch.epoch();
     checkpoints
@@ -407,9 +412,9 @@ pub fn set_checkpoint<BS: Blockstore>(
 }
 
 pub fn get_checkpoint<'m, BS: Blockstore>(
-    checkpoints: &'m Map<BS, Checkpoint>,
+    checkpoints: &'m Map<BS, BottomUpCheckpoint>,
     epoch: ChainEpoch,
-) -> anyhow::Result<Option<&'m Checkpoint>> {
+) -> anyhow::Result<Option<&'m BottomUpCheckpoint>> {
     checkpoints
         .get(&epoch_key(epoch))
         .map_err(|e| e.downcast_wrap(format!("failed to get checkpoint for id {}", epoch)))

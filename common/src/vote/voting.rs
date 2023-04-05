@@ -91,7 +91,7 @@ impl<T: UniqueVote + DeserializeOwned + Serialize> Voting<T> {
         total_weight: TokenAmount,
     ) -> anyhow::Result<Option<T>> {
         // first we check the epoch is the correct one, we process only it's multiple
-        // of cron_period since genesis_epoch
+        // of topdown_check_period since genesis_epoch
         if !self.epoch_can_vote(epoch) {
             return Err(anyhow!("epoch not allowed"));
         }
@@ -227,7 +227,7 @@ impl<T: UniqueVote + DeserializeOwned + Serialize> Voting<T> {
             }
             Some(epoch) => {
                 if *epoch > self.last_voting_executed_epoch + self.submission_period {
-                    log::debug!("earliest executable epoch not the same cron period");
+                    log::debug!("earliest executable epoch not the same checkpoint period");
                     return Ok(None);
                 }
                 *epoch
