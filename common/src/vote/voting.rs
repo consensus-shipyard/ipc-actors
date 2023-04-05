@@ -337,7 +337,7 @@ impl<T: Serialize> Serialize for Voting<T> {
     {
         // to be compatible to go client
         let executable_epoch_queue = if let Some(queue) = &self.executable_epoch_queue {
-            queue.iter().map(|e| *e).collect::<Vec<_>>()
+            queue.iter().copied().collect::<Vec<_>>()
         } else {
             vec![]
         };
@@ -369,13 +369,17 @@ impl<'de, T: DeserializeOwned> Deserialize<'de> for Voting<T> {
         );
         let inner = <Inner<T>>::deserialize(serde_tuple::Deserializer(deserializer))?;
 
-        let queue = inner.3.into_iter().collect::<BTreeSet<_>>();
+        let queue = if inner.3.is_empty() {
+            None
+        } else {
+            Some(inner.3.into_iter().collect::<BTreeSet<_>>())
+        };
 
         Ok(Voting {
             genesis_epoch: inner.0,
             submission_period: inner.1,
             last_voting_executed_epoch: inner.2,
-            executable_epoch_queue: Some(queue),
+            executable_epoch_queue: queue,
             epoch_vote_submissions: inner.4,
             threshold_ratio: inner.5,
         })
@@ -413,6 +417,39 @@ mod tests {
             submission_period: 2,
             last_voting_executed_epoch: 3,
             executable_epoch_queue: Some(BTreeSet::from([1])),
+            epoch_vote_submissions: Default::default(),
+            threshold_ratio: (2, 3),
+        };
+
+        let key = BytesKey::from("1");
+        hamt.set(key.clone(), voting.clone()).unwrap();
+        let fetched = hamt.get(&key).unwrap().unwrap();
+        assert_eq!(fetched.genesis_epoch, voting.genesis_epoch);
+        assert_eq!(fetched.submission_period, voting.submission_period);
+        assert_eq!(
+            fetched.last_voting_executed_epoch,
+            voting.last_voting_executed_epoch
+        );
+        assert_eq!(
+            fetched.executable_epoch_queue,
+            voting.executable_epoch_queue
+        );
+        assert_eq!(
+            fetched.epoch_vote_submissions,
+            voting.epoch_vote_submissions
+        );
+    }
+
+    #[test]
+    fn test_storage_queue_empty() {
+        let store = MemoryBlockstore::new();
+        let mut hamt = make_empty_map(&store, HAMT_BIT_WIDTH);
+
+        let voting = Voting::<DummyVote> {
+            genesis_epoch: 1,
+            submission_period: 2,
+            last_voting_executed_epoch: 3,
+            executable_epoch_queue: None,
             epoch_vote_submissions: Default::default(),
             threshold_ratio: (2, 3),
         };
