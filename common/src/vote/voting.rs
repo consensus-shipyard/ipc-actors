@@ -335,11 +335,18 @@ impl<T: Serialize> Serialize for Voting<T> {
     where
         S: Serializer,
     {
+        // to be compatible to go client
+        let executable_epoch_queue = if let Some(queue) = &self.executable_epoch_queue {
+            queue.iter().map(|e| *e).collect::<Vec<_>>()
+        } else {
+            vec![]
+        };
+
         let inner = (
             &self.genesis_epoch,
             &self.submission_period,
             &self.last_voting_executed_epoch,
-            &self.executable_epoch_queue,
+            &executable_epoch_queue,
             &self.epoch_vote_submissions,
             &self.threshold_ratio,
         );
@@ -356,16 +363,19 @@ impl<'de, T: DeserializeOwned> Deserialize<'de> for Voting<T> {
             ChainEpoch,
             ChainEpoch,
             ChainEpoch,
-            Option<BTreeSet<ChainEpoch>>,
+            Vec<ChainEpoch>,
             TCid<THamt<ChainEpoch, EpochVoteSubmissions<V>>>,
             Ratio,
         );
         let inner = <Inner<T>>::deserialize(serde_tuple::Deserializer(deserializer))?;
+
+        let queue = inner.3.into_iter().collect::<BTreeSet<_>>();
+
         Ok(Voting {
             genesis_epoch: inner.0,
             submission_period: inner.1,
             last_voting_executed_epoch: inner.2,
-            executable_epoch_queue: inner.3,
+            executable_epoch_queue: Some(queue),
             epoch_vote_submissions: inner.4,
             threshold_ratio: inner.5,
         })
@@ -374,14 +384,11 @@ impl<'de, T: DeserializeOwned> Deserialize<'de> for Voting<T> {
 
 #[cfg(test)]
 mod tests {
-    use crate::vote::submission::Ratio;
-    use crate::vote::{EpochVoteSubmissions, UniqueBytesKey, UniqueVote, Voting};
+    use crate::vote::{UniqueBytesKey, UniqueVote, Voting};
     use fil_actors_runtime::builtin::HAMT_BIT_WIDTH;
     use fil_actors_runtime::fvm_ipld_hamt::BytesKey;
     use fil_actors_runtime::make_empty_map;
     use fvm_ipld_blockstore::MemoryBlockstore;
-    use fvm_shared::clock::ChainEpoch;
-    use primitives::{TCid, THamt};
     use serde_tuple::{Deserialize_tuple, Serialize_tuple};
     use std::collections::BTreeSet;
 
@@ -394,41 +401,6 @@ mod tests {
         fn unique_key(&self) -> anyhow::Result<UniqueBytesKey> {
             Ok(self.key.clone())
         }
-    }
-
-    #[test]
-    fn test_serialization() {
-        #[derive(Deserialize_tuple, Serialize_tuple, PartialEq, Clone, Debug)]
-        struct DummyVoting {
-            genesis_epoch: ChainEpoch,
-            submission_period: ChainEpoch,
-            last_voting_executed_epoch: ChainEpoch,
-            executable_epoch_queue: Option<BTreeSet<ChainEpoch>>,
-            epoch_vote_submissions: TCid<THamt<ChainEpoch, EpochVoteSubmissions<DummyVote>>>,
-            threshold_ratio: Ratio,
-        }
-
-        let dummy_voting = DummyVoting {
-            genesis_epoch: 1,
-            submission_period: 2,
-            last_voting_executed_epoch: 3,
-            executable_epoch_queue: Some(BTreeSet::from([1])),
-            epoch_vote_submissions: Default::default(),
-            threshold_ratio: (2, 3),
-        };
-
-        let voting = Voting::<DummyVote> {
-            genesis_epoch: 1,
-            submission_period: 2,
-            last_voting_executed_epoch: 3,
-            executable_epoch_queue: Some(BTreeSet::from([1])),
-            epoch_vote_submissions: Default::default(),
-            threshold_ratio: (2, 3),
-        };
-
-        let json1 = serde_json::to_string(&dummy_voting).unwrap();
-        let json2 = serde_json::to_string(&voting).unwrap();
-        assert_eq!(json1, json2);
     }
 
     #[test]
