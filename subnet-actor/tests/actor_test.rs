@@ -652,6 +652,7 @@ mod test {
             Address::new_id(10),
             Address::new_id(20),
             Address::new_id(30),
+            Address::new_id(40),
         ];
 
         // first miner joins the subnet
@@ -697,9 +698,9 @@ mod test {
             i += 1;
         }
 
-        // verify that we have an active subnet with 3 validators.
+        // verify that we have an active subnet with 4 validators.
         let st: State = runtime.get_state();
-        assert_eq!(st.validator_set.validators().len(), 3);
+        assert_eq!(st.validator_set.validators().len(), 4);
         assert_eq!(st.status, Status::Active);
 
         // Generate the check point
@@ -716,7 +717,7 @@ mod test {
         );
 
         // Only validators should be entitled to submit checkpoints.
-        let non_miner = Address::new_id(40);
+        let non_miner = Address::new_id(50);
         runtime.set_caller(*ACCOUNT_ACTOR_CODE_ID, non_miner.clone());
         runtime.expect_validate_caller_type(SIG_TYPES.clone());
         expect_abort(
@@ -742,11 +743,18 @@ mod test {
         let sender2 = miners.get(1).cloned().unwrap();
 
         // This should have triggered commit
-        send_checkpoint(&mut runtime, sender2.clone(), &checkpoint_0, true).unwrap();
+        send_checkpoint(&mut runtime, sender2.clone(), &checkpoint_0, false).unwrap();
+        send_checkpoint(
+            &mut runtime,
+            miners.get(2).cloned().unwrap(),
+            &checkpoint_0,
+            true,
+        )
+        .unwrap();
 
         // Trying to submit an already committed checkpoint should fail, i.e. if the epoch is already
         // committed, then we should not allow voting again
-        let sender2 = miners.get(2).cloned().unwrap();
+        let sender2 = miners.get(3).cloned().unwrap();
         runtime.set_caller(*ACCOUNT_ACTOR_CODE_ID, sender2.clone());
         runtime.expect_validate_caller_type(SIG_TYPES.clone());
         expect_abort(
@@ -797,6 +805,7 @@ mod test {
             Address::new_id(10),
             Address::new_id(20),
             Address::new_id(30),
+            Address::new_id(40),
         ];
 
         // first miner joins the subnet
@@ -844,8 +853,6 @@ mod test {
 
         // verify that we have an active subnet with 3 validators.
         let st: State = runtime.get_state();
-        assert_eq!(st.validator_set.validators().len(), 3);
-        assert_eq!(st.status, Status::Active);
 
         // Generate the check point
         let root_subnet = SubnetID::from_str("/root").unwrap();
@@ -862,8 +869,8 @@ mod test {
         );
 
         // Reject the submission as checkpoints are not chained
-        let non_miner = Address::new_id(10);
-        runtime.set_caller(*ACCOUNT_ACTOR_CODE_ID, non_miner.clone());
+        let s = Address::new_id(10);
+        runtime.set_caller(*ACCOUNT_ACTOR_CODE_ID, s.clone());
         runtime.expect_validate_caller_type(SIG_TYPES.clone());
         expect_abort_contains_message(
             ExitCode::USR_ILLEGAL_STATE,
@@ -879,7 +886,7 @@ mod test {
     /// next executable epoch, we need to reset the epoch.
     ///
     /// Test flows like the below:
-    /// 1. Create 3 validators and register them to the subnet with equal weight
+    /// 1. Create 4 validators and register them to the subnet with equal weight
     ///
     /// 2. Submit to epoch `DEFAULT_CHAIN_EPOCH + st.epoch_checkpoint_voting.submission_period * 2`, we are skipping
     ///    the first epoch and ensure this is executable. The previous checkpoint cid is set to some value `cid_a`.
@@ -911,6 +918,7 @@ mod test {
             Address::new_id(10),
             Address::new_id(20),
             Address::new_id(30),
+            Address::new_id(40),
         ];
 
         // first miner joins the subnet
@@ -974,6 +982,7 @@ mod test {
 
         send_checkpoint(&mut runtime, miners[0].clone(), &checkpoint_2, false).unwrap();
         send_checkpoint(&mut runtime, miners[1].clone(), &checkpoint_2, false).unwrap();
+        send_checkpoint(&mut runtime, miners[2].clone(), &checkpoint_2, false).unwrap();
 
         // performing checks
         let st: State = runtime.get_state();
@@ -999,7 +1008,7 @@ mod test {
             st.epoch_checkpoint_voting
                 .load_most_voted_weight(runtime.store(), epoch_2)
                 .unwrap(),
-            Some(TokenAmount::from_whole(2))
+            Some(TokenAmount::from_whole(3))
         );
 
         // Step 3
@@ -1013,7 +1022,8 @@ mod test {
         );
 
         send_checkpoint(&mut runtime, miners[0].clone(), &checkpoint_1, false).unwrap();
-        send_checkpoint(&mut runtime, miners[1].clone(), &checkpoint_1, true).unwrap();
+        send_checkpoint(&mut runtime, miners[1].clone(), &checkpoint_1, false).unwrap();
+        send_checkpoint(&mut runtime, miners[2].clone(), &checkpoint_1, true).unwrap();
 
         // performing checks
         let st: State = runtime.get_state();
@@ -1032,7 +1042,7 @@ mod test {
             st.epoch_checkpoint_voting
                 .load_most_voted_weight(runtime.store(), epoch_2)
                 .unwrap(),
-            Some(TokenAmount::from_whole(2))
+            Some(TokenAmount::from_whole(3))
         );
         assert_eq!(
             st.epoch_checkpoint_voting
@@ -1043,7 +1053,7 @@ mod test {
 
         // Step 4
         checkpoint_2.data.prev_check = TCid::from(checkpoint_1.cid());
-        send_checkpoint(&mut runtime, miners[2].clone(), &checkpoint_2, false).unwrap();
+        send_checkpoint(&mut runtime, miners[3].clone(), &checkpoint_2, false).unwrap();
 
         // perform checks
         let st: State = runtime.get_state();
