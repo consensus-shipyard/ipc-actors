@@ -275,7 +275,7 @@ impl SubnetActor for Actor {
             let submission_epoch = ch.epoch();
 
             let some_checkpoint = st
-                .epoch_checkpoint_voting
+                .bottomup_checkpoint_voting
                 .submit_vote(
                     rt.store(),
                     ch,
@@ -292,7 +292,7 @@ impl SubnetActor for Actor {
             if let Some(ch) = some_checkpoint {
                 commit_checkpoint(st, store, &ch)
             } else if let Some(ch) = st
-                .epoch_checkpoint_voting
+                .bottomup_checkpoint_voting
                 .get_next_executable_vote(store)
                 .map_err(|_| actor_error!(illegal_state, "cannot check previous checkpoint"))?
             {
@@ -409,7 +409,7 @@ fn commit_checkpoint(
         }
     };
 
-    st.epoch_checkpoint_voting
+    st.bottomup_checkpoint_voting
         .mark_epoch_executed(store, ch.epoch())
         .map_err(|e| {
             log::error!("encountered error marking epoch executed: {:?}", e);

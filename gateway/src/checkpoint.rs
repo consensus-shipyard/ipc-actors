@@ -1,4 +1,4 @@
-use crate::{ensure_message_sorted, CrossMsg, StorableMsg};
+use crate::{ensure_message_sorted, CrossMsg};
 use anyhow::anyhow;
 use cid::multihash::Code;
 use cid::multihash::MultihashDigest;
@@ -248,7 +248,7 @@ impl Validators {
 #[derive(Clone, Debug, Serialize_tuple, Deserialize_tuple, PartialEq, Eq)]
 pub struct TopDownCheckpoint {
     pub epoch: ChainEpoch,
-    pub top_down_msgs: Vec<StorableMsg>,
+    pub top_down_msgs: Vec<CrossMsg>,
 }
 
 impl UniqueVote for TopDownCheckpoint {

@@ -737,13 +737,7 @@ impl Actor {
                 Self::execute_next_topdown_epoch(rt)?;
             }
             for m in checkpoint.top_down_msgs {
-                Self::apply_msg_inner(
-                    rt,
-                    CrossMsg {
-                        msg: m,
-                        wrapped: false,
-                    },
-                )?;
+                Self::apply_msg_inner(rt, m)?;
             }
         } else {
             Self::execute_next_topdown_epoch(rt)?;
@@ -980,13 +974,7 @@ impl Actor {
 
         if let Some(checkpoint) = checkpoint {
             for m in checkpoint.top_down_msgs {
-                Self::apply_msg_inner(
-                    rt,
-                    CrossMsg {
-                        msg: m,
-                        wrapped: false,
-                    },
-                )?;
+                Self::apply_msg_inner(rt, m)?;
             }
         }
         Ok(())

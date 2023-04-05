@@ -707,7 +707,7 @@ mod test {
         let root_subnet = SubnetID::from_str("/root").unwrap();
         let subnet = SubnetID::new_from_parent(&root_subnet, test_actor_address);
         // we are targeting the next submission period
-        let epoch = DEFAULT_CHAIN_EPOCH + st.epoch_checkpoint_voting.submission_period;
+        let epoch = DEFAULT_CHAIN_EPOCH + st.bottomup_checkpoint_voting.submission_period;
         let mut checkpoint_0 = BottomUpCheckpoint::new(subnet.clone(), epoch);
         checkpoint_0.set_signature(
             RawBytes::serialize(Signature::new_secp256k1(vec![1, 2, 3, 4]))
@@ -781,7 +781,7 @@ mod test {
         );
 
         // Start the voting for a new epoch, checking we can proceed with new epoch number.
-        let epoch = DEFAULT_CHAIN_EPOCH + st.epoch_checkpoint_voting.submission_period * 2;
+        let epoch = DEFAULT_CHAIN_EPOCH + st.bottomup_checkpoint_voting.submission_period * 2;
         let prev_cid = checkpoint_0.cid();
         let mut checkpoint_4 = BottomUpCheckpoint::new(subnet.clone(), epoch);
         checkpoint_4.data.prev_check = TCid::from(prev_cid);
@@ -858,7 +858,7 @@ mod test {
         let root_subnet = SubnetID::from_str("/root").unwrap();
         let subnet = SubnetID::new_from_parent(&root_subnet, test_actor_address);
         // we are targeting the next submission period
-        let epoch = DEFAULT_CHAIN_EPOCH + st.epoch_checkpoint_voting.submission_period;
+        let epoch = DEFAULT_CHAIN_EPOCH + st.bottomup_checkpoint_voting.submission_period;
         let mut checkpoint_0 = BottomUpCheckpoint::new(subnet.clone(), epoch);
         checkpoint_0.data.prev_check = TCid::default();
         checkpoint_0.set_signature(
@@ -888,26 +888,26 @@ mod test {
     /// Test flows like the below:
     /// 1. Create 4 validators and register them to the subnet with equal weight
     ///
-    /// 2. Submit to epoch `DEFAULT_CHAIN_EPOCH + st.epoch_checkpoint_voting.submission_period * 2`, we are skipping
+    /// 2. Submit to epoch `DEFAULT_CHAIN_EPOCH + st.bottomup_checkpoint_voting.submission_period * 2`, we are skipping
     ///    the first epoch and ensure this is executable. The previous checkpoint cid is set to some value `cid_a`.
     ///    We should see the epoch number being stored in the next executable queue.
     ///    Checks at step 2:
-    ///    - executable_queue should contain `DEFAULT_CHAIN_EPOCH + st.epoch_checkpoint_voting.submission_period * 2`
+    ///    - executable_queue should contain `DEFAULT_CHAIN_EPOCH + st.bottomup_checkpoint_voting.submission_period * 2`
     ///    - last_executed_epoch is still `DEFAULT_CHAIN_EPOCH`
     ///
-    /// 3. Submit to epoch `DEFAULT_CHAIN_EPOCH + st.epoch_checkpoint_voting.submission_period * 1`, i.e. the previous
+    /// 3. Submit to epoch `DEFAULT_CHAIN_EPOCH + st.bottomup_checkpoint_voting.submission_period * 1`, i.e. the previous
     ///    epoch in step 2. This would lead to the epoch being committed. The key is the checkpoint cid of the current
     ///    epoch should be different from that in step 2, i.e. any value other than `cid_a`
     ///    Checks at step 3:
-    ///    - executable_queue should contain `DEFAULT_CHAIN_EPOCH + st.epoch_checkpoint_voting.submission_period * 2`
-    ///    - last_executed_epoch is still `DEFAULT_CHAIN_EPOCH + st.epoch_checkpoint_voting.submission_period * 1`
+    ///    - executable_queue should contain `DEFAULT_CHAIN_EPOCH + st.bottomup_checkpoint_voting.submission_period * 2`
+    ///    - last_executed_epoch is still `DEFAULT_CHAIN_EPOCH + st.bottomup_checkpoint_voting.submission_period * 1`
     ///
-    /// 4. Submit to any epoch after `DEFAULT_CHAIN_EPOCH + st.epoch_checkpoint_voting.submission_period * 1`, should
-    ///    trigger a reset in submission of epoch `DEFAULT_CHAIN_EPOCH + st.epoch_checkpoint_voting.submission_period * 2`.
+    /// 4. Submit to any epoch after `DEFAULT_CHAIN_EPOCH + st.bottomup_checkpoint_voting.submission_period * 1`, should
+    ///    trigger a reset in submission of epoch `DEFAULT_CHAIN_EPOCH + st.bottomup_checkpoint_voting.submission_period * 2`.
     ///    Checks at step 4:
-    ///    - executable_queue should have removed `DEFAULT_CHAIN_EPOCH + st.epoch_checkpoint_voting.submission_period * 2`
-    ///    - last_executed_epoch is still `DEFAULT_CHAIN_EPOCH + st.epoch_checkpoint_voting.submission_period * 1`
-    ///    - submission at `DEFAULT_CHAIN_EPOCH + st.epoch_checkpoint_voting.submission_period * 2` is cleared
+    ///    - executable_queue should have removed `DEFAULT_CHAIN_EPOCH + st.bottomup_checkpoint_voting.submission_period * 2`
+    ///    - last_executed_epoch is still `DEFAULT_CHAIN_EPOCH + st.bottomup_checkpoint_voting.submission_period * 1`
+    ///    - submission at `DEFAULT_CHAIN_EPOCH + st.bottomup_checkpoint_voting.submission_period * 2` is cleared
     #[test]
     fn test_submit_checkpoint_aborts_not_chained_reset_epoch() {
         let test_actor_address = Address::new_id(9999);
@@ -969,7 +969,7 @@ mod test {
 
         // Step 2
         let st: State = runtime.get_state();
-        let epoch_2 = DEFAULT_CHAIN_EPOCH + st.epoch_checkpoint_voting.submission_period * 2;
+        let epoch_2 = DEFAULT_CHAIN_EPOCH + st.bottomup_checkpoint_voting.submission_period * 2;
         let prev_cid = Cid::default();
         let mut checkpoint_2 = BottomUpCheckpoint::new(subnet.clone(), epoch_2);
         checkpoint_2.data.prev_check = TCid::from(prev_cid);
@@ -991,28 +991,28 @@ mod test {
             CHECKPOINT_GENESIS_CID.clone()
         );
         assert_eq!(
-            st.epoch_checkpoint_voting.last_voting_executed_epoch,
+            st.bottomup_checkpoint_voting.last_voting_executed_epoch,
             DEFAULT_CHAIN_EPOCH
         );
         assert_eq!(
-            st.epoch_checkpoint_voting.executable_epoch_queue,
+            st.bottomup_checkpoint_voting.executable_epoch_queue,
             Some(BTreeSet::from([epoch_2]))
         );
         assert_eq!(
-            st.epoch_checkpoint_voting
+            st.bottomup_checkpoint_voting
                 .load_most_voted_submission(runtime.store(), epoch_2)
                 .unwrap(),
             Some(checkpoint_2.clone())
         );
         assert_eq!(
-            st.epoch_checkpoint_voting
+            st.bottomup_checkpoint_voting
                 .load_most_voted_weight(runtime.store(), epoch_2)
                 .unwrap(),
             Some(TokenAmount::from_whole(3))
         );
 
         // Step 3
-        let epoch_1 = DEFAULT_CHAIN_EPOCH + st.epoch_checkpoint_voting.submission_period * 1;
+        let epoch_1 = DEFAULT_CHAIN_EPOCH + st.bottomup_checkpoint_voting.submission_period * 1;
         let mut checkpoint_1 = BottomUpCheckpoint::new(subnet.clone(), epoch_1);
         checkpoint_1.set_signature(
             RawBytes::serialize(Signature::new_secp256k1(vec![1, 2, 3, 4]))
@@ -1029,23 +1029,23 @@ mod test {
         let st: State = runtime.get_state();
         assert_eq!(st.previous_executed_checkpoint_cid, checkpoint_1.cid());
         assert_eq!(
-            st.epoch_checkpoint_voting.last_voting_executed_epoch,
+            st.bottomup_checkpoint_voting.last_voting_executed_epoch,
             epoch_1
         );
         assert_eq!(
-            st.epoch_checkpoint_voting.executable_epoch_queue,
+            st.bottomup_checkpoint_voting.executable_epoch_queue,
             Some(BTreeSet::from([
-                DEFAULT_CHAIN_EPOCH + st.epoch_checkpoint_voting.submission_period * 2
+                DEFAULT_CHAIN_EPOCH + st.bottomup_checkpoint_voting.submission_period * 2
             ]))
         );
         assert_eq!(
-            st.epoch_checkpoint_voting
+            st.bottomup_checkpoint_voting
                 .load_most_voted_weight(runtime.store(), epoch_2)
                 .unwrap(),
             Some(TokenAmount::from_whole(3))
         );
         assert_eq!(
-            st.epoch_checkpoint_voting
+            st.bottomup_checkpoint_voting
                 .load_most_voted_weight(runtime.store(), epoch_1)
                 .unwrap(),
             None
@@ -1059,10 +1059,10 @@ mod test {
         let st: State = runtime.get_state();
         assert_eq!(st.previous_executed_checkpoint_cid, checkpoint_1.cid());
         assert_eq!(
-            st.epoch_checkpoint_voting.last_voting_executed_epoch,
+            st.bottomup_checkpoint_voting.last_voting_executed_epoch,
             epoch_1
         );
-        assert_eq!(st.epoch_checkpoint_voting.executable_epoch_queue, None);
+        assert_eq!(st.bottomup_checkpoint_voting.executable_epoch_queue, None);
     }
 
     fn send_checkpoint(

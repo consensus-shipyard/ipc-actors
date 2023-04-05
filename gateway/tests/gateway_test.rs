@@ -1353,7 +1353,7 @@ fn test_submit_topdown_check_works_with_execution() {
     setup_membership(&h, &mut rt);
 
     let epoch = *DEFAULT_GENESIS_EPOCH + *DEFAULT_TOPDOWN_PERIOD;
-    let msg = storable_msg(0);
+    let msg = cross_msg(0);
     let checkpoint = TopDownCheckpoint {
         epoch,
         top_down_msgs: vec![msg.clone()],
@@ -1422,10 +1422,10 @@ fn test_submit_topdown_check_works_with_execution() {
     // fourth submission, executed
     let submitter = Address::new_id(3);
     rt.expect_send(
-        msg.to.raw_addr().unwrap(),
-        msg.method,
+        msg.msg.to.raw_addr().unwrap(),
+        msg.msg.method,
         None,
-        msg.value,
+        msg.msg.value,
         None,
         ExitCode::OK,
     );
@@ -1440,14 +1440,17 @@ fn test_submit_topdown_check_works_with_execution() {
     );
 }
 
-fn storable_msg(nonce: u64) -> StorableMsg {
-    StorableMsg {
-        from: IPCAddress::new(&ROOTNET_ID, &Address::new_id(10)).unwrap(),
-        to: IPCAddress::new(&ROOTNET_ID, &Address::new_id(20)).unwrap(),
-        method: 0,
-        params: Default::default(),
-        value: Default::default(),
-        nonce,
+fn cross_msg(nonce: u64) -> CrossMsg {
+    CrossMsg {
+        msg: StorableMsg {
+            from: IPCAddress::new(&ROOTNET_ID, &Address::new_id(10)).unwrap(),
+            to: IPCAddress::new(&ROOTNET_ID, &Address::new_id(20)).unwrap(),
+            method: 0,
+            params: Default::default(),
+            value: Default::default(),
+            nonce,
+        },
+        wrapped: false,
     }
 }
 
@@ -1472,7 +1475,7 @@ fn test_submit_topdown_check_abort() {
     let submitter = Address::new_id(1);
     let checkpoint = TopDownCheckpoint {
         epoch,
-        top_down_msgs: vec![storable_msg(1)],
+        top_down_msgs: vec![cross_msg(1)],
     };
     let r = h.submit_topdown_check(&mut rt, submitter, checkpoint.clone());
     assert!(r.is_ok());
@@ -1481,7 +1484,7 @@ fn test_submit_topdown_check_abort() {
     let submitter = Address::new_id(2);
     let checkpoint = TopDownCheckpoint {
         epoch,
-        top_down_msgs: vec![storable_msg(1), storable_msg(2)],
+        top_down_msgs: vec![cross_msg(1), cross_msg(2)],
     };
     let r = h.submit_topdown_check(&mut rt, submitter, checkpoint.clone());
     assert!(r.is_ok());
@@ -1490,7 +1493,7 @@ fn test_submit_topdown_check_abort() {
     let submitter = Address::new_id(3);
     let checkpoint = TopDownCheckpoint {
         epoch,
-        top_down_msgs: vec![storable_msg(1), storable_msg(2), storable_msg(3)],
+        top_down_msgs: vec![cross_msg(1), cross_msg(2), cross_msg(3)],
     };
     let r = h.submit_topdown_check(&mut rt, submitter, checkpoint.clone());
     assert!(r.is_ok());
@@ -1554,7 +1557,7 @@ fn test_submit_topdown_check_sequential_execution() {
     ); // not executed yet
 
     // now we execute the previous epoch
-    let msg = storable_msg(0);
+    let msg = cross_msg(0);
     let epoch = *DEFAULT_GENESIS_EPOCH + *DEFAULT_TOPDOWN_PERIOD;
     let checkpoint = TopDownCheckpoint {
         epoch,
@@ -1577,10 +1580,10 @@ fn test_submit_topdown_check_sequential_execution() {
     let submitter = Address::new_id(3);
     // define expected send
     rt.expect_send(
-        msg.to.raw_addr().unwrap(),
-        msg.method,
+        msg.msg.to.raw_addr().unwrap(),
+        msg.msg.method,
         None,
-        msg.value,
+        msg.msg.value,
         None,
         ExitCode::OK,
     );

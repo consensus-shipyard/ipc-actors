@@ -58,7 +58,7 @@ pub struct State {
     pub validator_set: ValidatorSet,
     pub min_validators: u64,
     pub previous_executed_checkpoint_cid: Cid,
-    pub epoch_checkpoint_voting: Voting<BottomUpCheckpoint>,
+    pub bottomup_checkpoint_voting: Voting<BottomUpCheckpoint>,
 }
 
 /// We should probably have a derive macro to mark an object as a state object,
@@ -102,7 +102,7 @@ impl State {
             validator_set: ValidatorSet::default(),
             genesis_epoch: current_epoch,
             previous_executed_checkpoint_cid: *CHECKPOINT_GENESIS_CID,
-            epoch_checkpoint_voting: Voting::<BottomUpCheckpoint>::new_with_ratio(
+            bottomup_checkpoint_voting: Voting::<BottomUpCheckpoint>::new_with_ratio(
                 store,
                 current_epoch,
                 bottomup_check_period,
@@ -283,7 +283,7 @@ impl State {
         // the checkpoints are chained. This is an early termination check to ensure the checkpoints
         // are actually chained.
         if self
-            .epoch_checkpoint_voting
+            .bottomup_checkpoint_voting
             .is_next_executable_epoch(ch.epoch())
             && self.previous_executed_checkpoint_cid != ch.prev_check().cid()
         {
@@ -315,7 +315,7 @@ impl State {
     ) -> anyhow::Result<bool> {
         Ok(
             if self.previous_executed_checkpoint_cid != ch.prev_check().cid() {
-                self.epoch_checkpoint_voting
+                self.bottomup_checkpoint_voting
                     .abort_epoch(store, ch.data.epoch)?;
                 false
             } else {
@@ -357,7 +357,7 @@ impl Default for State {
             min_validators: 0,
             genesis_epoch: 0,
             previous_executed_checkpoint_cid: *CHECKPOINT_GENESIS_CID,
-            epoch_checkpoint_voting: Voting {
+            bottomup_checkpoint_voting: Voting {
                 genesis_epoch: 0,
                 submission_period: 0,
                 last_voting_executed_epoch: 0,
