@@ -95,7 +95,7 @@ impl State {
             stake: TCid::new_hamt(store)?,
             validator_set: ValidatorSet::default(),
             genesis_epoch: current_epoch,
-            previous_executed_checkpoint_cid: CHECKPOINT_GENESIS_CID.clone(),
+            previous_executed_checkpoint_cid: *CHECKPOINT_GENESIS_CID,
             epoch_checkpoint_voting: Voting::<Checkpoint>::new_with_ratio(
                 store,
                 current_epoch,
@@ -275,10 +275,9 @@ impl State {
         if self
             .epoch_checkpoint_voting
             .is_next_executable_epoch(ch.epoch())
+            && self.previous_executed_checkpoint_cid != ch.prev_check().cid()
         {
-            if self.previous_executed_checkpoint_cid != ch.prev_check().cid() {
-                return Err(anyhow!("checkpoint not chained"));
-            }
+            return Err(anyhow!("checkpoint not chained"));
         }
 
         // check signature
@@ -347,7 +346,7 @@ impl Default for State {
             validator_set: ValidatorSet::default(),
             min_validators: 0,
             genesis_epoch: 0,
-            previous_executed_checkpoint_cid: CHECKPOINT_GENESIS_CID.clone(),
+            previous_executed_checkpoint_cid: *CHECKPOINT_GENESIS_CID,
             epoch_checkpoint_voting: Voting {
                 genesis_epoch: 0,
                 submission_period: 0,
