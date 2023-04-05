@@ -10,7 +10,9 @@ use fvm_shared::bigint::Zero;
 use fvm_shared::clock::ChainEpoch;
 use fvm_shared::econ::TokenAmount;
 use ipc_actor_common::vote::Voting;
-use ipc_gateway::{Checkpoint, SubnetID, DEFAULT_CHECKPOINT_PERIOD, MIN_COLLATERAL_AMOUNT};
+use ipc_gateway::{
+    Checkpoint, SubnetID, CHECKPOINT_GENESIS_CID, DEFAULT_CHECKPOINT_PERIOD, MIN_COLLATERAL_AMOUNT,
+};
 use ipc_sdk::epoch_key;
 use ipc_sdk::{Validator, ValidatorSet};
 use lazy_static::lazy_static;
@@ -54,7 +56,7 @@ pub struct State {
     pub committed_checkpoints: TCid<THamt<ChainEpoch, Checkpoint>>,
     pub validator_set: ValidatorSet,
     pub min_validators: u64,
-    pub previous_executed_checkpoint_cid: Option<Cid>,
+    pub previous_executed_checkpoint_cid: Cid,
     pub epoch_checkpoint_voting: Voting<Checkpoint>,
 }
 
@@ -93,7 +95,7 @@ impl State {
             stake: TCid::new_hamt(store)?,
             validator_set: ValidatorSet::default(),
             genesis_epoch: current_epoch,
-            previous_executed_checkpoint_cid: None,
+            previous_executed_checkpoint_cid: CHECKPOINT_GENESIS_CID.clone(),
             epoch_checkpoint_voting: Voting::<Checkpoint>::new_with_ratio(
                 store,
                 current_epoch,
@@ -267,6 +269,18 @@ impl State {
             return Err(anyhow!("submitting checkpoint with the wrong source"));
         }
 
+        // the epoch being submitted is the next executable epoch, we perform a check to ensure
+        // the checkpoints are chained. This is an early termination check to ensure the checkpoints
+        // are actually chained.
+        if self
+            .epoch_checkpoint_voting
+            .is_next_executable_epoch(ch.epoch())
+        {
+            if self.previous_executed_checkpoint_cid != ch.prev_check().cid() {
+                return Err(anyhow!("checkpoint not chained"));
+            }
+        }
+
         // check signature
         // NOTE: In the current implementation the validator is the one sending the message
         // including the checkpoint, so there is no need for a explicit signature in checkpoints,
@@ -290,14 +304,15 @@ impl State {
         store: &impl Blockstore,
         ch: &Checkpoint,
     ) -> anyhow::Result<bool> {
-        if let Some(previous_cid) = &self.previous_executed_checkpoint_cid {
-            if *previous_cid != ch.prev_check().cid() {
+        Ok(
+            if self.previous_executed_checkpoint_cid != ch.prev_check().cid() {
                 self.epoch_checkpoint_voting
                     .abort_epoch(store, ch.data.epoch)?;
-                return Ok(false);
-            }
-        }
-        Ok(true)
+                false
+            } else {
+                true
+            },
+        )
     }
 
     pub fn flush_checkpoint<BS: Blockstore>(
@@ -332,7 +347,7 @@ impl Default for State {
             validator_set: ValidatorSet::default(),
             min_validators: 0,
             genesis_epoch: 0,
-            previous_executed_checkpoint_cid: None,
+            previous_executed_checkpoint_cid: CHECKPOINT_GENESIS_CID.clone(),
             epoch_checkpoint_voting: Voting {
                 genesis_epoch: 0,
                 submission_period: 0,

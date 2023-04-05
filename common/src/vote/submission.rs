@@ -68,7 +68,7 @@ impl<T: UniqueVote + DeserializeOwned + Serialize> EpochVoteSubmissions<T> {
         Ok(())
     }
 
-    /// Submit a cron checkpoint as the submitter.
+    /// Submit a vote as the submitter.
     pub fn submit<BS: Blockstore>(
         &mut self,
         store: &BS,
@@ -94,14 +94,17 @@ impl<T: UniqueVote + DeserializeOwned + Serialize> EpochVoteSubmissions<T> {
         }
     }
 
-    pub fn most_voted_weight<BS: Blockstore>(&self, store: &BS) -> anyhow::Result<TokenAmount> {
+    pub fn load_most_voted_weight<BS: Blockstore>(
+        &self,
+        store: &BS,
+    ) -> anyhow::Result<Option<TokenAmount>> {
         // we will only have one entry in the `most_submitted` set if more than 2/3 has reached
         if let Some(unique_key) = &self.most_voted_key {
-            Ok(self
-                .get_submission_weight(store, unique_key)?
-                .unwrap_or_else(TokenAmount::zero))
+            let hash_byte_key = BytesKey::from(unique_key.as_slice());
+            let hamt = self.submission_weights.load(store)?;
+            Ok(hamt.get(&hash_byte_key)?.cloned())
         } else {
-            Ok(TokenAmount::zero())
+            Ok(None)
         }
     }
 
@@ -170,6 +173,7 @@ impl<T: UniqueVote + DeserializeOwned + Serialize> EpochVoteSubmissions<T> {
     }
 }
 
+// Private and internal implementations
 impl<T: UniqueVote + DeserializeOwned + Serialize> EpochVoteSubmissions<T> {
     /// Update the total submitters, returns the latest total number of submitters
     fn update_submitters<BS: Blockstore>(
@@ -256,28 +260,16 @@ impl<T: UniqueVote + DeserializeOwned + Serialize> EpochVoteSubmissions<T> {
             let most_submitted_key = BytesKey::from(most_voted_key.as_slice());
 
             // safe to unwrap as the hamt must contain the key
-            let most_submitted_count = hamt.get(&most_submitted_key)?.unwrap();
-
+            let most_submitted_weight = hamt.get(&most_submitted_key)?.unwrap();
             // current submission is not the most voted checkpoints
             // if new_count < *most_submitted_count, we do nothing as the new count is not close to the most submitted
-            if new_weight > *most_submitted_count {
+            if new_weight > *most_submitted_weight {
                 *most_voted_key = unique_key;
                 Ok(new_weight)
             } else {
-                Ok(most_submitted_count.clone())
+                Ok(most_submitted_weight.clone())
             }
         })
-    }
-
-    /// Checks if the checkpoint unique key has already inserted in the store
-    fn get_submission_weight<BS: Blockstore>(
-        &self,
-        store: &BS,
-        unique_key: &UniqueBytesKey,
-    ) -> anyhow::Result<Option<TokenAmount>> {
-        let hamt = self.submission_weights.load(store)?;
-        let r = hamt.get(&BytesKey::from(unique_key.as_slice()))?;
-        Ok(r.cloned())
     }
 
     /// Checks if the checkpoint unique key has already inserted in the store

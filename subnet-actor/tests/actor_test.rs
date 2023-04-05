@@ -3,8 +3,8 @@ mod test {
     use cid::Cid;
     use fil_actors_runtime::runtime::Runtime;
     use fil_actors_runtime::test_utils::{
-        expect_abort, MockRuntime, ACCOUNT_ACTOR_CODE_ID, INIT_ACTOR_CODE_ID,
-        MULTISIG_ACTOR_CODE_ID,
+        expect_abort, expect_abort_contains_message, MockRuntime, ACCOUNT_ACTOR_CODE_ID,
+        INIT_ACTOR_CODE_ID, MULTISIG_ACTOR_CODE_ID,
     };
     use fil_actors_runtime::{ActorError, INIT_ACTOR_ADDR};
     use fvm_ipld_encoding::ipld_block::IpldBlock;
@@ -15,7 +15,9 @@ mod test {
     use fvm_shared::econ::TokenAmount;
     use fvm_shared::error::ExitCode;
     use fvm_shared::METHOD_SEND;
-    use ipc_gateway::{get_checkpoint, Checkpoint, FundParams, SubnetID, MIN_COLLATERAL_AMOUNT};
+    use ipc_gateway::{
+        Checkpoint, FundParams, SubnetID, CHECKPOINT_GENESIS_CID, MIN_COLLATERAL_AMOUNT,
+    };
     use ipc_subnet_actor::{
         Actor, ConsensusType, ConstructParams, JoinParams, Method, State, Status,
     };
@@ -24,6 +26,7 @@ mod test {
     use num_traits::FromPrimitive;
     use num_traits::Zero;
     use primitives::TCid;
+    use std::collections::BTreeSet;
     use std::str::FromStr;
 
     // just a test address
@@ -640,160 +643,417 @@ mod test {
         assert_eq!(st.status, Status::Killed);
     }
 
-    // #[test]
-    // fn test_submit_checkpoint() {
-    //     let test_actor_address = Address::new_id(9999);
-    //     let mut runtime = construct_runtime_with_receiver(test_actor_address.clone());
-    //
-    //     let miners = vec![
-    //         Address::new_id(10),
-    //         Address::new_id(20),
-    //         Address::new_id(30),
-    //     ];
-    //     let validator = Address::new_id(100);
-    //     let params = JoinParams {
-    //         validator_net_addr: validator.to_string(),
-    //     };
-    //
-    //     // first miner joins the subnet
-    //     let value = TokenAmount::from_atto(MIN_COLLATERAL_AMOUNT);
-    //
-    //     let mut i = 0;
-    //     for caller in &miners {
-    //         runtime.set_value(value.clone());
-    //         runtime.set_balance(TokenAmount::from_atto(MIN_COLLATERAL_AMOUNT));
-    //         runtime.set_caller(*ACCOUNT_ACTOR_CODE_ID, caller.clone());
-    //         runtime.expect_validate_caller_type(SIG_TYPES.clone());
-    //         if i == 0 {
-    //             runtime.expect_send(
-    //                 Address::new_id(IPC_GATEWAY_ADDR),
-    //                 ipc_gateway::Method::Register as u64,
-    //                 None,
-    //                 TokenAmount::from_atto(MIN_COLLATERAL_AMOUNT),
-    //                 None,
-    //                 ExitCode::new(0),
-    //             );
-    //         } else {
-    //             runtime.expect_send(
-    //                 Address::new_id(IPC_GATEWAY_ADDR),
-    //                 ipc_gateway::Method::AddStake as u64,
-    //                 None,
-    //                 TokenAmount::from_atto(MIN_COLLATERAL_AMOUNT),
-    //                 None,
-    //                 ExitCode::new(0),
-    //             );
-    //         }
-    //
-    //         runtime
-    //             .call::<Actor>(
-    //                 Method::Join as u64,
-    //                 IpldBlock::serialize_cbor(&params).unwrap(),
-    //             )
-    //             .unwrap();
-    //
-    //         i += 1;
-    //     }
-    //
-    //     // verify that we have an active subnet with 3 validators.
-    //     let st: State = runtime.get_state();
-    //     assert_eq!(st.validator_set.validators().len(), 3);
-    //     assert_eq!(st.status, Status::Active);
-    //
-    //     // Generate the check point
-    //     let root_subnet = SubnetID::from_str("/root").unwrap();
-    //     let subnet = SubnetID::new_from_parent(&root_subnet, test_actor_address);
-    //     let epoch = 10;
-    //     let mut checkpoint_0 = Checkpoint::new(subnet.clone(), epoch);
-    //     checkpoint_0.set_signature(
-    //         RawBytes::serialize(Signature::new_secp256k1(vec![1, 2, 3, 4]))
-    //             .unwrap()
-    //             .bytes()
-    //             .to_vec(),
-    //     );
-    //
-    //     // Only validators should be entitled to submit checkpoints.
-    //     let non_miner = Address::new_id(40);
-    //     runtime.set_caller(*ACCOUNT_ACTOR_CODE_ID, non_miner.clone());
-    //     runtime.expect_validate_caller_type(SIG_TYPES.clone());
-    //     expect_abort(
-    //         ExitCode::USR_ILLEGAL_STATE,
-    //         runtime.call::<Actor>(
-    //             Method::SubmitCheckpoint as u64,
-    //             IpldBlock::serialize_cbor(&checkpoint_0).unwrap(),
-    //         ),
-    //     );
-    //
-    //     // Send first checkpoint
-    //     let sender = miners.get(0).cloned().unwrap();
-    //     send_checkpoint(&mut runtime, sender.clone(), &checkpoint_0, false).unwrap();
-    //
-    //     expect_abort(
-    //         ExitCode::USR_ILLEGAL_STATE,
-    //         send_checkpoint(&mut runtime, sender.clone(), &checkpoint_0, false),
-    //     );
-    //
-    //     // Send second checkpoint
-    //     let sender2 = miners.get(1).cloned().unwrap();
-    //
-    //     // trigger commit
-    //     send_checkpoint(&mut runtime, sender2.clone(), &checkpoint_0, true).unwrap();
-    //
-    //     // Trying to submit an already committed checkpoint should fail, i.e. if the epoch is already
-    //     // committed, then we should not allow voting again
-    //     let sender2 = miners.get(2).cloned().unwrap();
-    //     runtime.set_caller(*ACCOUNT_ACTOR_CODE_ID, sender2.clone());
-    //     runtime.expect_validate_caller_type(SIG_TYPES.clone());
-    //     expect_abort(
-    //         ExitCode::USR_ILLEGAL_STATE,
-    //         runtime.call::<Actor>(
-    //             Method::SubmitCheckpoint as u64,
-    //             IpldBlock::serialize_cbor(&checkpoint_0).unwrap(),
-    //         ),
-    //     );
-    //
-    //     // If the epoch is wrong in the next checkpoint, it should be rejected. Not multiple of the
-    //     // execution period.
-    //     let prev_cid = checkpoint_0.cid();
-    //     let mut checkpoint_1 = Checkpoint::new(subnet.clone(), epoch + 1);
-    //     checkpoint_1.data.prev_check = TCid::from(prev_cid.clone());
-    //     runtime.set_caller(*ACCOUNT_ACTOR_CODE_ID, sender.clone());
-    //     runtime.expect_validate_caller_type(SIG_TYPES.clone());
-    //     expect_abort(
-    //         ExitCode::USR_ILLEGAL_STATE,
-    //         runtime.call::<Actor>(
-    //             Method::SubmitCheckpoint as u64,
-    //             IpldBlock::serialize_cbor(&checkpoint_1).unwrap(),
-    //         ),
-    //     );
-    //
-    //     // NO LONGER NEEDED, REPLACE WITH EXECUTION WITH FAILED PREVIOUS CHECKPOINT
-    //     // // Submit checkpoint with invalid previous cid
-    //     // let epoch = 20;
-    //     // let mut checkpoint_3 = Checkpoint::new(subnet.clone(), epoch);
-    //     // checkpoint_3.data.prev_check = TCid::from(Cid::default());
-    //     // runtime.set_caller(*ACCOUNT_ACTOR_CODE_ID, sender.clone());
-    //     // runtime.expect_validate_caller_type(SIG_TYPES.clone());
-    //     // expect_abort(
-    //     //     ExitCode::USR_ILLEGAL_STATE,
-    //     //     runtime.call::<Actor>(
-    //     //         Method::SubmitCheckpoint as u64,
-    //     //         IpldBlock::serialize_cbor(&checkpoint_3).unwrap(),
-    //     //     ),
-    //     // );
-    //
-    //     // Start the voting for a new epoch, checking we can proceed with new epoch number.
-    //     let epoch = 20;
-    //     let prev_cid = checkpoint_0.cid();
-    //     let mut checkpoint_4 = Checkpoint::new(subnet.clone(), epoch);
-    //     checkpoint_4.data.prev_check = TCid::from(prev_cid);
-    //     checkpoint_4.set_signature(
-    //         RawBytes::serialize(Signature::new_secp256k1(vec![1, 2, 3, 4]))
-    //             .unwrap()
-    //             .bytes()
-    //             .to_vec(),
-    //     );
-    //     send_checkpoint(&mut runtime, sender.clone(), &checkpoint_4, false).unwrap();
-    // }
+    #[test]
+    fn test_submit_checkpoint_works() {
+        let test_actor_address = Address::new_id(9999);
+        let mut runtime = construct_runtime_with_receiver(test_actor_address.clone());
+
+        let miners = vec![
+            Address::new_id(10),
+            Address::new_id(20),
+            Address::new_id(30),
+        ];
+
+        // first miner joins the subnet
+        let value = TokenAmount::from_atto(MIN_COLLATERAL_AMOUNT);
+
+        let mut i = 0;
+        for caller in &miners {
+            runtime.set_value(value.clone());
+            runtime.set_balance(TokenAmount::from_atto(MIN_COLLATERAL_AMOUNT));
+            runtime.set_caller(*ACCOUNT_ACTOR_CODE_ID, caller.clone());
+            runtime.expect_validate_caller_type(SIG_TYPES.clone());
+            if i == 0 {
+                runtime.expect_send(
+                    Address::new_id(IPC_GATEWAY_ADDR),
+                    ipc_gateway::Method::Register as u64,
+                    None,
+                    TokenAmount::from_atto(MIN_COLLATERAL_AMOUNT),
+                    None,
+                    ExitCode::new(0),
+                );
+            } else {
+                runtime.expect_send(
+                    Address::new_id(IPC_GATEWAY_ADDR),
+                    ipc_gateway::Method::AddStake as u64,
+                    None,
+                    TokenAmount::from_atto(MIN_COLLATERAL_AMOUNT),
+                    None,
+                    ExitCode::new(0),
+                );
+            }
+
+            let params = JoinParams {
+                validator_net_addr: caller.to_string(),
+            };
+
+            runtime
+                .call::<Actor>(
+                    Method::Join as u64,
+                    IpldBlock::serialize_cbor(&params).unwrap(),
+                )
+                .unwrap();
+
+            i += 1;
+        }
+
+        // verify that we have an active subnet with 3 validators.
+        let st: State = runtime.get_state();
+        assert_eq!(st.validator_set.validators().len(), 3);
+        assert_eq!(st.status, Status::Active);
+
+        // Generate the check point
+        let root_subnet = SubnetID::from_str("/root").unwrap();
+        let subnet = SubnetID::new_from_parent(&root_subnet, test_actor_address);
+        // we are targeting the next submission period
+        let epoch = DEFAULT_CHAIN_EPOCH + st.epoch_checkpoint_voting.submission_period;
+        let mut checkpoint_0 = Checkpoint::new(subnet.clone(), epoch);
+        checkpoint_0.set_signature(
+            RawBytes::serialize(Signature::new_secp256k1(vec![1, 2, 3, 4]))
+                .unwrap()
+                .bytes()
+                .to_vec(),
+        );
+
+        // Only validators should be entitled to submit checkpoints.
+        let non_miner = Address::new_id(40);
+        runtime.set_caller(*ACCOUNT_ACTOR_CODE_ID, non_miner.clone());
+        runtime.expect_validate_caller_type(SIG_TYPES.clone());
+        expect_abort(
+            ExitCode::USR_ILLEGAL_STATE,
+            runtime.call::<Actor>(
+                Method::SubmitCheckpoint as u64,
+                IpldBlock::serialize_cbor(&checkpoint_0).unwrap(),
+            ),
+        );
+
+        // Send first checkpoint
+        let sender = miners.get(0).cloned().unwrap();
+        send_checkpoint(&mut runtime, sender.clone(), &checkpoint_0, false).unwrap();
+
+        // Already voted, should not vote again
+        expect_abort_contains_message(
+            ExitCode::USR_ILLEGAL_STATE,
+            "already submitted",
+            send_checkpoint(&mut runtime, sender.clone(), &checkpoint_0, false),
+        );
+
+        // Send second checkpoint
+        let sender2 = miners.get(1).cloned().unwrap();
+
+        // This should have triggered commit
+        send_checkpoint(&mut runtime, sender2.clone(), &checkpoint_0, true).unwrap();
+
+        // Trying to submit an already committed checkpoint should fail, i.e. if the epoch is already
+        // committed, then we should not allow voting again
+        let sender2 = miners.get(2).cloned().unwrap();
+        runtime.set_caller(*ACCOUNT_ACTOR_CODE_ID, sender2.clone());
+        runtime.expect_validate_caller_type(SIG_TYPES.clone());
+        expect_abort(
+            ExitCode::USR_ILLEGAL_STATE,
+            runtime.call::<Actor>(
+                Method::SubmitCheckpoint as u64,
+                IpldBlock::serialize_cbor(&checkpoint_0).unwrap(),
+            ),
+        );
+
+        // If the epoch is wrong in the next checkpoint, it should be rejected. Not multiple of the
+        // execution period.
+        let prev_cid = checkpoint_0.cid();
+        let mut checkpoint_1 = Checkpoint::new(subnet.clone(), epoch + 1);
+        checkpoint_1.data.prev_check = TCid::from(prev_cid.clone());
+        runtime.set_caller(*ACCOUNT_ACTOR_CODE_ID, sender.clone());
+        runtime.expect_validate_caller_type(SIG_TYPES.clone());
+        expect_abort(
+            ExitCode::USR_ILLEGAL_STATE,
+            runtime.call::<Actor>(
+                Method::SubmitCheckpoint as u64,
+                IpldBlock::serialize_cbor(&checkpoint_1).unwrap(),
+            ),
+        );
+
+        // Start the voting for a new epoch, checking we can proceed with new epoch number.
+        let epoch = DEFAULT_CHAIN_EPOCH + st.epoch_checkpoint_voting.submission_period * 2;
+        let prev_cid = checkpoint_0.cid();
+        let mut checkpoint_4 = Checkpoint::new(subnet.clone(), epoch);
+        checkpoint_4.data.prev_check = TCid::from(prev_cid);
+        checkpoint_4.set_signature(
+            RawBytes::serialize(Signature::new_secp256k1(vec![1, 2, 3, 4]))
+                .unwrap()
+                .bytes()
+                .to_vec(),
+        );
+        send_checkpoint(&mut runtime, sender.clone(), &checkpoint_4, false).unwrap();
+    }
+
+    /// Tests the checkpoint will abort when checkpoints are not chained and the submitted epoch is the
+    /// next executable epoch, we stop the epoch from submission
+    #[test]
+    fn test_submit_checkpoint_aborts_not_chained_early_termination() {
+        let test_actor_address = Address::new_id(9999);
+        let mut runtime = construct_runtime_with_receiver(test_actor_address.clone());
+
+        let miners = vec![
+            Address::new_id(10),
+            Address::new_id(20),
+            Address::new_id(30),
+        ];
+
+        // first miner joins the subnet
+        let value = TokenAmount::from_atto(MIN_COLLATERAL_AMOUNT);
+
+        let mut i = 0;
+        for caller in &miners {
+            runtime.set_value(value.clone());
+            runtime.set_balance(TokenAmount::from_atto(MIN_COLLATERAL_AMOUNT));
+            runtime.set_caller(*ACCOUNT_ACTOR_CODE_ID, caller.clone());
+            runtime.expect_validate_caller_type(SIG_TYPES.clone());
+            if i == 0 {
+                runtime.expect_send(
+                    Address::new_id(IPC_GATEWAY_ADDR),
+                    ipc_gateway::Method::Register as u64,
+                    None,
+                    TokenAmount::from_atto(MIN_COLLATERAL_AMOUNT),
+                    None,
+                    ExitCode::new(0),
+                );
+            } else {
+                runtime.expect_send(
+                    Address::new_id(IPC_GATEWAY_ADDR),
+                    ipc_gateway::Method::AddStake as u64,
+                    None,
+                    TokenAmount::from_atto(MIN_COLLATERAL_AMOUNT),
+                    None,
+                    ExitCode::new(0),
+                );
+            }
+
+            let params = JoinParams {
+                validator_net_addr: caller.to_string(),
+            };
+
+            runtime
+                .call::<Actor>(
+                    Method::Join as u64,
+                    IpldBlock::serialize_cbor(&params).unwrap(),
+                )
+                .unwrap();
+
+            i += 1;
+        }
+
+        // verify that we have an active subnet with 3 validators.
+        let st: State = runtime.get_state();
+        assert_eq!(st.validator_set.validators().len(), 3);
+        assert_eq!(st.status, Status::Active);
+
+        // Generate the check point
+        let root_subnet = SubnetID::from_str("/root").unwrap();
+        let subnet = SubnetID::new_from_parent(&root_subnet, test_actor_address);
+        // we are targeting the next submission period
+        let epoch = DEFAULT_CHAIN_EPOCH + st.epoch_checkpoint_voting.submission_period;
+        let mut checkpoint_0 = Checkpoint::new(subnet.clone(), epoch);
+        checkpoint_0.data.prev_check = TCid::default();
+        checkpoint_0.set_signature(
+            RawBytes::serialize(Signature::new_secp256k1(vec![1, 2, 3, 4]))
+                .unwrap()
+                .bytes()
+                .to_vec(),
+        );
+
+        // Reject the submission as checkpoints are not chained
+        let non_miner = Address::new_id(10);
+        runtime.set_caller(*ACCOUNT_ACTOR_CODE_ID, non_miner.clone());
+        runtime.expect_validate_caller_type(SIG_TYPES.clone());
+        expect_abort_contains_message(
+            ExitCode::USR_ILLEGAL_STATE,
+            "checkpoint not chained",
+            runtime.call::<Actor>(
+                Method::SubmitCheckpoint as u64,
+                IpldBlock::serialize_cbor(&checkpoint_0).unwrap(),
+            ),
+        );
+    }
+
+    /// Tests the checkpoint will abort when checkpoints are not chained and the submitted epoch is NOT the
+    /// next executable epoch, we need to reset the epoch.
+    ///
+    /// Test flows like the below:
+    /// 1. Create 3 validators and register them to the subnet with equal weight
+    ///
+    /// 2. Submit to epoch `DEFAULT_CHAIN_EPOCH + st.epoch_checkpoint_voting.submission_period * 2`, we are skipping
+    ///    the first epoch and ensure this is executable. The previous checkpoint cid is set to some value `cid_a`.
+    ///    We should see the epoch number being stored in the next executable queue.
+    ///    Checks at step 2:
+    ///    - executable_queue should contain `DEFAULT_CHAIN_EPOCH + st.epoch_checkpoint_voting.submission_period * 2`
+    ///    - last_executed_epoch is still `DEFAULT_CHAIN_EPOCH`
+    ///
+    /// 3. Submit to epoch `DEFAULT_CHAIN_EPOCH + st.epoch_checkpoint_voting.submission_period * 1`, i.e. the previous
+    ///    epoch in step 2. This would lead to the epoch being committed. The key is the checkpoint cid of the current
+    ///    epoch should be different from that in step 2, i.e. any value other than `cid_a`
+    ///    Checks at step 3:
+    ///    - executable_queue should contain `DEFAULT_CHAIN_EPOCH + st.epoch_checkpoint_voting.submission_period * 2`
+    ///    - last_executed_epoch is still `DEFAULT_CHAIN_EPOCH + st.epoch_checkpoint_voting.submission_period * 1`
+    ///
+    /// 4. Submit to any epoch after `DEFAULT_CHAIN_EPOCH + st.epoch_checkpoint_voting.submission_period * 1`, should
+    ///    trigger a reset in submission of epoch `DEFAULT_CHAIN_EPOCH + st.epoch_checkpoint_voting.submission_period * 2`.
+    ///    Checks at step 4:
+    ///    - executable_queue should have removed `DEFAULT_CHAIN_EPOCH + st.epoch_checkpoint_voting.submission_period * 2`
+    ///    - last_executed_epoch is still `DEFAULT_CHAIN_EPOCH + st.epoch_checkpoint_voting.submission_period * 1`
+    ///    - submission at `DEFAULT_CHAIN_EPOCH + st.epoch_checkpoint_voting.submission_period * 2` is cleared
+    #[test]
+    fn test_submit_checkpoint_aborts_not_chained_reset_epoch() {
+        let test_actor_address = Address::new_id(9999);
+        let mut runtime = construct_runtime_with_receiver(test_actor_address.clone());
+
+        // Step 1
+        let miners = vec![
+            Address::new_id(10),
+            Address::new_id(20),
+            Address::new_id(30),
+        ];
+
+        // first miner joins the subnet
+        let value = TokenAmount::from_atto(MIN_COLLATERAL_AMOUNT);
+
+        let mut i = 0;
+        for caller in &miners {
+            runtime.set_value(value.clone());
+            runtime.set_balance(TokenAmount::from_atto(MIN_COLLATERAL_AMOUNT));
+            runtime.set_caller(*ACCOUNT_ACTOR_CODE_ID, caller.clone());
+            runtime.expect_validate_caller_type(SIG_TYPES.clone());
+            if i == 0 {
+                runtime.expect_send(
+                    Address::new_id(IPC_GATEWAY_ADDR),
+                    ipc_gateway::Method::Register as u64,
+                    None,
+                    TokenAmount::from_atto(MIN_COLLATERAL_AMOUNT),
+                    None,
+                    ExitCode::new(0),
+                );
+            } else {
+                runtime.expect_send(
+                    Address::new_id(IPC_GATEWAY_ADDR),
+                    ipc_gateway::Method::AddStake as u64,
+                    None,
+                    TokenAmount::from_atto(MIN_COLLATERAL_AMOUNT),
+                    None,
+                    ExitCode::new(0),
+                );
+            }
+
+            let params = JoinParams {
+                validator_net_addr: caller.to_string(),
+            };
+
+            runtime
+                .call::<Actor>(
+                    Method::Join as u64,
+                    IpldBlock::serialize_cbor(&params).unwrap(),
+                )
+                .unwrap();
+
+            i += 1;
+        }
+
+        let root_subnet = SubnetID::from_str("/root").unwrap();
+        let subnet = SubnetID::new_from_parent(&root_subnet, test_actor_address);
+
+        // Step 2
+        let st: State = runtime.get_state();
+        let epoch_2 = DEFAULT_CHAIN_EPOCH + st.epoch_checkpoint_voting.submission_period * 2;
+        let prev_cid = Cid::default();
+        let mut checkpoint_2 = Checkpoint::new(subnet.clone(), epoch_2);
+        checkpoint_2.data.prev_check = TCid::from(prev_cid);
+        checkpoint_2.set_signature(
+            RawBytes::serialize(Signature::new_secp256k1(vec![1, 2, 3, 4]))
+                .unwrap()
+                .bytes()
+                .to_vec(),
+        );
+
+        send_checkpoint(&mut runtime, miners[0].clone(), &checkpoint_2, false).unwrap();
+        send_checkpoint(&mut runtime, miners[1].clone(), &checkpoint_2, false).unwrap();
+
+        // performing checks
+        let st: State = runtime.get_state();
+        assert_eq!(
+            st.previous_executed_checkpoint_cid,
+            CHECKPOINT_GENESIS_CID.clone()
+        );
+        assert_eq!(
+            st.epoch_checkpoint_voting.last_voting_executed_epoch,
+            DEFAULT_CHAIN_EPOCH
+        );
+        assert_eq!(
+            st.epoch_checkpoint_voting.executable_epoch_queue,
+            Some(BTreeSet::from([epoch_2]))
+        );
+        assert_eq!(
+            st.epoch_checkpoint_voting
+                .load_most_voted_submission(runtime.store(), epoch_2)
+                .unwrap(),
+            Some(checkpoint_2.clone())
+        );
+        assert_eq!(
+            st.epoch_checkpoint_voting
+                .load_most_voted_weight(runtime.store(), epoch_2)
+                .unwrap(),
+            Some(TokenAmount::from_whole(2))
+        );
+
+        // Step 3
+        let epoch_1 = DEFAULT_CHAIN_EPOCH + st.epoch_checkpoint_voting.submission_period * 1;
+        let mut checkpoint_1 = Checkpoint::new(subnet.clone(), epoch_1);
+        checkpoint_1.set_signature(
+            RawBytes::serialize(Signature::new_secp256k1(vec![1, 2, 3, 4]))
+                .unwrap()
+                .bytes()
+                .to_vec(),
+        );
+
+        send_checkpoint(&mut runtime, miners[0].clone(), &checkpoint_1, false).unwrap();
+        send_checkpoint(&mut runtime, miners[1].clone(), &checkpoint_1, true).unwrap();
+
+        // performing checks
+        let st: State = runtime.get_state();
+        assert_eq!(st.previous_executed_checkpoint_cid, checkpoint_1.cid());
+        assert_eq!(
+            st.epoch_checkpoint_voting.last_voting_executed_epoch,
+            epoch_1
+        );
+        assert_eq!(
+            st.epoch_checkpoint_voting.executable_epoch_queue,
+            Some(BTreeSet::from([
+                DEFAULT_CHAIN_EPOCH + st.epoch_checkpoint_voting.submission_period * 2
+            ]))
+        );
+        assert_eq!(
+            st.epoch_checkpoint_voting
+                .load_most_voted_weight(runtime.store(), epoch_2)
+                .unwrap(),
+            Some(TokenAmount::from_whole(2))
+        );
+        assert_eq!(
+            st.epoch_checkpoint_voting
+                .load_most_voted_weight(runtime.store(), epoch_1)
+                .unwrap(),
+            None
+        );
+
+        // Step 4
+        checkpoint_2.data.prev_check = TCid::from(checkpoint_1.cid());
+        send_checkpoint(&mut runtime, miners[2].clone(), &checkpoint_2, false).unwrap();
+
+        // perform checks
+        let st: State = runtime.get_state();
+        assert_eq!(st.previous_executed_checkpoint_cid, checkpoint_1.cid());
+        assert_eq!(
+            st.epoch_checkpoint_voting.last_voting_executed_epoch,
+            epoch_1
+        );
+        assert_eq!(st.epoch_checkpoint_voting.executable_epoch_queue, None);
+    }
 
     fn send_checkpoint(
         runtime: &mut MockRuntime,

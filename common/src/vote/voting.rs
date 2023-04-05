@@ -11,11 +11,11 @@ use serde::de::DeserializeOwned;
 use serde::{Deserialize, Deserializer, Serialize, Serializer};
 use std::collections::BTreeSet; // numerator and denominator
 
-const DEFAULT_THRESHOLD_RATIO: (u64, u64) = (2, 3);
+const DEFAULT_THRESHOLD_RATIO: Ratio = (2, 3);
 
 /// Handle the epoch voting
 #[derive(PartialEq, Eq, Clone, Debug)]
-pub struct Voting<Vote> {
+pub struct Voting<T> {
     /// The epoch that the voting started
     pub genesis_epoch: ChainEpoch,
     /// How often the voting should be submitted by validators
@@ -27,12 +27,12 @@ pub struct Voting<Vote> {
     /// epoch is ready to be executed. Most of the time this should be empty, we are wrapping with
     /// Option instead of empty BTreeSet just to save some storage space.
     pub executable_epoch_queue: Option<BTreeSet<ChainEpoch>>,
-    pub epoch_vote_submissions: TCid<THamt<ChainEpoch, EpochVoteSubmissions<Vote>>>,
+    pub epoch_vote_submissions: TCid<THamt<ChainEpoch, EpochVoteSubmissions<T>>>,
     /// The voting execution threshold
     pub threshold_ratio: Ratio,
 }
 
-impl<V: UniqueVote + DeserializeOwned + Serialize> Default for Voting<V> {
+impl<T: UniqueVote + DeserializeOwned + Serialize> Default for Voting<T> {
     fn default() -> Self {
         Voting {
             genesis_epoch: 0,
@@ -45,12 +45,12 @@ impl<V: UniqueVote + DeserializeOwned + Serialize> Default for Voting<V> {
     }
 }
 
-impl<Vote: UniqueVote + DeserializeOwned + Serialize> Voting<Vote> {
+impl<T: UniqueVote + DeserializeOwned + Serialize> Voting<T> {
     pub fn new<BS: Blockstore>(
         store: &BS,
         genesis_epoch: ChainEpoch,
         period: ChainEpoch,
-    ) -> anyhow::Result<Voting<Vote>> {
+    ) -> anyhow::Result<Voting<T>> {
         Self::new_with_ratio(
             store,
             genesis_epoch,
@@ -66,7 +66,7 @@ impl<Vote: UniqueVote + DeserializeOwned + Serialize> Voting<Vote> {
         period: ChainEpoch,
         ratio_numerator: u64,
         ratio_denominator: u64,
-    ) -> anyhow::Result<Voting<Vote>> {
+    ) -> anyhow::Result<Voting<T>> {
         Ok(Self {
             genesis_epoch,
             submission_period: period,
@@ -77,15 +77,19 @@ impl<Vote: UniqueVote + DeserializeOwned + Serialize> Voting<Vote> {
         })
     }
 
+    /// Submit a vote at a specific epoch. If the validator threshold is reached, this method would
+    /// return the most voted vote, else it returns None.
+    ///
+    /// Note that this struct does not track the weight, it needs to be managed by external caller.
     pub fn submit_vote<BS: Blockstore>(
         &mut self,
         store: &BS,
-        vote: Vote,
+        vote: T,
         epoch: ChainEpoch,
         submitter: Address,
         submitter_weight: TokenAmount,
         total_weight: TokenAmount,
-    ) -> anyhow::Result<Option<Vote>> {
+    ) -> anyhow::Result<Option<T>> {
         // first we check the epoch is the correct one, we process only it's multiple
         // of cron_period since genesis_epoch
         if !self.epoch_can_vote(epoch) {
@@ -104,7 +108,7 @@ impl<Vote: UniqueVote + DeserializeOwned + Serialize> Voting<Vote> {
         let epoch_key = epoch_key(epoch);
         let mut submission = match hamt.get(&epoch_key)? {
             Some(s) => s.clone(),
-            None => EpochVoteSubmissions::<Vote>::new(store)?,
+            None => EpochVoteSubmissions::<T>::new(store)?,
         };
 
         let most_voted_weight = submission.submit(store, submitter, submitter_weight, vote)?;
@@ -131,11 +135,11 @@ impl<Vote: UniqueVote + DeserializeOwned + Serialize> Voting<Vote> {
                     // just store the submission and skip execution
                     hamt.set(epoch_key, submission)?;
                     self.insert_executable_epoch(epoch);
-                    return Ok(None);
+                    None
+                } else {
+                    let msgs = submission.load_most_voted_submission(store)?.unwrap();
+                    Some(msgs)
                 }
-
-                let msgs = submission.load_most_voted_submission(store)?.unwrap();
-                Some(msgs)
             }
         };
 
@@ -145,10 +149,12 @@ impl<Vote: UniqueVote + DeserializeOwned + Serialize> Voting<Vote> {
         Ok(messages)
     }
 
+    /// Checks the `epoch` is the next executable epoch.
     pub fn is_next_executable_epoch(&self, epoch: ChainEpoch) -> bool {
         self.last_voting_executed_epoch + self.submission_period == epoch
     }
 
+    /// Abort a specific epoch.
     pub fn abort_epoch<BS: Blockstore>(
         &mut self,
         store: &BS,
@@ -170,6 +176,8 @@ impl<Vote: UniqueVote + DeserializeOwned + Serialize> Voting<Vote> {
         })
     }
 
+    /// Marks the epoch executed, removes the epoch from the `self.executable_epoch_queue` and clears all
+    /// the submissions in `self.epoch_vote_submissions`.
     pub fn mark_epoch_executed<BS: Blockstore>(
         &mut self,
         store: &BS,
@@ -195,19 +203,19 @@ impl<Vote: UniqueVote + DeserializeOwned + Serialize> Voting<Vote> {
         })
     }
 
-    fn remove_epoch_from_queue(&mut self, epoch: ChainEpoch) {
-        if let Some(queue) = self.executable_epoch_queue.as_mut() {
-            queue.remove(&epoch);
-            if queue.is_empty() {
-                self.executable_epoch_queue = None;
-            }
-        }
-    }
-
+    /// Load the next executable epoch and the content to be executed.
+    /// This ensures none of the epochs will be stuck. Consider the following example:
+    ///
+    /// Epoch 10 and 20 are two epochs to be executed. However, all the validators have submitted
+    /// epoch 20, and the status is to be executed. However, epoch 10 has yet to be executed. Now,
+    /// epoch 10 has reached consensus and executed, but epoch 20 cannot be executed because every
+    /// validator has already voted, no one can vote again to trigger the execution. Epoch 20 is stuck.
+    ///
+    /// This method lets one check if the next epoch can be executed, returns Some(T) if executable.
     pub fn get_next_executable_vote<BS: Blockstore>(
         &mut self,
         store: &BS,
-    ) -> anyhow::Result<Option<Vote>> {
+    ) -> anyhow::Result<Option<T>> {
         let epoch_queue = match self.executable_epoch_queue.as_mut() {
             None => return Ok(None),
             Some(queue) => queue,
@@ -226,24 +234,24 @@ impl<Vote: UniqueVote + DeserializeOwned + Serialize> Voting<Vote> {
             }
         };
 
-        self.epoch_vote_submissions.modify(store, |hamt| {
-            let epoch_key = epoch_key(epoch);
-            let submission = match hamt.get(&epoch_key)? {
-                Some(s) => s,
-                None => unreachable!("Submission in epoch not found, report bug"),
-            };
+        let hamt = self.epoch_vote_submissions.load(store)?;
 
-            let vote = submission.load_most_voted_submission(store)?.unwrap();
+        let epoch_key = epoch_key(epoch);
+        let submission = match hamt.get(&epoch_key)? {
+            Some(s) => s,
+            None => unreachable!("Submission in epoch not found, report bug"),
+        };
 
-            Ok(Some(vote))
-        })
+        let vote = submission.load_most_voted_submission(store)?.unwrap();
+
+        Ok(Some(vote))
     }
 
     pub fn submission_period(&self) -> ChainEpoch {
         self.submission_period
     }
 
-    pub fn epoch_vote_submissions(&self) -> TCid<THamt<ChainEpoch, EpochVoteSubmissions<Vote>>> {
+    pub fn epoch_vote_submissions(&self) -> TCid<THamt<ChainEpoch, EpochVoteSubmissions<T>>> {
         self.epoch_vote_submissions.clone()
     }
 
@@ -269,6 +277,49 @@ impl<Vote: UniqueVote + DeserializeOwned + Serialize> Voting<Vote> {
         self.last_voting_executed_epoch >= epoch
     }
 
+    /// Load the most voted submission at a specific epoch
+    pub fn load_most_voted_submission(
+        &self,
+        store: &impl Blockstore,
+        epoch: ChainEpoch,
+    ) -> anyhow::Result<Option<T>> {
+        let hamt = self.epoch_vote_submissions.load(store)?;
+
+        let epoch_key = epoch_key(epoch);
+
+        if let Some(submission) = hamt.get(&epoch_key)? {
+            submission.load_most_voted_submission(store)
+        } else {
+            Ok(None)
+        }
+    }
+
+    /// Load the most voted weight at a specific epoch
+    pub fn load_most_voted_weight(
+        &self,
+        store: &impl Blockstore,
+        epoch: ChainEpoch,
+    ) -> anyhow::Result<Option<TokenAmount>> {
+        let hamt = self.epoch_vote_submissions.load(store)?;
+
+        let epoch_key = epoch_key(epoch);
+
+        if let Some(submission) = hamt.get(&epoch_key)? {
+            submission.load_most_voted_weight(store)
+        } else {
+            Ok(None)
+        }
+    }
+
+    fn remove_epoch_from_queue(&mut self, epoch: ChainEpoch) {
+        if let Some(queue) = self.executable_epoch_queue.as_mut() {
+            queue.remove(&epoch);
+            if queue.is_empty() {
+                self.executable_epoch_queue = None;
+            }
+        }
+    }
+
     fn insert_executable_epoch(&mut self, epoch: ChainEpoch) {
         match self.executable_epoch_queue.as_mut() {
             None => self.executable_epoch_queue = Some(BTreeSet::from([epoch])),
@@ -279,7 +330,7 @@ impl<Vote: UniqueVote + DeserializeOwned + Serialize> Voting<Vote> {
     }
 }
 
-impl<V: Serialize> Serialize for Voting<V> {
+impl<T: Serialize> Serialize for Voting<T> {
     fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
     where
         S: Serializer,
@@ -296,7 +347,7 @@ impl<V: Serialize> Serialize for Voting<V> {
     }
 }
 
-impl<'de, V: DeserializeOwned> Deserialize<'de> for Voting<V> {
+impl<'de, T: DeserializeOwned> Deserialize<'de> for Voting<T> {
     fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
     where
         D: Deserializer<'de>,
@@ -309,7 +360,7 @@ impl<'de, V: DeserializeOwned> Deserialize<'de> for Voting<V> {
             TCid<THamt<ChainEpoch, EpochVoteSubmissions<V>>>,
             Ratio,
         );
-        let inner = <Inner<V>>::deserialize(serde_tuple::Deserializer(deserializer))?;
+        let inner = <Inner<T>>::deserialize(serde_tuple::Deserializer(deserializer))?;
         Ok(Voting {
             genesis_epoch: inner.0,
             submission_period: inner.1,

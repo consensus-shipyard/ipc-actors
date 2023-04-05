@@ -416,7 +416,7 @@ fn commit_checkpoint(
             actor_error!(unhandled_message, e.to_string())
         })?;
 
-    st.previous_executed_checkpoint_cid = Some(ch.cid());
+    st.previous_executed_checkpoint_cid = ch.cid();
 
     // commit checkpoint
     st.flush_checkpoint(store, ch)
