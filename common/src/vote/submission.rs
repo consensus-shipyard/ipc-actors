@@ -100,9 +100,7 @@ impl<T: UniqueVote + DeserializeOwned + Serialize> EpochVoteSubmissions<T> {
     ) -> anyhow::Result<Option<TokenAmount>> {
         // we will only have one entry in the `most_submitted` set if more than 2/3 has reached
         if let Some(unique_key) = &self.most_voted_key {
-            let hash_byte_key = BytesKey::from(unique_key.as_slice());
-            let hamt = self.submission_weights.load(store)?;
-            Ok(hamt.get(&hash_byte_key)?.cloned())
+            self.get_submission_weight(store, unique_key)
         } else {
             Ok(None)
         }
@@ -175,6 +173,17 @@ impl<T: UniqueVote + DeserializeOwned + Serialize> EpochVoteSubmissions<T> {
 
 // Private and internal implementations
 impl<T: UniqueVote + DeserializeOwned + Serialize> EpochVoteSubmissions<T> {
+    /// Checks if the checkpoint unique key has already inserted in the store
+    fn get_submission_weight<BS: Blockstore>(
+        &self,
+        store: &BS,
+        unique_key: &UniqueBytesKey,
+    ) -> anyhow::Result<Option<TokenAmount>> {
+        let hamt = self.submission_weights.load(store)?;
+        let r = hamt.get(&BytesKey::from(unique_key.as_slice()))?;
+        Ok(r.cloned())
+    }
+
     /// Update the total submitters, returns the latest total number of submitters
     fn update_submitters<BS: Blockstore>(
         &mut self,
