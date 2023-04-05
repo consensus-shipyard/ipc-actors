@@ -1,12 +1,8 @@
 [package]
-name = "ipc-sdk"
-description = "Common types and util functions for IPC actors"
-version = "0.0.1"
-license = "MIT OR Apache-2.0"
-authors = ["ConsensusLab", "Protocol Labs", "Filecoin Core Devs"]
+name = "ipc-actor-common"
+description = "The common code used by both gateway actor and subnet actor, but not by sdk exposed to users"
+version = "0.1.0"
 edition = "2021"
-repository = "https://github.com/consensus-shipyard/ipc-actors"
-keywords = ["filecoin", "web3", "wasm", "ipc"]
 
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
@@ -14,6 +10,7 @@ keywords = ["filecoin", "web3", "wasm", "ipc"]
 anyhow = "1.0.56"
 log = "0.4.17"
 primitives = { git = "https://github.com/consensus-shipyard/fvm-utils" }
+ipc-sdk = { path = "../sdk" }
 num-traits = "0.2.14"
 fvm_ipld_blockstore = "0.1.1"
 fvm_ipld_encoding = "0.3.3"
@@ -27,4 +24,3 @@ integer-encoding = { version = "3.0.3", default-features = false }
 
 [dev-dependencies]
 serde_json = "1.0.95"
-

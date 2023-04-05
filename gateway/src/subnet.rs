@@ -6,12 +6,11 @@ use fvm_shared::econ::TokenAmount;
 use primitives::{TAmt, TCid};
 use serde_tuple::{Deserialize_tuple, Serialize_tuple};
 
-use crate::CROSSMSG_AMT_BITWIDTH;
+use crate::{State, CROSSMSG_AMT_BITWIDTH};
 use ipc_sdk::subnet_id::SubnetID;
 
 use super::checkpoint::*;
 use super::cross::CrossMsg;
-use super::state::State;
 
 #[derive(PartialEq, Eq, Clone, Copy, Debug, Deserialize_repr, Serialize_repr)]
 #[repr(i32)]

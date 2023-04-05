@@ -15,10 +15,11 @@ use lazy_static::lazy_static;
 use num_traits::Zero;
 use primitives::{TCid, THamt};
 use serde_tuple::{Deserialize_tuple, Serialize_tuple};
-use std::collections::BTreeSet;
 use std::str::FromStr;
 
-use crate::cron::{CronSubmission, Validators};
+use crate::cron::Validators;
+use crate::CronCheckpoint;
+use ipc_actor_common::vote::Voting;
 use ipc_sdk::subnet_id::SubnetID;
 use ipc_sdk::ValidatorSet;
 
@@ -49,18 +50,7 @@ pub struct State {
     pub bottomup_nonce: u64,
     pub applied_bottomup_nonce: u64,
     pub applied_topdown_nonce: u64,
-    /// The epoch that the subnet actor is deployed
-    pub genesis_epoch: ChainEpoch,
-    /// How often cron checkpoints will be submitted by validator in the child subnet
-    pub cron_period: ChainEpoch,
-    /// The last submit cron epoch that was executed
-    pub last_cron_executed_epoch: ChainEpoch,
-    /// Contains the executable epochs that are ready to be executed, but has yet to be executed.
-    /// This usually happens when previous submission epoch has not executed, but the next submission
-    /// epoch is ready to be executed. Most of the time this should be empty, we are wrapping with
-    /// Option instead of empty VecDeque just to save some storage space.
-    pub executable_epoch_queue: Option<BTreeSet<ChainEpoch>>,
-    pub cron_submissions: TCid<THamt<ChainEpoch, CronSubmission>>,
+    pub cron_checkpoint_voting: Voting<CronCheckpoint>,
     pub validators: Validators,
 }
 
@@ -86,11 +76,11 @@ impl State {
             // We first increase to the subsequent and then execute for bottom-up messages
             applied_bottomup_nonce: Default::default(),
             applied_topdown_nonce: Default::default(),
-            genesis_epoch: params.genesis_epoch,
-            cron_period: params.cron_period,
-            last_cron_executed_epoch: params.genesis_epoch,
-            executable_epoch_queue: None,
-            cron_submissions: TCid::new_hamt(store)?,
+            cron_checkpoint_voting: Voting::<CronCheckpoint>::new(
+                store,
+                params.genesis_epoch,
+                params.cron_period,
+            )?,
             validators: Validators::new(ValidatorSet::default()),
         })
     }
@@ -383,15 +373,6 @@ impl State {
     pub fn set_membership(&mut self, validator_set: ValidatorSet) {
         self.validators = Validators::new(validator_set);
     }
-
-    pub fn insert_executable_epoch(&mut self, epoch: ChainEpoch) {
-        match self.executable_epoch_queue.as_mut() {
-            None => self.executable_epoch_queue = Some(BTreeSet::from([epoch])),
-            Some(queue) => {
-                queue.insert(epoch);
-            }
-        }
-    }
 }
 
 pub fn set_subnet<BS: Blockstore>(
@@ -432,15 +413,6 @@ pub fn get_checkpoint<'m, BS: Blockstore>(
     checkpoints
         .get(&epoch_key(epoch))
         .map_err(|e| e.downcast_wrap(format!("failed to get checkpoint for id {}", epoch)))
-}
-
-pub fn get_bottomup_msg<'m, BS: Blockstore>(
-    crossmsgs: &'m CrossMsgMetaArray<BS>,
-    nonce: u64,
-) -> anyhow::Result<Option<&'m CrossMsgMeta>> {
-    crossmsgs
-        .get(nonce)
-        .map_err(|e| anyhow!("failed to get crossmsg meta by nonce: {:?}", e))
 }
 
 pub fn get_topdown_msg<'m, BS: Blockstore>(

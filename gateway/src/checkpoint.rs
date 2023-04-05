@@ -6,13 +6,14 @@ use fvm_ipld_encoding::DAG_CBOR;
 use fvm_ipld_encoding::{serde_bytes, to_vec};
 use fvm_shared::clock::ChainEpoch;
 use fvm_shared::econ::TokenAmount;
+use ipc_actor_common::vote::{UniqueBytesKey, UniqueVote};
 use ipc_sdk::subnet_id::SubnetID;
 use lazy_static::lazy_static;
 use num_traits::Zero;
 use primitives::{TCid, TLink};
 use serde_tuple::{Deserialize_tuple, Serialize_tuple};
 
-use crate::{ensure_message_sorted, CrossMsg, CrossMsgs};
+use crate::{ensure_message_sorted, CrossMsg};
 
 lazy_static! {
     // Default CID used for the genesis checkpoint. Using
@@ -27,6 +28,12 @@ pub struct Checkpoint {
     pub data: CheckData,
     #[serde(with = "serde_bytes")]
     pub sig: Vec<u8>,
+}
+
+impl UniqueVote for Checkpoint {
+    fn unique_key(&self) -> anyhow::Result<UniqueBytesKey> {
+        Ok(self.cid().to_bytes())
+    }
 }
 
 impl Checkpoint {
@@ -172,30 +179,10 @@ impl CheckData {
             source: id,
             proof: Vec::new(),
             epoch,
-            prev_check: CHECKPOINT_GENESIS_CID.clone().into(),
+            prev_check: (*CHECKPOINT_GENESIS_CID).into(),
             children: Vec::new(),
             cross_msgs: BatchCrossMsgs::default(),
         }
-    }
-}
-
-// CrossMsgMeta sends an aggregate of all messages being propagated up in
-// the checkpoint.
-#[derive(PartialEq, Eq, Clone, Debug, Default, Serialize_tuple, Deserialize_tuple)]
-pub struct CrossMsgMeta {
-    pub msgs_cid: TCid<TLink<CrossMsgs>>,
-    pub nonce: u64,
-    pub value: TokenAmount,
-    pub fee: TokenAmount,
-}
-
-impl CrossMsgMeta {
-    pub fn new() -> Self {
-        Self::default()
-    }
-
-    pub fn set_nonce(&mut self, nonce: u64) {
-        self.nonce = nonce;
     }
 }
 

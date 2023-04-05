@@ -13,6 +13,7 @@ members = [
     "gateway",
     "subnet-actor",
     "sdk",
+    "common",
     "atomic-exec",
     "atomic-exec/primitives",
     "atomic-exec/examples/fungible-token",

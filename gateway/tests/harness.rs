@@ -102,8 +102,14 @@ impl Harness {
         assert_eq!(st.min_stake, TokenAmount::from_atto(MIN_COLLATERAL_AMOUNT));
         assert_eq!(st.check_period, DEFAULT_CHECKPOINT_PERIOD);
         assert_eq!(st.applied_bottomup_nonce, 0);
-        assert_eq!(st.cron_period, *DEFAULT_CRON_PERIOD);
-        assert_eq!(st.genesis_epoch, *DEFAULT_GENESIS_EPOCH);
+        assert_eq!(
+            st.cron_checkpoint_voting.submission_period(),
+            *DEFAULT_CRON_PERIOD
+        );
+        assert_eq!(
+            st.cron_checkpoint_voting.genesis_epoch(),
+            *DEFAULT_GENESIS_EPOCH
+        );
         verify_empty_map(rt, st.subnets.cid());
         verify_empty_map(rt, st.checkpoints.cid());
     }

@@ -12,7 +12,7 @@ use multihash::MultihashDigest;
 use primitives::CodeType;
 use std::cmp::Ordering;
 
-use crate::checkpoint::{Checkpoint, CrossMsgMeta};
+use crate::checkpoint::Checkpoint;
 use crate::cross::CrossMsg;
 
 /// ID used in the builtin-actors bundle manifest
@@ -24,7 +24,6 @@ pub const MIN_COLLATERAL_AMOUNT: u64 = 10_u64.pow(18);
 
 pub const SUBNET_ACTOR_REWARD_METHOD: u64 = frc42_dispatch::method_hash!("Reward");
 
-pub type CrossMsgMetaArray<'bs, BS> = Array<'bs, CrossMsgMeta, BS>;
 pub type CrossMsgArray<'bs, BS> = Array<'bs, CrossMsg, BS>;
 
 /// The executable message trait

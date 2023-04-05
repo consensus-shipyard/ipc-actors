@@ -3,21 +3,21 @@ use fil_actors_runtime::runtime::Runtime;
 use fil_actors_runtime::test_utils::MockRuntime;
 use fil_actors_runtime::BURNT_FUNDS_ACTOR_ADDR;
 use fvm_ipld_encoding::RawBytes;
-use fvm_ipld_hamt::BytesKey;
 use fvm_shared::address::Address;
 use fvm_shared::bigint::Zero;
 use fvm_shared::clock::ChainEpoch;
 use fvm_shared::econ::TokenAmount;
 use fvm_shared::error::ExitCode;
 use fvm_shared::METHOD_SEND;
+use ipc_actor_common::vote::{EpochVoteSubmissions, UniqueVote};
 use ipc_gateway::checkpoint::BatchCrossMsgs;
 use ipc_gateway::Status::{Active, Inactive};
 use ipc_gateway::{
-    get_topdown_msg, Checkpoint, CronCheckpoint, CronSubmission, CrossMsg, IPCAddress, PostBoxItem,
-    State, StorableMsg, CROSS_MSG_FEE, DEFAULT_CHECKPOINT_PERIOD, SUBNET_ACTOR_REWARD_METHOD,
+    get_topdown_msg, Checkpoint, CronCheckpoint, CrossMsg, IPCAddress, PostBoxItem, State,
+    StorableMsg, CROSS_MSG_FEE, DEFAULT_CHECKPOINT_PERIOD, SUBNET_ACTOR_REWARD_METHOD,
 };
 use ipc_sdk::subnet_id::SubnetID;
-use ipc_sdk::{Validator, ValidatorSet};
+use ipc_sdk::{epoch_key, Validator, ValidatorSet};
 use primitives::TCid;
 use std::collections::BTreeSet;
 use std::ops::Mul;
@@ -1305,6 +1305,16 @@ fn test_submit_cron_checking_errors() {
     setup_membership(&h, &mut rt);
 
     let submitter = Address::new_id(10000);
+
+    let checkpoint = CronCheckpoint {
+        epoch: *DEFAULT_GENESIS_EPOCH + *DEFAULT_CRON_PERIOD,
+        top_down_msgs: vec![],
+    };
+    let r = h.submit_cron(&mut rt, submitter, checkpoint);
+    assert!(r.is_err());
+    assert_eq!(r.unwrap_err().msg(), "caller not validator");
+
+    let submitter = Address::new_id(0);
     let checkpoint = CronCheckpoint {
         epoch: *DEFAULT_GENESIS_EPOCH + 1,
         top_down_msgs: vec![],
@@ -1320,20 +1330,19 @@ fn test_submit_cron_checking_errors() {
     let r = h.submit_cron(&mut rt, submitter, checkpoint);
     assert!(r.is_err());
     assert_eq!(r.unwrap_err().msg(), "epoch already executed");
-
-    let checkpoint = CronCheckpoint {
-        epoch: *DEFAULT_GENESIS_EPOCH + *DEFAULT_CRON_PERIOD,
-        top_down_msgs: vec![],
-    };
-    let r = h.submit_cron(&mut rt, submitter, checkpoint);
-    assert!(r.is_err());
-    assert_eq!(r.unwrap_err().msg(), "caller not validator");
 }
 
-fn get_epoch_submissions(rt: &mut MockRuntime, epoch: ChainEpoch) -> Option<CronSubmission> {
+fn get_epoch_submissions(
+    rt: &mut MockRuntime,
+    epoch: ChainEpoch,
+) -> Option<EpochVoteSubmissions<CronCheckpoint>> {
     let st: State = rt.get_state();
-    let hamt = st.cron_submissions.load(rt.store()).unwrap();
-    let bytes_key = BytesKey::from(epoch.to_be_bytes().as_slice());
+    let hamt = st
+        .cron_checkpoint_voting
+        .epoch_vote_submissions()
+        .load(rt.store())
+        .unwrap();
+    let bytes_key = epoch_key(epoch);
     hamt.get(&bytes_key).unwrap().cloned()
 }
 
@@ -1357,13 +1366,16 @@ fn test_submit_cron_works_with_execution() {
     let submission = get_epoch_submissions(&mut rt, epoch).unwrap();
     assert_eq!(
         submission
-            .get_submission(rt.store(), &checkpoint.hash().unwrap())
+            .get_submission(rt.store(), &checkpoint.unique_key().unwrap())
             .unwrap()
             .unwrap(),
         checkpoint
     );
     let st: State = rt.get_state();
-    assert_eq!(st.last_cron_executed_epoch, *DEFAULT_GENESIS_EPOCH); // not executed yet
+    assert_eq!(
+        st.cron_checkpoint_voting.last_voting_executed_epoch(),
+        *DEFAULT_GENESIS_EPOCH
+    ); // not executed yet
 
     // already submitted
     let submitter = Address::new_id(0);
@@ -1378,13 +1390,16 @@ fn test_submit_cron_works_with_execution() {
     let submission = get_epoch_submissions(&mut rt, epoch).unwrap();
     assert_eq!(
         submission
-            .get_submission(rt.store(), &checkpoint.hash().unwrap())
+            .get_submission(rt.store(), &checkpoint.unique_key().unwrap())
             .unwrap()
             .unwrap(),
         checkpoint
     );
     let st: State = rt.get_state();
-    assert_eq!(st.last_cron_executed_epoch, *DEFAULT_GENESIS_EPOCH); // not executed yet
+    assert_eq!(
+        st.cron_checkpoint_voting.last_voting_executed_epoch(),
+        *DEFAULT_GENESIS_EPOCH
+    ); // not executed yet
 
     // third submission
     let submitter = Address::new_id(2);
@@ -1393,13 +1408,16 @@ fn test_submit_cron_works_with_execution() {
     let submission = get_epoch_submissions(&mut rt, epoch).unwrap();
     assert_eq!(
         submission
-            .get_submission(rt.store(), &checkpoint.hash().unwrap())
+            .get_submission(rt.store(), &checkpoint.unique_key().unwrap())
             .unwrap()
             .unwrap(),
         checkpoint
     );
     let st: State = rt.get_state();
-    assert_eq!(st.last_cron_executed_epoch, *DEFAULT_GENESIS_EPOCH); // not executed yet
+    assert_eq!(
+        st.cron_checkpoint_voting.last_voting_executed_epoch(),
+        *DEFAULT_GENESIS_EPOCH
+    ); // not executed yet
 
     // fourth submission, executed
     let submitter = Address::new_id(3);
@@ -1416,7 +1434,10 @@ fn test_submit_cron_works_with_execution() {
     let submission = get_epoch_submissions(&mut rt, epoch);
     assert!(submission.is_none());
     let st: State = rt.get_state();
-    assert_eq!(st.last_cron_executed_epoch, epoch);
+    assert_eq!(
+        st.cron_checkpoint_voting.last_voting_executed_epoch(),
+        epoch
+    );
 }
 
 fn storable_msg(nonce: u64) -> StorableMsg {
@@ -1476,7 +1497,10 @@ fn test_submit_cron_abort() {
 
     // check aborted
     let st: State = rt.get_state();
-    assert_eq!(st.last_cron_executed_epoch, *DEFAULT_GENESIS_EPOCH); // not executed yet
+    assert_eq!(
+        st.cron_checkpoint_voting.last_voting_executed_epoch(),
+        *DEFAULT_GENESIS_EPOCH
+    ); // not executed yet
     let submission = get_epoch_submissions(&mut rt, epoch).unwrap();
     for i in 0..4 {
         assert_eq!(
@@ -1520,9 +1544,12 @@ fn test_submit_cron_sequential_execution() {
     h.submit_cron(&mut rt, submitter, checkpoint.clone())
         .unwrap();
     let st: State = rt.get_state();
-    assert_eq!(st.last_cron_executed_epoch, *DEFAULT_GENESIS_EPOCH); // not executed yet
     assert_eq!(
-        st.executable_epoch_queue,
+        st.cron_checkpoint_voting.last_voting_executed_epoch(),
+        *DEFAULT_GENESIS_EPOCH
+    ); // not executed yet
+    assert_eq!(
+        *st.cron_checkpoint_voting.executable_epoch_queue(),
         Some(BTreeSet::from([pending_epoch]))
     ); // not executed yet
 
@@ -1562,7 +1589,10 @@ fn test_submit_cron_sequential_execution() {
     let submission = get_epoch_submissions(&mut rt, epoch);
     assert!(submission.is_none());
     let st: State = rt.get_state();
-    assert_eq!(st.last_cron_executed_epoch, epoch);
+    assert_eq!(
+        st.cron_checkpoint_voting.last_voting_executed_epoch(),
+        epoch
+    );
 
     // now we submit to the next epoch
     let epoch = *DEFAULT_GENESIS_EPOCH + *DEFAULT_CRON_PERIOD * 3;
@@ -1573,6 +1603,9 @@ fn test_submit_cron_sequential_execution() {
     h.submit_cron(&mut rt, submitter, checkpoint.clone())
         .unwrap();
     let st: State = rt.get_state();
-    assert_eq!(st.last_cron_executed_epoch, pending_epoch);
-    assert_eq!(st.executable_epoch_queue, None);
+    assert_eq!(
+        st.cron_checkpoint_voting.last_voting_executed_epoch(),
+        pending_epoch
+    );
+    assert_eq!(*st.cron_checkpoint_voting.executable_epoch_queue(), None);
 }
