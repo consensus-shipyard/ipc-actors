@@ -84,28 +84,25 @@ impl BottomUpCheckpoint {
     /// Take the cross messages out of the checkpoint. This will empty the `self.data.cross_msgs`
     /// and replace with None.
     pub fn take_cross_msgs(&mut self) -> Option<Vec<CrossMsg>> {
-        self.data.cross_msgs.cross_msgs.take()
+         self.data.cross_msgs.cross_msgs.take()
     }
 
     pub fn ensure_cross_msgs_sorted(&self) -> anyhow::Result<()> {
-        match self.data.cross_msgs.cross_msgs.as_ref() {
-            None => Ok(()),
-            Some(v) => ensure_message_sorted(v),
-        }
+        ensure_message_sorted(&self.data.cross_msgs.cross_msgs)
     }
 
     /// Get the sum of values in cross messages
     pub fn total_value(&self) -> TokenAmount {
-        match &self.data.cross_msgs.cross_msgs {
-            None => TokenAmount::zero(),
-            Some(cross_msgs) => {
-                let mut value = TokenAmount::zero();
-                cross_msgs.iter().for_each(|cross_msg| {
-                    value += &cross_msg.msg.value;
-                });
-                value
-            }
-        }
+        let mut value = TokenAmount::zero();
+        &self
+            .data
+            .cross_msgs
+            .cross_msgs
+            .iter()
+            .for_each(|cross_msg| {
+                value += &cross_msg.msg.value;
+            });
+        value
     }
 
     /// Get the total fee of the cross messages
@@ -115,10 +112,7 @@ impl BottomUpCheckpoint {
 
     pub fn push_cross_msgs(&mut self, cross_msg: CrossMsg, fee: &TokenAmount) {
         self.data.cross_msgs.fee += fee;
-        match self.data.cross_msgs.cross_msgs.as_mut() {
-            None => self.data.cross_msgs.cross_msgs = Some(vec![cross_msg]),
-            Some(v) => v.push(cross_msg),
-        };
+        self.data.cross_msgs.cross_msgs.push(cross_msg);
     }
 
     /// Add the cid of a checkpoint from a child subnet for further propagation
@@ -170,7 +164,7 @@ pub struct CheckData {
 
 #[derive(Default, PartialEq, Eq, Clone, Debug, Serialize_tuple, Deserialize_tuple)]
 pub struct BatchCrossMsgs {
-    pub cross_msgs: Option<Vec<CrossMsg>>,
+    pub cross_msgs: Vec<CrossMsg>,
     pub fee: TokenAmount,
 }
 
