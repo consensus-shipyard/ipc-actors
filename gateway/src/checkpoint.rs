@@ -14,6 +14,7 @@ use ipc_sdk::ValidatorSet;
 use lazy_static::lazy_static;
 use num_traits::Zero;
 use primitives::{TCid, TLink};
+use serde::{Deserialize, Deserializer, Serialize, Serializer};
 use serde_tuple::{Deserialize_tuple, Serialize_tuple};
 
 lazy_static! {
@@ -168,7 +169,7 @@ pub struct CheckData {
     pub cross_msgs: BatchCrossMsgs,
 }
 
-#[derive(Default, PartialEq, Eq, Clone, Debug, Serialize_tuple, Deserialize_tuple)]
+#[derive(Default, PartialEq, Eq, Clone, Debug)]
 pub struct BatchCrossMsgs {
     pub cross_msgs: Option<Vec<CrossMsg>>,
     pub fee: TokenAmount,
@@ -271,5 +272,61 @@ impl UniqueVote for TopDownCheckpoint {
         // TODO: dispatch call to save gas? The actor dispatching contains the raw serialized data,
         // TODO: which we dont have to serialize here again
         Ok(mh_code.digest(&to_vec(self).unwrap()).to_bytes())
+    }
+}
+
+impl Serialize for BatchCrossMsgs {
+    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
+    where
+        S: Serializer,
+    {
+        if let Some(v) = self.cross_msgs.as_ref() {
+            let inner = (v, &self.fee);
+            serde::Serialize::serialize(&inner, serde_tuple::Serializer(serializer))
+        } else {
+            let inner: (&Vec<CrossMsg>, &TokenAmount) = (&vec![], &self.fee);
+            serde::Serialize::serialize(&inner, serde_tuple::Serializer(serializer))
+        }
+    }
+}
+
+impl<'de> Deserialize<'de> for BatchCrossMsgs {
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: Deserializer<'de>,
+    {
+        type Inner = (Vec<CrossMsg>, TokenAmount);
+        let inner = Inner::deserialize(serde_tuple::Deserializer(deserializer))?;
+        Ok(BatchCrossMsgs {
+            cross_msgs: if inner.0.is_empty() {
+                None
+            } else {
+                Some(inner.0)
+            },
+            fee: inner.1,
+        })
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use crate::BottomUpCheckpoint;
+    use cid::Cid;
+    use fil_actors_runtime::cbor;
+    use ipc_sdk::subnet_id::SubnetID;
+    use primitives::TCid;
+    use std::str::FromStr;
+
+    #[test]
+    fn test_serialization() {
+        let mut checkpoint = BottomUpCheckpoint::new(SubnetID::from_str("/root").unwrap(), 10);
+        checkpoint.data.prev_check = TCid::from(
+            Cid::from_str("bafy2bzacecnamqgqmifpluoeldx7zzglxcljo6oja4vrmtj7432rphldpdmm2")
+                .unwrap(),
+        );
+
+        let raw_bytes = cbor::serialize(&checkpoint, "").unwrap();
+        let de = cbor::deserialize(&raw_bytes, "").unwrap();
+        assert_eq!(checkpoint, de);
     }
 }
