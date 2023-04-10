@@ -450,17 +450,6 @@ mod tests {
         let json1 = serde_json::to_string(&dummy_voting).unwrap();
         let json2 = serde_json::to_string(&voting).unwrap();
         assert_eq!(json1, json2);
-
-        let voting = Voting::<DummyVote> {
-            genesis_epoch: 0,
-            submission_period: 0,
-            last_voting_executed_epoch: 0,
-            executable_epoch_queue: None,
-            epoch_vote_submissions: TCid::from(Cid::from_str("bafy2bzacecnamqgqmifpluoeldx7zzglxcljo6oja4vrmtj7432rphldpdmm2").unwrap()),
-            threshold_ratio: (2, 3),
-        };
-        let s = cbor::serialize(&voting, "test").unwrap();
-        println!("{s:?}");
     }
 
     #[test]
