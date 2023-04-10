@@ -395,16 +395,14 @@ impl<'de, T: DeserializeOwned> Deserialize<'de> for Voting<T> {
 mod tests {
     use crate::vote::submission::Ratio;
     use crate::vote::{EpochVoteSubmissions, UniqueBytesKey, UniqueVote, Voting};
-    use cid::Cid;
     use fil_actors_runtime::builtin::HAMT_BIT_WIDTH;
     use fil_actors_runtime::fvm_ipld_hamt::BytesKey;
-    use fil_actors_runtime::{cbor, make_empty_map};
+    use fil_actors_runtime::make_empty_map;
     use fvm_ipld_blockstore::MemoryBlockstore;
     use fvm_shared::clock::ChainEpoch;
     use primitives::{TCid, THamt};
     use serde_tuple::{Deserialize_tuple, Serialize_tuple};
     use std::collections::BTreeSet;
-    use std::str::FromStr;
 
     #[derive(PartialEq, Clone, Deserialize_tuple, Serialize_tuple, Debug)]
     struct DummyVote {

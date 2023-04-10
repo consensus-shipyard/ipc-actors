@@ -32,7 +32,7 @@ mod test {
     // just a test address
     const IPC_GATEWAY_ADDR: u64 = 1024;
     const NETWORK_NAME: &'static str = "test";
-    const DEFAULT_CHAIN_EPOCH: ChainEpoch = 10;
+    const DEFAULT_GENESIS_EPOCH: ChainEpoch = 0;
 
     lazy_static! {
         pub static ref SIG_TYPES: Vec<Cid> = vec![*ACCOUNT_ACTOR_CODE_ID, *MULTISIG_ACTOR_CODE_ID];
@@ -68,7 +68,7 @@ mod test {
 
         runtime.expect_validate_caller_addr(vec![INIT_ACTOR_ADDR]);
 
-        runtime.set_epoch(DEFAULT_CHAIN_EPOCH);
+        runtime.set_epoch(DEFAULT_GENESIS_EPOCH);
 
         runtime
             .call::<Actor>(
@@ -95,7 +95,7 @@ mod test {
         assert_eq!(state.ipc_gateway_addr, Address::new_id(IPC_GATEWAY_ADDR));
         assert_eq!(state.total_stake, TokenAmount::zero());
         assert_eq!(state.validator_set.validators().is_empty(), true);
-        assert_eq!(state.genesis_epoch, DEFAULT_CHAIN_EPOCH);
+        assert_eq!(state.genesis_epoch, DEFAULT_GENESIS_EPOCH);
     }
 
     #[test]
@@ -707,7 +707,7 @@ mod test {
         let root_subnet = SubnetID::from_str("/root").unwrap();
         let subnet = SubnetID::new_from_parent(&root_subnet, test_actor_address);
         // we are targeting the next submission period
-        let epoch = DEFAULT_CHAIN_EPOCH + st.bottomup_checkpoint_voting.submission_period;
+        let epoch = DEFAULT_GENESIS_EPOCH + st.bottomup_checkpoint_voting.submission_period;
         let mut checkpoint_0 = BottomUpCheckpoint::new(subnet.clone(), epoch);
         checkpoint_0.set_signature(
             RawBytes::serialize(Signature::new_secp256k1(vec![1, 2, 3, 4]))
@@ -781,7 +781,7 @@ mod test {
         );
 
         // Start the voting for a new epoch, checking we can proceed with new epoch number.
-        let epoch = DEFAULT_CHAIN_EPOCH + st.bottomup_checkpoint_voting.submission_period * 2;
+        let epoch = DEFAULT_GENESIS_EPOCH + st.bottomup_checkpoint_voting.submission_period * 2;
         let prev_cid = checkpoint_0.cid();
         let mut checkpoint_4 = BottomUpCheckpoint::new(subnet.clone(), epoch);
         checkpoint_4.data.prev_check = TCid::from(prev_cid);
@@ -858,7 +858,7 @@ mod test {
         let root_subnet = SubnetID::from_str("/root").unwrap();
         let subnet = SubnetID::new_from_parent(&root_subnet, test_actor_address);
         // we are targeting the next submission period
-        let epoch = DEFAULT_CHAIN_EPOCH + st.bottomup_checkpoint_voting.submission_period;
+        let epoch = DEFAULT_GENESIS_EPOCH + st.bottomup_checkpoint_voting.submission_period;
         let mut checkpoint_0 = BottomUpCheckpoint::new(subnet.clone(), epoch);
         checkpoint_0.data.prev_check = TCid::default();
         checkpoint_0.set_signature(
@@ -888,26 +888,26 @@ mod test {
     /// Test flows like the below:
     /// 1. Create 4 validators and register them to the subnet with equal weight
     ///
-    /// 2. Submit to epoch `DEFAULT_CHAIN_EPOCH + st.bottomup_checkpoint_voting.submission_period * 2`, we are skipping
+    /// 2. Submit to epoch `DEFAULT_GENESIS_EPOCH + st.bottomup_checkpoint_voting.submission_period * 2`, we are skipping
     ///    the first epoch and ensure this is executable. The previous checkpoint cid is set to some value `cid_a`.
     ///    We should see the epoch number being stored in the next executable queue.
     ///    Checks at step 2:
-    ///    - executable_queue should contain `DEFAULT_CHAIN_EPOCH + st.bottomup_checkpoint_voting.submission_period * 2`
-    ///    - last_executed_epoch is still `DEFAULT_CHAIN_EPOCH`
+    ///    - executable_queue should contain `DEFAULT_GENESIS_EPOCH + st.bottomup_checkpoint_voting.submission_period * 2`
+    ///    - last_executed_epoch is still `DEFAULT_GENESIS_EPOCH`
     ///
-    /// 3. Submit to epoch `DEFAULT_CHAIN_EPOCH + st.bottomup_checkpoint_voting.submission_period * 1`, i.e. the previous
+    /// 3. Submit to epoch `DEFAULT_GENESIS_EPOCH + st.bottomup_checkpoint_voting.submission_period * 1`, i.e. the previous
     ///    epoch in step 2. This would lead to the epoch being committed. The key is the checkpoint cid of the current
     ///    epoch should be different from that in step 2, i.e. any value other than `cid_a`
     ///    Checks at step 3:
-    ///    - executable_queue should contain `DEFAULT_CHAIN_EPOCH + st.bottomup_checkpoint_voting.submission_period * 2`
-    ///    - last_executed_epoch is still `DEFAULT_CHAIN_EPOCH + st.bottomup_checkpoint_voting.submission_period * 1`
+    ///    - executable_queue should contain `DEFAULT_GENESIS_EPOCH + st.bottomup_checkpoint_voting.submission_period * 2`
+    ///    - last_executed_epoch is still `DEFAULT_GENESIS_EPOCH + st.bottomup_checkpoint_voting.submission_period * 1`
     ///
-    /// 4. Submit to any epoch after `DEFAULT_CHAIN_EPOCH + st.bottomup_checkpoint_voting.submission_period * 1`, should
-    ///    trigger a reset in submission of epoch `DEFAULT_CHAIN_EPOCH + st.bottomup_checkpoint_voting.submission_period * 2`.
+    /// 4. Submit to any epoch after `DEFAULT_GENESIS_EPOCH + st.bottomup_checkpoint_voting.submission_period * 1`, should
+    ///    trigger a reset in submission of epoch `DEFAULT_GENESIS_EPOCH + st.bottomup_checkpoint_voting.submission_period * 2`.
     ///    Checks at step 4:
-    ///    - executable_queue should have removed `DEFAULT_CHAIN_EPOCH + st.bottomup_checkpoint_voting.submission_period * 2`
-    ///    - last_executed_epoch is still `DEFAULT_CHAIN_EPOCH + st.bottomup_checkpoint_voting.submission_period * 1`
-    ///    - submission at `DEFAULT_CHAIN_EPOCH + st.bottomup_checkpoint_voting.submission_period * 2` is cleared
+    ///    - executable_queue should have removed `DEFAULT_GENESIS_EPOCH + st.bottomup_checkpoint_voting.submission_period * 2`
+    ///    - last_executed_epoch is still `DEFAULT_GENESIS_EPOCH + st.bottomup_checkpoint_voting.submission_period * 1`
+    ///    - submission at `DEFAULT_GENESIS_EPOCH + st.bottomup_checkpoint_voting.submission_period * 2` is cleared
     #[test]
     fn test_submit_checkpoint_aborts_not_chained_reset_epoch() {
         let test_actor_address = Address::new_id(9999);
@@ -969,7 +969,7 @@ mod test {
 
         // Step 2
         let st: State = runtime.get_state();
-        let epoch_2 = DEFAULT_CHAIN_EPOCH + st.bottomup_checkpoint_voting.submission_period * 2;
+        let epoch_2 = DEFAULT_GENESIS_EPOCH + st.bottomup_checkpoint_voting.submission_period * 2;
         let prev_cid = Cid::default();
         let mut checkpoint_2 = BottomUpCheckpoint::new(subnet.clone(), epoch_2);
         checkpoint_2.data.prev_check = TCid::from(prev_cid);
@@ -992,7 +992,7 @@ mod test {
         );
         assert_eq!(
             st.bottomup_checkpoint_voting.last_voting_executed_epoch,
-            DEFAULT_CHAIN_EPOCH
+            DEFAULT_GENESIS_EPOCH
         );
         assert_eq!(
             st.bottomup_checkpoint_voting.executable_epoch_queue,
@@ -1012,7 +1012,7 @@ mod test {
         );
 
         // Step 3
-        let epoch_1 = DEFAULT_CHAIN_EPOCH + st.bottomup_checkpoint_voting.submission_period * 1;
+        let epoch_1 = DEFAULT_GENESIS_EPOCH + st.bottomup_checkpoint_voting.submission_period * 1;
         let mut checkpoint_1 = BottomUpCheckpoint::new(subnet.clone(), epoch_1);
         checkpoint_1.set_signature(
             RawBytes::serialize(Signature::new_secp256k1(vec![1, 2, 3, 4]))
@@ -1035,7 +1035,7 @@ mod test {
         assert_eq!(
             st.bottomup_checkpoint_voting.executable_epoch_queue,
             Some(BTreeSet::from([
-                DEFAULT_CHAIN_EPOCH + st.bottomup_checkpoint_voting.submission_period * 2
+                DEFAULT_GENESIS_EPOCH + st.bottomup_checkpoint_voting.submission_period * 2
             ]))
         );
         assert_eq!(

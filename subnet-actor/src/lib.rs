@@ -81,7 +81,13 @@ impl SubnetActor for Actor {
     fn constructor(rt: &mut impl Runtime, params: ConstructParams) -> Result<(), ActorError> {
         rt.validate_immediate_caller_is(std::iter::once(&INIT_ACTOR_ADDR))?;
 
-        let st = State::new(rt.store(), params, rt.curr_epoch()).map_err(|e| {
+        // NOTE: we currently use 0 as the genesis_epoch for subnets so checkpoints
+        // are submitted directly from epoch 0.
+        // In the future we can use the current epoch. This will be really
+        // useful once we support the docking of subnets to new parents, etc.
+        // let genesis_epoch = rt.curr_epoch();
+        let genesis_epoch = 0;
+        let st = State::new(rt.store(), params, genesis_epoch).map_err(|e| {
             e.downcast_default(ExitCode::USR_ILLEGAL_STATE, "Failed to create actor state")
         })?;
 

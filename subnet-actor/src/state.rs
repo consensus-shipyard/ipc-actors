@@ -106,12 +106,7 @@ impl State {
             previous_executed_checkpoint_cid: *CHECKPOINT_GENESIS_CID,
             bottomup_checkpoint_voting: Voting::<BottomUpCheckpoint>::new_with_ratio(
                 store,
-                // NOTE: we currently use 0 as the genesis_epoch for subnets. We want
-                // checkpoints to be committed from genesis. In the future, we may want
-                // to make the logic a bit more complex and only start committing checkpoints
-                // from a specific epoch. This may be the case when an existing subnet
-                // docks to a parent.
-                0,
+                current_epoch,
                 bottomup_check_period,
                 2,
                 3,
