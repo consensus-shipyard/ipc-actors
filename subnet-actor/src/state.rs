@@ -9,9 +9,13 @@ use fvm_shared::address::Address;
 use fvm_shared::bigint::Zero;
 use fvm_shared::clock::ChainEpoch;
 use fvm_shared::econ::TokenAmount;
-use ipc_gateway::checkpoint::CHECKPOINT_GENESIS_CID;
-use ipc_gateway::{Checkpoint, SubnetID, DEFAULT_CHECKPOINT_PERIOD, MIN_COLLATERAL_AMOUNT};
+use ipc_actor_common::vote::Voting;
+use ipc_gateway::{
+    BottomUpCheckpoint, SubnetID, CHECKPOINT_GENESIS_CID, DEFAULT_CHECKPOINT_PERIOD,
+    MIN_COLLATERAL_AMOUNT,
+};
 use ipc_sdk::epoch_key;
+use ipc_sdk::{Validator, ValidatorSet};
 use lazy_static::lazy_static;
 use num::rational::Ratio;
 use num::BigInt;
@@ -42,23 +46,41 @@ pub struct State {
     pub status: Status,
     #[serde(with = "serde_bytes")]
     pub genesis: Vec<u8>,
-    pub finality_threshold: ChainEpoch,
-    pub check_period: ChainEpoch,
+
+    // duplicated definition for easier data access in client applications
+    pub bottomup_check_period: ChainEpoch,
+    pub topdown_check_period: ChainEpoch,
+    pub genesis_epoch: ChainEpoch,
+
     // FIXME: Consider making checkpoints a HAMT instead of an AMT so we use
     // the AMT index instead of and epoch k for object indexing.
-    pub checkpoints: TCid<THamt<ChainEpoch, Checkpoint>>,
-    pub window_checks: TCid<THamt<Cid, Votes>>,
+    pub committed_checkpoints: TCid<THamt<ChainEpoch, BottomUpCheckpoint>>,
     pub validator_set: ValidatorSet,
     pub min_validators: u64,
+    pub previous_executed_checkpoint_cid: Cid,
+    pub bottomup_checkpoint_voting: Voting<BottomUpCheckpoint>,
 }
 
 /// We should probably have a derive macro to mark an object as a state object,
 /// and have load and save methods automatically generated for them as part of a
 /// StateObject trait (i.e. impl StateObject for State).
 impl State {
-    pub fn new<BS: Blockstore>(store: &BS, params: ConstructParams) -> anyhow::Result<State> {
+    pub fn new<BS: Blockstore>(
+        store: &BS,
+        params: ConstructParams,
+        current_epoch: ChainEpoch,
+    ) -> anyhow::Result<State> {
         let min_stake = TokenAmount::from_atto(MIN_COLLATERAL_AMOUNT);
-
+        let bottomup_check_period = if params.bottomup_check_period < DEFAULT_CHECKPOINT_PERIOD {
+            DEFAULT_CHECKPOINT_PERIOD
+        } else {
+            params.bottomup_check_period
+        };
+        let topdown_check_period = if params.topdown_check_period < DEFAULT_CHECKPOINT_PERIOD {
+            DEFAULT_CHECKPOINT_PERIOD
+        } else {
+            params.topdown_check_period
+        };
         let state = State {
             name: params.name,
             parent_id: params.parent,
@@ -71,68 +93,27 @@ impl State {
                 params.min_validator_stake
             },
             min_validators: params.min_validators,
-            finality_threshold: params.finality_threshold,
-            check_period: if params.check_period < DEFAULT_CHECKPOINT_PERIOD {
-                DEFAULT_CHECKPOINT_PERIOD
-            } else {
-                params.check_period
-            },
+            bottomup_check_period,
+            topdown_check_period,
+            committed_checkpoints: TCid::new_hamt(store)?,
             genesis: params.genesis,
             status: Status::Instantiated,
-            checkpoints: TCid::new_hamt(store)?,
             stake: TCid::new_hamt(store)?,
-            window_checks: TCid::new_hamt(store)?,
-            validator_set: ValidatorSet::new(),
+            validator_set: ValidatorSet::default(),
+            // genesis epoch determines the epoch from the parent when the
+            // subnet was spawned.
+            genesis_epoch: current_epoch,
+            previous_executed_checkpoint_cid: *CHECKPOINT_GENESIS_CID,
+            bottomup_checkpoint_voting: Voting::<BottomUpCheckpoint>::new_with_ratio(
+                store,
+                current_epoch,
+                bottomup_check_period,
+                2,
+                3,
+            )?,
         };
 
         Ok(state)
-    }
-
-    pub fn get_votes<BS: Blockstore>(
-        &self,
-        store: &BS,
-        cid: &Cid,
-    ) -> Result<Option<Votes>, ActorError> {
-        let hamt = self
-            .window_checks
-            .load(store)
-            .map_err(|_| actor_error!(illegal_state, "cannot load votes hamt"))?;
-        let votes = hamt
-            .get(&BytesKey::from(cid.to_bytes()))
-            .map_err(|_| actor_error!(illegal_state, "cannot read votes"))?;
-        Ok(votes.cloned())
-    }
-
-    pub fn remove_votes<BS: Blockstore>(
-        &mut self,
-        store: &BS,
-        cid: &Cid,
-    ) -> Result<(), ActorError> {
-        self.window_checks
-            .modify(store, |hamt| {
-                hamt.delete(&BytesKey::from(cid.to_bytes()))
-                    .map_err(|_| actor_error!(illegal_state, "cannot remove votes from hamt"))?;
-                Ok(true)
-            })
-            .map_err(|_| actor_error!(illegal_state, "cannot modify window checks"))?;
-
-        Ok(())
-    }
-
-    pub fn set_votes<BS: Blockstore>(
-        &mut self,
-        store: &BS,
-        cid: &Cid,
-        votes: Votes,
-    ) -> Result<(), ActorError> {
-        self.window_checks
-            .modify(store, |hamt| {
-                hamt.set(BytesKey::from(cid.to_bytes()), votes)
-                    .map_err(|_| actor_error!(illegal_state, "cannot set votes in hamt"))?;
-                Ok(true)
-            })
-            .map_err(|_| actor_error!(illegal_state, "cannot modify window checks"))?;
-        Ok(())
     }
 
     /// Get the stake of an address.
@@ -275,22 +256,6 @@ impl State {
         }
     }
 
-    fn get_checkpoint<BS: Blockstore>(
-        &self,
-        store: &BS,
-        epoch: ChainEpoch,
-    ) -> anyhow::Result<Option<Checkpoint>> {
-        let hamt = self
-            .checkpoints
-            .load(store)
-            .map_err(|e| anyhow!("failed to load checkpoints: {}", e))?;
-        let checkpoint = hamt
-            .get(&epoch_key(epoch))
-            .map_err(|e| anyhow!("failed to get checkpoint for id {}: {:?}", epoch, e))?
-            .cloned();
-        Ok(checkpoint)
-    }
-
     pub fn is_validator(&self, addr: &Address) -> bool {
         self.validator_set
             .validators()
@@ -299,23 +264,15 @@ impl State {
     }
 
     /// Do not call this function in transaction
-    pub fn verify_checkpoint(&self, rt: &mut impl Runtime, ch: &Checkpoint) -> anyhow::Result<()> {
+    pub fn verify_checkpoint(
+        &self,
+        rt: &mut impl Runtime,
+        ch: &BottomUpCheckpoint,
+    ) -> anyhow::Result<()> {
         // check that subnet is active
         if self.status != Status::Active {
             return Err(anyhow!(
                 "submitting checkpoints is not allowed while subnet is not active"
-            ));
-        }
-
-        // check that a checkpoint for the epoch doesn't exist already.
-        if self.get_checkpoint(rt.store(), ch.epoch())?.is_some() {
-            return Err(anyhow!("cannot submit checkpoint for epoch"));
-        };
-
-        // check that the epoch is correct
-        if ch.epoch() % self.check_period != 0 {
-            return Err(anyhow!(
-                "epoch in checkpoint doesn't correspond with a signing window"
             ));
         }
 
@@ -324,11 +281,15 @@ impl State {
             return Err(anyhow!("submitting checkpoint with the wrong source"));
         }
 
-        // check previous checkpoint
-        if self.prev_checkpoint_cid(rt.store(), &ch.epoch())? != ch.prev_check().cid() {
-            return Err(anyhow!(
-                "previous checkpoint not consistent with previously committed"
-            ));
+        // the epoch being submitted is the next executable epoch, we perform a check to ensure
+        // the checkpoints are chained. This is an early termination check to ensure the checkpoints
+        // are actually chained.
+        if self
+            .bottomup_checkpoint_voting
+            .is_next_executable_epoch(ch.epoch())
+            && self.previous_executed_checkpoint_cid != ch.prev_check().cid()
+        {
+            return Err(anyhow!("checkpoint not chained"));
         }
 
         // check signature
@@ -347,30 +308,31 @@ impl State {
         Ok(())
     }
 
-    fn prev_checkpoint_cid<BS: Blockstore>(
-        &self,
-        store: &BS,
-        epoch: &ChainEpoch,
-    ) -> anyhow::Result<Cid> {
-        let mut epoch = epoch - self.check_period;
-        while epoch >= 0 {
-            match self.get_checkpoint(store, epoch)? {
-                Some(ch) => return Ok(ch.cid()),
-                None => {
-                    epoch -= self.check_period;
-                }
-            }
-        }
-        Ok(CHECKPOINT_GENESIS_CID.clone())
+    /// Ensures the checkpoints are chained, aka checkpoint.prev_check() should be the previous executed
+    /// checkpoint cid. If not, should abort the current checkpoint.
+    pub fn ensure_checkpoint_chained(
+        &mut self,
+        store: &impl Blockstore,
+        ch: &BottomUpCheckpoint,
+    ) -> anyhow::Result<bool> {
+        Ok(
+            if self.previous_executed_checkpoint_cid != ch.prev_check().cid() {
+                self.bottomup_checkpoint_voting
+                    .abort_epoch(store, ch.data.epoch)?;
+                false
+            } else {
+                true
+            },
+        )
     }
 
     pub fn flush_checkpoint<BS: Blockstore>(
         &mut self,
         store: &BS,
-        ch: &Checkpoint,
+        ch: &BottomUpCheckpoint,
     ) -> anyhow::Result<()> {
         let epoch = ch.epoch();
-        self.checkpoints.modify(store, |hamt| {
+        self.committed_checkpoints.modify(store, |hamt| {
             hamt.set(epoch_key(epoch), ch.clone())
                 .map_err(|e| anyhow!("failed to set checkpoint: {:?}", e))?;
             Ok(true)
@@ -388,15 +350,24 @@ impl Default for State {
             consensus: ConsensusType::Delegated,
             min_validator_stake: TokenAmount::from_atto(MIN_COLLATERAL_AMOUNT),
             total_stake: TokenAmount::zero(),
-            finality_threshold: 5,
-            check_period: 10,
+            bottomup_check_period: 0,
+            topdown_check_period: 0,
             genesis: Vec::new(),
             status: Status::Instantiated,
-            checkpoints: TCid::default(),
             stake: TCid::default(),
-            window_checks: TCid::default(),
-            validator_set: ValidatorSet::new(),
+            validator_set: ValidatorSet::default(),
             min_validators: 0,
+            genesis_epoch: 0,
+            previous_executed_checkpoint_cid: *CHECKPOINT_GENESIS_CID,
+            bottomup_checkpoint_voting: Voting {
+                genesis_epoch: 0,
+                submission_period: 0,
+                last_voting_executed_epoch: 0,
+                executable_epoch_queue: None,
+                epoch_vote_submissions: TCid::default(),
+                threshold_ratio: (2, 3),
+            },
+            committed_checkpoints: TCid::default(),
         }
     }
 }

@@ -1,11 +1,10 @@
-use crate::ApplyMsgParams;
 use crate::State;
 use crate::SUBNET_ACTOR_REWARD_METHOD;
+use crate::{ApplyMsgParams, ExecutableMessage};
 use anyhow::anyhow;
 use fil_actors_runtime::runtime::Runtime;
 use fil_actors_runtime::ActorError;
 use fil_actors_runtime::BURNT_FUNDS_ACTOR_ADDR;
-use fvm_ipld_blockstore::MemoryBlockstore;
 use fvm_ipld_encoding::ipld_block::IpldBlock;
 use fvm_ipld_encoding::RawBytes;
 use fvm_shared::address::Address;
@@ -14,7 +13,6 @@ use fvm_shared::MethodNum;
 use fvm_shared::METHOD_SEND;
 use ipc_sdk::address::IPCAddress;
 use ipc_sdk::subnet_id::SubnetID;
-use primitives::{TCid, TLink};
 use serde_tuple::{Deserialize_tuple, Serialize_tuple};
 use std::path::Path;
 
@@ -35,10 +33,22 @@ pub struct StorableMsg {
     pub nonce: u64,
 }
 
+impl ExecutableMessage for StorableMsg {
+    fn nonce(&self) -> u64 {
+        self.nonce
+    }
+}
+
 #[derive(PartialEq, Eq, Clone, Debug, Serialize_tuple, Deserialize_tuple)]
 pub struct CrossMsg {
     pub msg: StorableMsg,
     pub wrapped: bool,
+}
+
+impl ExecutableMessage for CrossMsg {
+    fn nonce(&self) -> u64 {
+        self.msg.nonce()
+    }
 }
 
 #[derive(PartialEq, Eq)]
@@ -71,7 +81,6 @@ impl StorableMsg {
         sub_id: &SubnetID,
         sig_addr: &Address,
         value: TokenAmount,
-        nonce: u64,
     ) -> anyhow::Result<Self> {
         let to = IPCAddress::new(
             &match sub_id.parent() {
@@ -87,7 +96,7 @@ impl StorableMsg {
             method: METHOD_SEND,
             params: RawBytes::default(),
             value,
-            nonce,
+            nonce: 0,
         })
     }
 
@@ -156,19 +165,6 @@ impl CrossMsgs {
     pub fn new() -> Self {
         Self::default()
     }
-
-    pub(crate) fn cid(&self) -> anyhow::Result<TCid<TLink<CrossMsgs>>> {
-        TCid::new_link(&MemoryBlockstore::new(), &self)
-    }
-
-    /// Appends a cross-message to cross-msgs
-    pub(crate) fn add_msg(&mut self, msg: &CrossMsg) -> bool {
-        if !self.msgs.contains(msg) {
-            self.msgs.push(msg.clone());
-            return true;
-        }
-        false
-    }
 }
 
 /// Transaction side-effects from the commitment of a cross-net message. It burns funds
@@ -211,7 +207,7 @@ pub(crate) fn distribute_crossmsg_fee(
     fee: TokenAmount,
 ) -> Result<(), ActorError> {
     if !fee.is_zero() {
-        rt.send(&subnet_actor, SUBNET_ACTOR_REWARD_METHOD, None, fee)?;
+        rt.send(subnet_actor, SUBNET_ACTOR_REWARD_METHOD, None, fee)?;
     }
     Ok(())
 }

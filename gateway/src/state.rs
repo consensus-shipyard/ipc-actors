@@ -13,11 +13,15 @@ use fvm_shared::error::ExitCode;
 use ipc_sdk::epoch_key;
 use lazy_static::lazy_static;
 use num_traits::Zero;
-use primitives::{TAmt, TCid, THamt, TLink};
+use primitives::{TCid, THamt};
 use serde_tuple::{Deserialize_tuple, Serialize_tuple};
 use std::str::FromStr;
 
+use crate::checkpoint::Validators;
+use crate::TopDownCheckpoint;
+use ipc_actor_common::vote::Voting;
 use ipc_sdk::subnet_id::SubnetID;
+use ipc_sdk::ValidatorSet;
 
 use super::checkpoint::*;
 use super::cross::*;
@@ -36,19 +40,19 @@ pub struct State {
     pub total_subnets: u64,
     pub min_stake: TokenAmount,
     pub subnets: TCid<THamt<SubnetID, Subnet>>,
-    pub check_period: ChainEpoch,
+    pub bottomup_check_period: ChainEpoch,
+    pub topdown_check_period: ChainEpoch,
     // FIXME: Consider making checkpoints a HAMT instead of an AMT so we use
     // the AMT index instead of and epoch k for object indexing.
-    pub checkpoints: TCid<THamt<ChainEpoch, Checkpoint>>,
-    pub check_msg_registry: TCid<THamt<TCid<TLink<CrossMsgs>>, CrossMsgs>>,
+    pub bottomup_checkpoints: TCid<THamt<ChainEpoch, BottomUpCheckpoint>>,
     /// `postbox` keeps track for an EOA of all the cross-net messages triggered by
     /// an actor that need to be propagated further through the hierarchy.
     pub postbox: PostBox,
-    pub nonce: u64,
     pub bottomup_nonce: u64,
-    pub bottomup_msg_meta: TCid<TAmt<CrossMsgMeta, CROSSMSG_AMT_BITWIDTH>>,
     pub applied_bottomup_nonce: u64,
     pub applied_topdown_nonce: u64,
+    pub topdown_checkpoint_voting: Voting<TopDownCheckpoint>,
+    pub validators: Validators,
 }
 
 lazy_static! {
@@ -62,20 +66,27 @@ impl State {
             total_subnets: Default::default(),
             min_stake: MIN_SUBNET_COLLATERAL.clone(),
             subnets: TCid::new_hamt(store)?,
-            check_period: match params.checkpoint_period > DEFAULT_CHECKPOINT_PERIOD {
-                true => params.checkpoint_period,
+            bottomup_check_period: match params.bottomup_check_period > DEFAULT_CHECKPOINT_PERIOD {
+                true => params.bottomup_check_period,
                 false => DEFAULT_CHECKPOINT_PERIOD,
             },
-            checkpoints: TCid::new_hamt(store)?,
-            check_msg_registry: TCid::new_hamt(store)?,
+            topdown_check_period: match params.topdown_check_period > DEFAULT_CHECKPOINT_PERIOD {
+                true => params.topdown_check_period,
+                false => DEFAULT_CHECKPOINT_PERIOD,
+            },
+            bottomup_checkpoints: TCid::new_hamt(store)?,
             postbox: TCid::new_hamt(store)?,
-            nonce: Default::default(),
             bottomup_nonce: Default::default(),
-            bottomup_msg_meta: TCid::new_amt(store)?,
             // This way we ensure that the first message to execute has nonce= 0, if not it would expect 1 and fail for the first nonce
             // We first increase to the subsequent and then execute for bottom-up messages
-            applied_bottomup_nonce: MAX_NONCE,
+            applied_bottomup_nonce: Default::default(),
             applied_topdown_nonce: Default::default(),
+            topdown_checkpoint_voting: Voting::<TopDownCheckpoint>::new(
+                store,
+                params.genesis_epoch,
+                params.topdown_check_period,
+            )?,
+            validators: Validators::new(ValidatorSet::default()),
         })
     }
 
@@ -111,7 +122,7 @@ impl State {
                     top_down_msgs: TCid::new_amt(rt.store())?,
                     circ_supply: TokenAmount::zero(),
                     status: Status::Active,
-                    nonce: 0,
+                    topdown_nonce: 0,
                     prev_checkpoint: None,
                 };
                 set_subnet(subnets, id, subnet)?;
@@ -157,9 +168,9 @@ impl State {
     pub(crate) fn flush_checkpoint<BS: Blockstore>(
         &mut self,
         store: &BS,
-        ch: &Checkpoint,
+        ch: &BottomUpCheckpoint,
     ) -> anyhow::Result<()> {
-        self.checkpoints
+        self.bottomup_checkpoints
             .update(store, |checkpoints| set_checkpoint(checkpoints, ch.clone()))
     }
 
@@ -168,16 +179,16 @@ impl State {
         &self,
         store: &BS,
         epoch: ChainEpoch,
-    ) -> anyhow::Result<Checkpoint> {
+    ) -> anyhow::Result<BottomUpCheckpoint> {
         if epoch < 0 {
             return Err(anyhow!("epoch can't be negative"));
         }
-        let ch_epoch = checkpoint_epoch(epoch, self.check_period);
-        let checkpoints = self.checkpoints.load(store)?;
+        let ch_epoch = checkpoint_epoch(epoch, self.bottomup_check_period);
+        let checkpoints = self.bottomup_checkpoints.load(store)?;
 
         Ok(match get_checkpoint(&checkpoints, ch_epoch)? {
             Some(ch) => ch.clone(),
-            None => Checkpoint::new(self.network_name.clone(), ch_epoch),
+            None => BottomUpCheckpoint::new(self.network_name.clone(), ch_epoch),
         })
     }
 
@@ -186,31 +197,18 @@ impl State {
         &mut self,
         store: &BS,
         cross_msg: &CrossMsg,
-        fee: &TokenAmount,
         curr_epoch: ChainEpoch,
+        fee: &TokenAmount,
     ) -> anyhow::Result<()> {
         let mut ch = self.get_window_checkpoint(store, curr_epoch)?;
 
-        match ch.cross_msgs_mut() {
-            Some(msgmeta) => {
-                let prev_cid = &msgmeta.msgs_cid;
-                let m_cid = self.append_msg_to_meta(store, prev_cid, cross_msg)?;
-                msgmeta.msgs_cid = m_cid;
-                msgmeta.value += &cross_msg.msg.value + fee;
-                msgmeta.fee += fee;
-            }
-            None => self.check_msg_registry.modify(store, |cross_reg| {
-                let mut msgmeta = CrossMsgMeta::default();
-                let mut crossmsgs = CrossMsgs::new();
-                let _ = crossmsgs.add_msg(cross_msg);
-                let m_cid = put_msgmeta(cross_reg, crossmsgs)?;
-                msgmeta.msgs_cid = m_cid;
-                msgmeta.value += &cross_msg.msg.value + fee;
-                msgmeta.fee += fee;
-                ch.set_cross_msgs(msgmeta);
-                Ok(())
-            })?,
-        };
+        let mut cross_msg = cross_msg.clone();
+        cross_msg.msg.nonce = self.bottomup_nonce;
+
+        ch.push_cross_msgs(cross_msg, fee);
+
+        // increment nonce
+        self.bottomup_nonce += 1;
 
         // flush checkpoint
         self.flush_checkpoint(store, &ch).map_err(|e| {
@@ -218,55 +216,6 @@ impl State {
         })?;
 
         Ok(())
-    }
-
-    /// append cross-msg and/or fee reward to a specific message meta.
-    pub(crate) fn append_msg_to_meta<BS: Blockstore>(
-        &mut self,
-        store: &BS,
-        meta_cid: &TCid<TLink<CrossMsgs>>,
-        cross_msg: &CrossMsg,
-    ) -> anyhow::Result<TCid<TLink<CrossMsgs>>> {
-        self.check_msg_registry.modify(store, |cross_reg| {
-            // get previous meta stored
-            let mut prev_crossmsgs = match cross_reg.get(&meta_cid.cid().to_bytes())? {
-                Some(m) => m.clone(),
-                None => {
-                    // double-check that is not found because there were no messages
-                    // in meta and not because we messed-up something.
-                    if meta_cid.cid() != Cid::default() {
-                        return Err(anyhow!("no msgmeta found for cid"));
-                    }
-                    // return empty messages
-                    CrossMsgs::new()
-                }
-            };
-            let added = prev_crossmsgs.add_msg(cross_msg);
-            if !added {
-                return Ok(meta_cid.clone());
-            }
-            replace_msgmeta(cross_reg, meta_cid, prev_crossmsgs)
-        })
-    }
-
-    /// release circulating supply from a subent
-    ///
-    /// This is triggered through bottom-up messages sending subnet tokens
-    /// to some other subnet in the hierarchy.
-    /// store bottomup messages for their execution in the subnet
-    pub(crate) fn store_bottomup_msg<BS: Blockstore>(
-        &mut self,
-        store: &BS,
-        meta: &CrossMsgMeta,
-    ) -> anyhow::Result<()> {
-        let mut new_meta = meta.clone();
-        new_meta.nonce = self.bottomup_nonce;
-        self.bottomup_nonce += 1;
-        self.bottomup_msg_meta.update(store, |crossmsgs| {
-            crossmsgs
-                .set(new_meta.nonce, new_meta)
-                .map_err(|e| anyhow!("failed to set crossmsg meta array: {:?}", e))
-        })
     }
 
     /// commit topdown messages for their execution in the subnet
@@ -291,9 +240,9 @@ impl State {
             })?;
         match sub {
             Some(mut sub) => {
-                cross_msg.msg.nonce = sub.nonce;
+                cross_msg.msg.nonce = sub.topdown_nonce;
                 sub.store_topdown_msg(store, cross_msg)?;
-                sub.nonce += 1;
+                sub.topdown_nonce += 1;
                 sub.circ_supply += &cross_msg.msg.value;
                 self.flush_subnet(store, &sub)?;
             }
@@ -311,37 +260,11 @@ impl State {
         &mut self,
         store: &BS,
         msg: &CrossMsg,
-        fee: &TokenAmount,
         curr_epoch: ChainEpoch,
+        fee: &TokenAmount,
     ) -> anyhow::Result<()> {
         // store bottom-up msg and fee in checkpoint for propagation
-        self.store_msg_in_checkpoint(store, msg, fee, curr_epoch)?;
-        // increment nonce
-        self.nonce += 1;
-
-        Ok(())
-    }
-
-    pub fn bottomup_state_transition(&mut self, msg: &StorableMsg) -> anyhow::Result<()> {
-        // Bottom-up messages include the nonce of their message meta. Several messages
-        // will include the same nonce. They need to be applied in order of nonce.
-
-        // As soon as we see a message with the next msgMeta nonce, we increment the nonce
-        // and start accepting the one for the next nonce.
-        if self.applied_bottomup_nonce == u64::MAX && msg.nonce == 0 {
-            self.applied_bottomup_nonce = 0;
-        } else if self.applied_bottomup_nonce.wrapping_add(1) == msg.nonce {
-            // wrapping add is used to prevent overflow.
-            self.applied_bottomup_nonce = self.applied_bottomup_nonce.wrapping_add(1);
-        };
-
-        if self.applied_bottomup_nonce != msg.nonce {
-            return Err(anyhow!(
-                "the bottom-up message being applied doesn't hold the subsequent nonce: nonce={} applied={}",
-                msg.nonce,
-                self.applied_bottomup_nonce,
-            ));
-        }
+        self.store_msg_in_checkpoint(store, msg, curr_epoch, fee)?;
         Ok(())
     }
 
@@ -451,6 +374,10 @@ impl State {
         *balance -= fee;
         Ok(())
     }
+
+    pub fn set_membership(&mut self, validator_set: ValidatorSet) {
+        self.validators = Validators::new(validator_set);
+    }
 }
 
 pub fn set_subnet<BS: Blockstore>(
@@ -474,8 +401,8 @@ fn get_subnet<'m, BS: Blockstore>(
 }
 
 pub fn set_checkpoint<BS: Blockstore>(
-    checkpoints: &mut Map<BS, Checkpoint>,
-    ch: Checkpoint,
+    checkpoints: &mut Map<BS, BottomUpCheckpoint>,
+    ch: BottomUpCheckpoint,
 ) -> anyhow::Result<()> {
     let epoch = ch.epoch();
     checkpoints
@@ -485,45 +412,12 @@ pub fn set_checkpoint<BS: Blockstore>(
 }
 
 pub fn get_checkpoint<'m, BS: Blockstore>(
-    checkpoints: &'m Map<BS, Checkpoint>,
+    checkpoints: &'m Map<BS, BottomUpCheckpoint>,
     epoch: ChainEpoch,
-) -> anyhow::Result<Option<&'m Checkpoint>> {
+) -> anyhow::Result<Option<&'m BottomUpCheckpoint>> {
     checkpoints
         .get(&epoch_key(epoch))
         .map_err(|e| e.downcast_wrap(format!("failed to get checkpoint for id {}", epoch)))
-}
-
-fn put_msgmeta<BS: Blockstore>(
-    registry: &mut Map<BS, CrossMsgs>,
-    metas: CrossMsgs,
-) -> anyhow::Result<TCid<TLink<CrossMsgs>>> {
-    let m_cid = metas.cid()?;
-    registry
-        .set(m_cid.cid().to_bytes().into(), metas)
-        .map_err(|e| e.downcast_wrap(format!("failed to set crossmsg meta for cid {}", m_cid)))?;
-    Ok(m_cid)
-}
-
-/// insert a message meta and remove the old one.
-fn replace_msgmeta<BS: Blockstore>(
-    registry: &mut Map<BS, CrossMsgs>,
-    prev_cid: &TCid<TLink<CrossMsgs>>,
-    meta: CrossMsgs,
-) -> anyhow::Result<TCid<TLink<CrossMsgs>>> {
-    // add new meta
-    let m_cid = put_msgmeta(registry, meta)?;
-    // remove the previous one
-    registry.delete(&prev_cid.cid().to_bytes())?;
-    Ok(m_cid)
-}
-
-pub fn get_bottomup_msg<'m, BS: Blockstore>(
-    crossmsgs: &'m CrossMsgMetaArray<BS>,
-    nonce: u64,
-) -> anyhow::Result<Option<&'m CrossMsgMeta>> {
-    crossmsgs
-        .get(nonce)
-        .map_err(|e| anyhow!("failed to get crossmsg meta by nonce: {:?}", e))
 }
 
 pub fn get_topdown_msg<'m, BS: Blockstore>(
