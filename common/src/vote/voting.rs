@@ -335,15 +335,27 @@ impl<T: Serialize> Serialize for Voting<T> {
     where
         S: Serializer,
     {
-        let inner = (
-            &self.genesis_epoch,
-            &self.submission_period,
-            &self.last_voting_executed_epoch,
-            &self.executable_epoch_queue,
-            &self.epoch_vote_submissions,
-            &self.threshold_ratio,
-        );
-        inner.serialize(serde_tuple::Serializer(serializer))
+        if let Some(queue) = &self.executable_epoch_queue {
+            let inner = (
+                &self.genesis_epoch,
+                &self.submission_period,
+                &self.last_voting_executed_epoch,
+                &queue.iter().collect::<Vec<_>>(),
+                &self.epoch_vote_submissions,
+                &self.threshold_ratio,
+            );
+            inner.serialize(serde_tuple::Serializer(serializer))
+        } else {
+            let inner: (_, _, _, &Vec<ChainEpoch>, _, _) = (
+                &self.genesis_epoch,
+                &self.submission_period,
+                &self.last_voting_executed_epoch,
+                &vec![],
+                &self.epoch_vote_submissions,
+                &self.threshold_ratio,
+            );
+            inner.serialize(serde_tuple::Serializer(serializer))
+        }
     }
 }
 
@@ -356,16 +368,23 @@ impl<'de, T: DeserializeOwned> Deserialize<'de> for Voting<T> {
             ChainEpoch,
             ChainEpoch,
             ChainEpoch,
-            Option<BTreeSet<ChainEpoch>>,
+            Vec<ChainEpoch>,
             TCid<THamt<ChainEpoch, EpochVoteSubmissions<V>>>,
             Ratio,
         );
         let inner = <Inner<T>>::deserialize(serde_tuple::Deserializer(deserializer))?;
+
+        let queue = if inner.3.is_empty() {
+            None
+        } else {
+            let set = inner.3.into_iter().collect::<BTreeSet<_>>();
+            Some(set)
+        };
         Ok(Voting {
             genesis_epoch: inner.0,
             submission_period: inner.1,
             last_voting_executed_epoch: inner.2,
-            executable_epoch_queue: inner.3,
+            executable_epoch_queue: queue,
             epoch_vote_submissions: inner.4,
             threshold_ratio: inner.5,
         })
@@ -376,14 +395,16 @@ impl<'de, T: DeserializeOwned> Deserialize<'de> for Voting<T> {
 mod tests {
     use crate::vote::submission::Ratio;
     use crate::vote::{EpochVoteSubmissions, UniqueBytesKey, UniqueVote, Voting};
+    use cid::Cid;
     use fil_actors_runtime::builtin::HAMT_BIT_WIDTH;
     use fil_actors_runtime::fvm_ipld_hamt::BytesKey;
-    use fil_actors_runtime::make_empty_map;
+    use fil_actors_runtime::{cbor, make_empty_map};
     use fvm_ipld_blockstore::MemoryBlockstore;
     use fvm_shared::clock::ChainEpoch;
     use primitives::{TCid, THamt};
     use serde_tuple::{Deserialize_tuple, Serialize_tuple};
     use std::collections::BTreeSet;
+    use std::str::FromStr;
 
     #[derive(PartialEq, Clone, Deserialize_tuple, Serialize_tuple, Debug)]
     struct DummyVote {
