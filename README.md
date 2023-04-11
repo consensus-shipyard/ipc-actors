@@ -1,5 +1,4 @@
 # IPC Actors
-> The IPC actors are still under-development, and this README is a work-in-progress (so expect bugs, typos, et. al). A final version of the README will be provided once the development of the actors is finalized.
 
 This repository includes the reference implementation of all the actors responsible for the operation of the IPC (InterPlanerary Consensus) protocol. These actors are written in Rust to be compiled in web assembly, and they target the FVM. This project is conformed by the following crates:
 - `gateway`: Implementation of the IPC gateway.
