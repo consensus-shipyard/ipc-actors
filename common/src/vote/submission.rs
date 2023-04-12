@@ -334,7 +334,11 @@ impl<'de, T: DeserializeOwned> Deserialize<'de> for EpochVoteSubmissions<T> {
         );
         let inner = <Inner<T>>::deserialize(serde_tuple::Deserializer(deserializer))?;
 
-        let most_voted_key = if inner.1.is_empty() { None} else { Some(inner.1) };
+        let most_voted_key = if inner.1.is_empty() {
+            None
+        } else {
+            Some(inner.1)
+        };
         Ok(EpochVoteSubmissions {
             total_submission_weight: inner.0,
             most_voted_key,
