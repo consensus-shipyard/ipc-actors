@@ -298,14 +298,25 @@ impl<T: Serialize> Serialize for EpochVoteSubmissions<T> {
     where
         S: Serializer,
     {
-        let inner = (
-            &self.total_submission_weight,
-            &self.most_voted_key,
-            &self.submitters,
-            &self.submission_weights,
-            &self.submissions,
-        );
-        serde::Serialize::serialize(&inner, serde_tuple::Serializer(serializer))
+        if let Some(key) = &self.most_voted_key {
+            let inner = (
+                &self.total_submission_weight,
+                &key,
+                &self.submitters,
+                &self.submission_weights,
+                &self.submissions,
+            );
+            serde::Serialize::serialize(&inner, serde_tuple::Serializer(serializer))
+        } else {
+            let inner = (
+                &self.total_submission_weight,
+                &UniqueBytesKey::new(),
+                &self.submitters,
+                &self.submission_weights,
+                &self.submissions,
+            );
+            serde::Serialize::serialize(&inner, serde_tuple::Serializer(serializer))
+        }
     }
 }
 
@@ -316,16 +327,17 @@ impl<'de, T: DeserializeOwned> Deserialize<'de> for EpochVoteSubmissions<T> {
     {
         type Inner<V> = (
             TokenAmount,
-            Option<UniqueBytesKey>,
+            UniqueBytesKey,
             TCid<THamt<Address, ()>>,
             TCid<THamt<UniqueBytesKey, TokenAmount>>,
             TCid<THamt<UniqueBytesKey, V>>,
         );
         let inner = <Inner<T>>::deserialize(serde_tuple::Deserializer(deserializer))?;
 
+        let most_voted_key = if inner.1.is_empty() { None} else { Some(inner.1) };
         Ok(EpochVoteSubmissions {
             total_submission_weight: inner.0,
-            most_voted_key: inner.1,
+            most_voted_key,
             submitters: inner.2,
             submission_weights: inner.3,
             submissions: inner.4,
@@ -362,7 +374,7 @@ mod tests {
         #[derive(Deserialize_tuple, Serialize_tuple, PartialEq, Eq, Clone, Debug)]
         struct DummySubmissions {
             total_submission_weight: TokenAmount,
-            most_voted_key: Option<UniqueBytesKey>,
+            most_voted_key: UniqueBytesKey,
             submitters: TCid<THamt<Address, ()>>,
             submission_weights: TCid<THamt<UniqueBytesKey, TokenAmount>>,
             submissions: TCid<THamt<UniqueBytesKey, DummyVote>>,
@@ -370,7 +382,7 @@ mod tests {
 
         let dummy_submissions = DummySubmissions {
             total_submission_weight: TokenAmount::from_atto(100),
-            most_voted_key: Some(vec![1, 2, 3]),
+            most_voted_key: vec![1, 2, 3],
             submitters: Default::default(),
             submission_weights: Default::default(),
             submissions: Default::default(),
@@ -379,6 +391,26 @@ mod tests {
         let submissions = EpochVoteSubmissions::<DummyVote> {
             total_submission_weight: TokenAmount::from_atto(100),
             most_voted_key: Some(vec![1, 2, 3]),
+            submitters: Default::default(),
+            submission_weights: Default::default(),
+            submissions: Default::default(),
+        };
+
+        let json1 = serde_json::to_string(&dummy_submissions).unwrap();
+        let json2 = serde_json::to_string(&submissions).unwrap();
+        assert_eq!(json1, json2);
+
+        let dummy_submissions = DummySubmissions {
+            total_submission_weight: TokenAmount::from_atto(100),
+            most_voted_key: vec![],
+            submitters: Default::default(),
+            submission_weights: Default::default(),
+            submissions: Default::default(),
+        };
+
+        let submissions = EpochVoteSubmissions::<DummyVote> {
+            total_submission_weight: TokenAmount::from_atto(100),
+            most_voted_key: None,
             submitters: Default::default(),
             submission_weights: Default::default(),
             submissions: Default::default(),
