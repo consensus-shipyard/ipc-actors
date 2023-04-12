@@ -34,11 +34,6 @@ pub fn epoch_key(k: ChainEpoch) -> BytesKey {
     bz.into()
 }
 
-pub mod account {
-    /// Public key account actor method.
-    pub const PUBKEY_ADDRESS_METHOD: u64 = 2;
-}
-
 #[derive(Clone, Debug, Serialize_tuple, Deserialize_tuple, PartialEq, Eq)]
 pub struct Validator {
     pub addr: Address,

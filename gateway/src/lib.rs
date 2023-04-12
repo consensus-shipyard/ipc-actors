@@ -35,8 +35,6 @@ fil_actors_runtime::wasm_trampoline!(Actor);
 pub mod checkpoint;
 mod cross;
 mod error;
-#[doc(hidden)]
-pub mod ext;
 mod state;
 pub mod subnet;
 mod types;

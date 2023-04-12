@@ -1,6 +1,7 @@
 use cid::Cid;
 use fil_actors_runtime::builtin::HAMT_BIT_WIDTH;
 use fil_actors_runtime::deserialize_block;
+use fil_actors_runtime::runtime::fvm::PUBLIC_RESOLVE_ADDRESS_METHOD;
 use fil_actors_runtime::runtime::Runtime;
 use fil_actors_runtime::test_utils::expect_abort;
 use fil_actors_runtime::test_utils::{
@@ -23,7 +24,7 @@ use fvm_shared::MethodNum;
 use fvm_shared::METHOD_SEND;
 use ipc_gateway::checkpoint::ChildCheck;
 use ipc_gateway::{
-    ext, get_topdown_msg, is_bottomup, Actor, BottomUpCheckpoint, ConstructorParams, CrossMsg,
+    get_topdown_msg, is_bottomup, Actor, BottomUpCheckpoint, ConstructorParams, CrossMsg,
     CrossMsgParams, FundParams, IPCAddress, Method, PropagateParams, State, StorableMsg, Subnet,
     SubnetID, TopDownCheckpoint, CROSS_MSG_FEE, DEFAULT_CHECKPOINT_PERIOD, MIN_COLLATERAL_AMOUNT,
     SUBNET_ACTOR_REWARD_METHOD,
@@ -301,7 +302,7 @@ impl Harness {
 
         rt.expect_send(
             *funder,
-            ext::account::PUBKEY_ADDRESS_METHOD,
+            PUBLIC_RESOLVE_ADDRESS_METHOD,
             None,
             TokenAmount::zero(),
             IpldBlock::serialize_cbor(&*TEST_BLS).unwrap(),
@@ -360,7 +361,7 @@ impl Harness {
 
         rt.expect_send(
             *releaser,
-            ext::account::PUBKEY_ADDRESS_METHOD,
+            PUBLIC_RESOLVE_ADDRESS_METHOD,
             None,
             TokenAmount::zero(),
             IpldBlock::serialize_cbor(&*TEST_BLS).unwrap(),
