@@ -201,14 +201,18 @@ pub struct ChildCheck {
 /// frozen and that is ready for signing and commitment in the
 /// current window.
 pub fn checkpoint_epoch(epoch: ChainEpoch, period: ChainEpoch) -> ChainEpoch {
+    // TODO: Once we consider different genesis_epoch different to zero
+    // we should account for this here.
     (epoch / period) * period
 }
 
 /// WindowEpoch returns the epoch of the active checkpoint window
 ///
-/// Determines the epoch to which new checkpoints and xshard transactions need
-/// to be assigned.
+/// Determines the epoch to which new checkpoints and cross-net transactions need
+/// to be assigned (i.e. the next checkpoint to be committed)
 pub fn window_epoch(epoch: ChainEpoch, period: ChainEpoch) -> ChainEpoch {
+    // TODO: Once we consider different genesis_epoch different to zero
+    // we should account for this here.
     let ind = epoch / period;
     period * (ind + 1)
 }

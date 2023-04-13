@@ -10,7 +10,7 @@ use fvm_shared::econ::TokenAmount;
 use fvm_shared::error::ExitCode;
 use fvm_shared::METHOD_SEND;
 use ipc_actor_common::vote::{EpochVoteSubmissions, UniqueVote};
-use ipc_gateway::checkpoint::BatchCrossMsgs;
+use ipc_gateway::checkpoint::{window_epoch, BatchCrossMsgs};
 use ipc_gateway::Status::{Active, Inactive};
 use ipc_gateway::{
     get_topdown_msg, BottomUpCheckpoint, CrossMsg, IPCAddress, PostBoxItem, State, StorableMsg,
@@ -263,8 +263,13 @@ fn checkpoint_commit() {
     h.commit_child_check(&mut rt, &shid, &ch, ExitCode::OK)
         .unwrap();
     let st: State = rt.get_state();
+    // the child checkpoint should be committed as a child_check
+    // in the next checkpoint being populated.
     let commit = st.get_window_checkpoint(rt.store(), epoch).unwrap();
-    assert_eq!(commit.epoch(), DEFAULT_CHECKPOINT_PERIOD);
+    assert_eq!(
+        commit.epoch(),
+        window_epoch(epoch, st.bottomup_check_period)
+    );
     let child_check = has_childcheck_source(&commit.data.children, &shid).unwrap();
     assert_eq!(&child_check.checks.len(), &1);
     assert_eq!(has_cid(&child_check.checks, &ch.cid()), true);
@@ -281,7 +286,10 @@ fn checkpoint_commit() {
         .unwrap();
     let st: State = rt.get_state();
     let commit = st.get_window_checkpoint(rt.store(), epoch).unwrap();
-    assert_eq!(commit.epoch(), DEFAULT_CHECKPOINT_PERIOD);
+    assert_eq!(
+        commit.epoch(),
+        window_epoch(epoch, st.bottomup_check_period)
+    );
     let child_check = has_childcheck_source(&commit.data.children, &shid).unwrap();
     assert_eq!(&child_check.checks.len(), &2);
     assert_eq!(has_cid(&child_check.checks, &ch.cid()), true);
@@ -311,7 +319,10 @@ fn checkpoint_commit() {
         .unwrap();
     let st: State = rt.get_state();
     let commit = st.get_window_checkpoint(rt.store(), epoch).unwrap();
-    assert_eq!(commit.epoch(), DEFAULT_CHECKPOINT_PERIOD);
+    assert_eq!(
+        commit.epoch(),
+        window_epoch(epoch, st.bottomup_check_period)
+    );
     let child_check = has_childcheck_source(&commit.data.children, &shid_two).unwrap();
     assert_eq!(&child_check.checks.len(), &1);
     assert_eq!(has_cid(&child_check.checks, &ch.cid()), true);
@@ -373,7 +384,10 @@ fn checkpoint_crossmsgs() {
         .unwrap();
     let st: State = rt.get_state();
     let commit = st.get_window_checkpoint(rt.store(), epoch).unwrap();
-    assert_eq!(commit.epoch(), DEFAULT_CHECKPOINT_PERIOD);
+    assert_eq!(
+        commit.epoch(),
+        window_epoch(epoch, st.bottomup_check_period)
+    );
     let child_check = has_childcheck_source(&commit.data.children, &shid).unwrap();
     assert_eq!(&child_check.checks.len(), &1);
     let prev_cid = ch.cid();
@@ -469,10 +483,14 @@ fn test_release() {
     let releaser = Address::new_id(1001);
     // Release funds
     let r_amount = TokenAmount::from_atto(5_u64.pow(18));
-    rt.set_balance(2 * r_amount.clone());
-    h.release(&mut rt, &releaser, ExitCode::OK, r_amount.clone(), 0)
+    rt.set_balance(4 * r_amount.clone());
+    h.release(&mut rt, &releaser, ExitCode::OK, r_amount.clone(), 2, 0, 0)
         .unwrap();
-    h.release(&mut rt, &releaser, ExitCode::OK, r_amount, 1)
+    h.release(&mut rt, &releaser, ExitCode::OK, r_amount.clone(), 3, 1, 1)
+        .unwrap();
+    h.release(&mut rt, &releaser, ExitCode::OK, r_amount.clone(), 10, 2, 0)
+        .unwrap();
+    h.release(&mut rt, &releaser, ExitCode::OK, r_amount, 11, 3, 1)
         .unwrap();
 }
 
