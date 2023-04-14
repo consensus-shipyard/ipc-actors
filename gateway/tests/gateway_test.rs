@@ -273,6 +273,9 @@ fn checkpoint_commit() {
     let child_check = has_childcheck_source(&commit.data.children, &shid).unwrap();
     assert_eq!(&child_check.checks.len(), &1);
     assert_eq!(has_cid(&child_check.checks, &ch.cid()), true);
+    // check that the checkpoint was committed successfully in the subnet as previous checkpoint.
+    let subnet = h.get_subnet(&rt, &shid).unwrap();
+    assert_eq!(subnet.prev_checkpoint.unwrap(), ch);
 
     // Commit a checkpoint for subnet twice
     h.commit_child_check(&mut rt, &shid, &ch, ExitCode::USR_ILLEGAL_ARGUMENT)
@@ -326,6 +329,9 @@ fn checkpoint_commit() {
     let child_check = has_childcheck_source(&commit.data.children, &shid_two).unwrap();
     assert_eq!(&child_check.checks.len(), &1);
     assert_eq!(has_cid(&child_check.checks, &ch.cid()), true);
+    // check that the checkpoint was committed successfully in the subnet as previous checkpoint.
+    let subnet = h.get_subnet(&rt, &shid_two).unwrap();
+    assert_eq!(subnet.prev_checkpoint.unwrap(), ch);
 }
 
 #[test]
@@ -392,6 +398,9 @@ fn checkpoint_crossmsgs() {
     assert_eq!(&child_check.checks.len(), &1);
     let prev_cid = ch.cid();
     assert_eq!(has_cid(&child_check.checks, &prev_cid), true);
+    // check that the checkpoint was committed successfully in the subnet as previous checkpoint.
+    let subnet = h.get_subnet(&rt, &shid).unwrap();
+    assert_eq!(subnet.prev_checkpoint.unwrap(), ch);
 
     // TODO: More extensive tests?
 }

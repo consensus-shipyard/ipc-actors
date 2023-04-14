@@ -49,7 +49,6 @@ pub struct State {
     /// an actor that need to be propagated further through the hierarchy.
     pub postbox: PostBox,
     pub bottomup_nonce: u64,
-    pub applied_bottomup_nonce: u64,
     pub applied_topdown_nonce: u64,
     pub topdown_checkpoint_voting: Voting<TopDownCheckpoint>,
     pub validators: Validators,
@@ -79,7 +78,6 @@ impl State {
             bottomup_nonce: Default::default(),
             // This way we ensure that the first message to execute has nonce= 0, if not it would expect 1 and fail for the first nonce
             // We first increase to the subsequent and then execute for bottom-up messages
-            applied_bottomup_nonce: Default::default(),
             applied_topdown_nonce: Default::default(),
             topdown_checkpoint_voting: Voting::<TopDownCheckpoint>::new(
                 store,
@@ -90,9 +88,9 @@ impl State {
         })
     }
 
-    /// Get content for a child subnet.
+    /// Get content for a child subnet as mut.
     pub fn get_subnet<BS: Blockstore>(
-        &self,
+        &mut self,
         store: &BS,
         id: &SubnetID,
     ) -> anyhow::Result<Option<Subnet>> {
@@ -124,6 +122,7 @@ impl State {
                     status: Status::Active,
                     topdown_nonce: 0,
                     prev_checkpoint: None,
+                    applied_bottomup_nonce: 0,
                 };
                 set_subnet(subnets, id, subnet)?;
                 Ok(true)

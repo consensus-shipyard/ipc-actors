@@ -29,6 +29,7 @@ pub struct Subnet {
     pub circ_supply: TokenAmount,
     pub status: Status,
     pub prev_checkpoint: Option<BottomUpCheckpoint>,
+    pub applied_bottomup_nonce: u64,
 }
 
 impl Subnet {
@@ -42,6 +43,17 @@ impl Subnet {
         if self.stake < st.min_stake {
             self.status = Status::Inactive;
         }
+        st.flush_subnet(rt.store(), self)?;
+        Ok(())
+    }
+
+    /// Increase the applied bottom-up nonce after an execution.
+    pub(crate) fn increase_applied_bottomup(
+        &mut self,
+        rt: &mut impl Runtime,
+        st: &mut State,
+    ) -> anyhow::Result<()> {
+        self.applied_bottomup_nonce += 1;
         st.flush_subnet(rt.store(), self)?;
         Ok(())
     }

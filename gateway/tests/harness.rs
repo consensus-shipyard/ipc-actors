@@ -102,7 +102,6 @@ impl Harness {
         assert_eq!(st.network_name, self.net_name);
         assert_eq!(st.min_stake, TokenAmount::from_atto(MIN_COLLATERAL_AMOUNT));
         assert_eq!(st.bottomup_check_period, DEFAULT_CHECKPOINT_PERIOD);
-        assert_eq!(st.applied_bottomup_nonce, 0);
         assert_eq!(
             st.topdown_checkpoint_voting.submission_period(),
             *DEFAULT_TOPDOWN_PERIOD

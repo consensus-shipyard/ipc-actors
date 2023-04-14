@@ -363,7 +363,7 @@ impl Actor {
                     let cross_msgs = commit.cross_msgs();
 
                     // update prev_check for child
-                    sub.prev_checkpoint = Some(commit);
+                    sub.prev_checkpoint = Some(commit.clone());
                     // flush subnet
                     st.flush_subnet(rt.store(), &sub).map_err(|e| {
                         e.downcast_default(ExitCode::USR_ILLEGAL_STATE, "error flushing subnet")
@@ -380,7 +380,7 @@ impl Actor {
 
         if let Some(msgs) = cross_msgs {
             for cross_msg in msgs {
-                Self::apply_msg_inner(rt, cross_msg)?;
+                Self::apply_msg_inner(rt, commit.source(), cross_msg)?;
             }
         }
 
@@ -735,7 +735,9 @@ impl Actor {
                 Self::execute_next_topdown_epoch(rt)?;
             }
             for m in checkpoint.top_down_msgs {
-                Self::apply_msg_inner(rt, m)?;
+                // we can use UNDEF here because top-down messages don't need
+                // to track the forwarder for anything when applying messages.
+                Self::apply_msg_inner(rt, &ipc_sdk::subnet_id::UNDEF, m)?;
             }
         } else {
             Self::execute_next_topdown_epoch(rt)?;
@@ -833,7 +835,14 @@ impl Actor {
 
 /// Contains private method invocation
 impl Actor {
-    fn apply_msg_inner(rt: &mut impl Runtime, cross_msg: CrossMsg) -> Result<RawBytes, ActorError> {
+    /// Applies a cross-net messages coming from some other subnet.
+    /// The `forwarder` argument determines the previous subnet that submitted
+    /// the checkpoint triggering the cross-net message execution.
+    fn apply_msg_inner(
+        rt: &mut impl Runtime,
+        forwarder: &SubnetID,
+        cross_msg: CrossMsg,
+    ) -> Result<RawBytes, ActorError> {
         let rto = match cross_msg.msg.to.raw_addr() {
             Ok(to) => to,
             Err(_) => {
@@ -861,15 +870,29 @@ impl Actor {
             Ok(IPCMsgType::BottomUp) => {
                 // if directed to current network, execute message.
                 if sto == st.network_name {
-                    rt.transaction(|st: &mut State, _| {
-                        if st.applied_bottomup_nonce != cross_msg.msg.nonce {
-                            return Err(actor_error!(
-                                illegal_state,
-                                "the bottom-up message being applied doesn't hold the subsequent nonce"
-                            ));
-                        }
+                    rt.transaction(|st: &mut State, rt| {
+                        // get applied bottom-up nonce from subnet
+                        match st.get_subnet(rt.store(), forwarder)
+                            .map_err(|_| actor_error!(illegal_argument, "error getting subnet from store in bottom-up execution"))?{
+                                Some(mut sub) => {
+                                    if sub.applied_bottomup_nonce != cross_msg.msg.nonce {
+                                        return Err(actor_error!(
+                                            illegal_state,
+                                            "the bottom-up message being applied for subnet doesn't hold the subsequent nonce"
+                                        ));
+                                    }
 
-                        st.applied_bottomup_nonce += 1;
+                                    // increase the nonce after application
+                                    sub.increase_applied_bottomup(rt, st)
+                                        .map_err(|_| actor_error!(illegal_argument, "error increasing applied_bottomup_nonce in execution"))?;
+                                },
+                                None => {
+                                    return Err(actor_error!(
+                                        illegal_state,
+                                        "we can execute a bottom-up message for a subnet that is not registered"
+                                    ));
+                                }
+                        };
 
                         Ok(())
                     })?;
@@ -972,7 +995,9 @@ impl Actor {
 
         if let Some(checkpoint) = checkpoint {
             for m in checkpoint.top_down_msgs {
-                Self::apply_msg_inner(rt, m)?;
+                // we can use UNDEF here because top-down messages don't need
+                // to track the forwarder for anything when applying messages.
+                Self::apply_msg_inner(rt, &ipc_sdk::subnet_id::UNDEF, m)?;
             }
         }
         Ok(())
