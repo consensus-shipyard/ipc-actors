@@ -346,12 +346,16 @@ impl Harness {
         releaser: &Address,
         code: ExitCode,
         value: TokenAmount,
+        epoch: ChainEpoch,
         expected_nonce: u64,
+        expected_msg_index: usize,
     ) -> Result<Cid, ActorError> {
         rt.set_caller(*ACCOUNT_ACTOR_CODE_ID, *releaser);
         rt.expect_validate_caller_type(SIG_TYPES.clone());
         // set value and include the cross_msg_fee
         set_rt_value_with_cross_fee(rt, &value);
+
+        rt.set_epoch(epoch);
 
         if code != ExitCode::OK {
             expect_abort(code, rt.call::<Actor>(Method::Release as MethodNum, None));
@@ -384,10 +388,12 @@ impl Harness {
         let parent = &self.net_name.parent().unwrap();
         let from = IPCAddress::new(&self.net_name, &BURNT_FUNDS_ACTOR_ADDR).unwrap();
         let to = IPCAddress::new(&parent, &TEST_BLS).unwrap();
-        rt.set_epoch(0);
-        let ch = st.get_window_checkpoint(rt.store(), 0).unwrap();
+        let ch = st.get_window_checkpoint(rt.store(), epoch).unwrap();
+        // check that is included in the next checkpoint to be committed and not
+        // in a checkpoint template of the past
+        assert_eq!(ch.data.epoch > epoch, true);
 
-        let msg = ch.data.cross_msgs.cross_msgs.unwrap()[expected_nonce as usize].clone();
+        let msg = ch.data.cross_msgs.cross_msgs.unwrap()[expected_msg_index].clone();
         assert_eq!(msg.msg.from, from);
         assert_eq!(msg.msg.to, to);
         assert_eq!(msg.msg.nonce, expected_nonce);

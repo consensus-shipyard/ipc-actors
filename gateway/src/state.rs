@@ -183,7 +183,7 @@ impl State {
         if epoch < 0 {
             return Err(anyhow!("epoch can't be negative"));
         }
-        let ch_epoch = checkpoint_epoch(epoch, self.bottomup_check_period);
+        let ch_epoch = window_epoch(epoch, self.bottomup_check_period);
         let checkpoints = self.bottomup_checkpoints.load(store)?;
 
         Ok(match get_checkpoint(&checkpoints, ch_epoch)? {
