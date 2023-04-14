@@ -360,7 +360,7 @@ impl Actor {
                         e.downcast_default(ExitCode::USR_ILLEGAL_STATE, "error flushing checkpoint")
                     })?;
 
-                    let cross_msgs = commit.take_cross_msgs();
+                    let cross_msgs = commit.cross_msgs();
 
                     // update prev_check for child
                     sub.prev_checkpoint = Some(commit);

@@ -84,8 +84,8 @@ impl BottomUpCheckpoint {
 
     /// Take the cross messages out of the checkpoint. This will empty the `self.data.cross_msgs`
     /// and replace with None.
-    pub fn take_cross_msgs(&mut self) -> Option<Vec<CrossMsg>> {
-        self.data.cross_msgs.cross_msgs.take()
+    pub fn cross_msgs(&mut self) -> Option<Vec<CrossMsg>> {
+        self.data.cross_msgs.cross_msgs.clone()
     }
 
     pub fn ensure_cross_msgs_sorted(&self) -> anyhow::Result<()> {

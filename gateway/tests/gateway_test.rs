@@ -14,7 +14,7 @@ use ipc_gateway::checkpoint::{window_epoch, BatchCrossMsgs};
 use ipc_gateway::Status::{Active, Inactive};
 use ipc_gateway::{
     get_topdown_msg, BottomUpCheckpoint, CrossMsg, IPCAddress, PostBoxItem, State, StorableMsg,
-    TopDownCheckpoint, CROSS_MSG_FEE, DEFAULT_CHECKPOINT_PERIOD, SUBNET_ACTOR_REWARD_METHOD,
+    TopDownCheckpoint, CROSS_MSG_FEE, SUBNET_ACTOR_REWARD_METHOD,
 };
 use ipc_sdk::subnet_id::SubnetID;
 use ipc_sdk::{epoch_key, Validator, ValidatorSet};
