@@ -95,7 +95,6 @@ mod test {
         assert_eq!(state.ipc_gateway_addr, Address::new_id(IPC_GATEWAY_ADDR));
         assert_eq!(state.total_stake, TokenAmount::zero());
         assert_eq!(state.validator_set.validators().is_empty(), true);
-        assert_eq!(state.genesis_epoch, DEFAULT_GENESIS_EPOCH);
     }
 
     #[test]

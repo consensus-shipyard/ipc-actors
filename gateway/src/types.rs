@@ -36,7 +36,6 @@ pub struct ConstructorParams {
     pub network_name: String,
     pub bottomup_check_period: ChainEpoch,
     pub topdown_check_period: ChainEpoch,
-    pub genesis_epoch: ChainEpoch,
 }
 
 #[derive(Serialize_tuple, Deserialize_tuple, Clone)]
@@ -59,6 +58,11 @@ pub struct ApplyMsgParams {
 pub struct PropagateParams {
     /// The postbox message cid
     pub postbox_cid: Cid,
+}
+
+#[derive(Serialize_tuple, Deserialize_tuple, Clone)]
+pub struct InitGenesisEpoch {
+    pub genesis_epoch: ChainEpoch,
 }
 
 #[derive(Serialize_tuple, Deserialize_tuple, Clone)]
@@ -124,7 +128,6 @@ mod tests {
             network_name: "/root".to_string(),
             bottomup_check_period: 100,
             topdown_check_period: 20,
-            genesis_epoch: 10,
         };
         let bytes = fil_actors_runtime::util::cbor::serialize(&p, "").unwrap();
         let serialized = base64::encode(bytes.bytes());
@@ -137,6 +140,5 @@ mod tests {
         assert_eq!(p.network_name, deserialized.network_name);
         assert_eq!(p.bottomup_check_period, deserialized.bottomup_check_period);
         assert_eq!(p.topdown_check_period, deserialized.topdown_check_period);
-        assert_eq!(p.genesis_epoch, deserialized.genesis_epoch);
     }
 }

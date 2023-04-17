@@ -2,6 +2,7 @@ use anyhow::anyhow;
 use fil_actors_runtime::runtime::Runtime;
 use fvm_ipld_blockstore::Blockstore;
 use fvm_ipld_encoding::repr::{Deserialize_repr, Serialize_repr};
+use fvm_shared::clock::ChainEpoch;
 use fvm_shared::econ::TokenAmount;
 use primitives::{TAmt, TCid};
 use serde_tuple::{Deserialize_tuple, Serialize_tuple};
@@ -30,6 +31,10 @@ pub struct Subnet {
     pub status: Status,
     pub prev_checkpoint: Option<BottomUpCheckpoint>,
     pub applied_bottomup_nonce: u64,
+    // genesis_epoch determines the epoch from which the subnet
+    // was registered. This signals the epoch from which
+    // the top-down checkpoint can be started.
+    pub genesis_epoch: ChainEpoch,
 }
 
 impl Subnet {

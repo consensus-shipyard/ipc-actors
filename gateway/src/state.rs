@@ -52,6 +52,10 @@ pub struct State {
     pub applied_topdown_nonce: u64,
     pub topdown_checkpoint_voting: Voting<TopDownCheckpoint>,
     pub validators: Validators,
+    /// `initialized` determines if validators have initialized the subnet
+    /// to start accepting top-down checkpoints and messages. No cross-net messages
+    /// and checkpoints can be triggered if the subnet is not initialized yet.
+    pub initialized: bool,
 }
 
 lazy_static! {
@@ -79,13 +83,21 @@ impl State {
             // This way we ensure that the first message to execute has nonce= 0, if not it would expect 1 and fail for the first nonce
             // We first increase to the subsequent and then execute for bottom-up messages
             applied_topdown_nonce: Default::default(),
-            topdown_checkpoint_voting: Voting::<TopDownCheckpoint>::new(
-                store,
-                params.genesis_epoch,
-                params.topdown_check_period,
-            )?,
+            topdown_checkpoint_voting: Voting::<TopDownCheckpoint>::default(),
             validators: Validators::new(ValidatorSet::default()),
+            initialized: false,
         })
+    }
+
+    /// requires that the subnet is initialized before continuing
+    pub(crate) fn require_initialized(&mut self) -> Result<(), ActorError> {
+        if !self.initialized {
+            return Err(actor_error!(
+                illegal_state,
+                "error initializing top-down voting"
+            ));
+        }
+        Ok(())
     }
 
     /// Get content for a child subnet as mut.
@@ -123,6 +135,7 @@ impl State {
                     topdown_nonce: 0,
                     prev_checkpoint: None,
                     applied_bottomup_nonce: 0,
+                    genesis_epoch: rt.curr_epoch(),
                 };
                 set_subnet(subnets, id, subnet)?;
                 Ok(true)

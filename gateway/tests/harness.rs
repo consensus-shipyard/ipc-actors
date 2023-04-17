@@ -25,9 +25,9 @@ use fvm_shared::METHOD_SEND;
 use ipc_gateway::checkpoint::ChildCheck;
 use ipc_gateway::{
     get_topdown_msg, is_bottomup, Actor, BottomUpCheckpoint, ConstructorParams, CrossMsg,
-    CrossMsgParams, FundParams, IPCAddress, Method, PropagateParams, State, StorableMsg, Subnet,
-    SubnetID, TopDownCheckpoint, CROSS_MSG_FEE, DEFAULT_CHECKPOINT_PERIOD, MIN_COLLATERAL_AMOUNT,
-    SUBNET_ACTOR_REWARD_METHOD,
+    CrossMsgParams, FundParams, IPCAddress, InitGenesisEpoch, Method, PropagateParams, State,
+    StorableMsg, Subnet, SubnetID, TopDownCheckpoint, CROSS_MSG_FEE, DEFAULT_CHECKPOINT_PERIOD,
+    MIN_COLLATERAL_AMOUNT, SUBNET_ACTOR_REWARD_METHOD,
 };
 use ipc_sdk::ValidatorSet;
 use lazy_static::lazy_static;
@@ -69,6 +69,7 @@ pub fn setup(id: SubnetID) -> (Harness, MockRuntime) {
     let mut rt = new_runtime();
     let h = new_harness(id);
     h.construct(&mut rt);
+    h.initialize(&mut rt);
     (h, rt)
 }
 
@@ -84,7 +85,6 @@ impl Harness {
             network_name: self.net_name.to_string(),
             bottomup_check_period: 10,
             topdown_check_period: *DEFAULT_TOPDOWN_PERIOD,
-            genesis_epoch: *DEFAULT_GENESIS_EPOCH,
         };
         rt.set_caller(*INIT_ACTOR_CODE_ID, INIT_ACTOR_ADDR);
         rt.call::<Actor>(
@@ -92,6 +92,25 @@ impl Harness {
             IpldBlock::serialize_cbor(&params).unwrap(),
         )
         .unwrap();
+    }
+
+    pub fn initialize(&self, rt: &mut MockRuntime) {
+        rt.expect_validate_caller_addr(vec![SYSTEM_ACTOR_ADDR]);
+        let params = InitGenesisEpoch {
+            genesis_epoch: *DEFAULT_GENESIS_EPOCH,
+        };
+        rt.set_caller(*SYSTEM_ACTOR_CODE_ID, SYSTEM_ACTOR_ADDR);
+        rt.call::<Actor>(
+            Method::InitGenesisEpoch as MethodNum,
+            IpldBlock::serialize_cbor(&params).unwrap(),
+        )
+        .unwrap();
+        let st: State = rt.get_state();
+        assert_eq!(st.initialized, true);
+        assert_eq!(
+            st.topdown_checkpoint_voting.genesis_epoch,
+            DEFAULT_GENESIS_EPOCH.clone()
+        );
     }
 
     pub fn construct_and_verify(&self, rt: &mut MockRuntime) {

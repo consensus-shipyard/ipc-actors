@@ -50,7 +50,6 @@ pub struct State {
     // duplicated definition for easier data access in client applications
     pub bottomup_check_period: ChainEpoch,
     pub topdown_check_period: ChainEpoch,
-    pub genesis_epoch: ChainEpoch,
 
     // FIXME: Consider making checkpoints a HAMT instead of an AMT so we use
     // the AMT index instead of and epoch k for object indexing.
@@ -100,9 +99,6 @@ impl State {
             status: Status::Instantiated,
             stake: TCid::new_hamt(store)?,
             validator_set: ValidatorSet::default(),
-            // genesis epoch determines the epoch from the parent when the
-            // subnet was spawned.
-            genesis_epoch: current_epoch,
             previous_executed_checkpoint_cid: *CHECKPOINT_GENESIS_CID,
             bottomup_checkpoint_voting: Voting::<BottomUpCheckpoint>::new_with_ratio(
                 store,
@@ -357,7 +353,6 @@ impl Default for State {
             stake: TCid::default(),
             validator_set: ValidatorSet::default(),
             min_validators: 0,
-            genesis_epoch: 0,
             previous_executed_checkpoint_cid: *CHECKPOINT_GENESIS_CID,
             bottomup_checkpoint_voting: Voting {
                 genesis_epoch: 0,
