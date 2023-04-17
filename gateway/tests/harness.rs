@@ -29,14 +29,12 @@ use ipc_gateway::{
     StorableMsg, Subnet, SubnetID, TopDownCheckpoint, CROSS_MSG_FEE, DEFAULT_CHECKPOINT_PERIOD,
     MIN_COLLATERAL_AMOUNT, SUBNET_ACTOR_REWARD_METHOD,
 };
+use ipc_sdk::subnet_id::ROOTNET_ID;
 use ipc_sdk::ValidatorSet;
 use lazy_static::lazy_static;
 use primitives::{TCid, TCidContent};
-use std::str::FromStr;
 
 lazy_static! {
-    pub static ref ROOTNET_ID: SubnetID =
-        SubnetID::new_from_parent(&SubnetID::from_str("/root").unwrap(), Address::new_id(0));
     pub static ref SUBNET_ONE: Address = Address::new_id(101);
     pub static ref SUBNET_TWO: Address = Address::new_id(102);
     pub static ref SUBNET_THR: Address = Address::new_id(103);
@@ -67,9 +65,13 @@ pub fn setup_root() -> (Harness, MockRuntime) {
 
 pub fn setup(id: SubnetID) -> (Harness, MockRuntime) {
     let mut rt = new_runtime();
-    let h = new_harness(id);
+    let h = new_harness(id.clone());
     h.construct(&mut rt);
-    h.initialize(&mut rt);
+    // the rootnet doesn't need to be explicitly
+    // initialized.
+    if id != *ROOTNET_ID {
+        h.initialize(&mut rt);
+    }
     (h, rt)
 }
 
@@ -127,7 +129,11 @@ impl Harness {
         );
         assert_eq!(
             st.topdown_checkpoint_voting.genesis_epoch(),
-            *DEFAULT_GENESIS_EPOCH
+            if st.network_name == *ROOTNET_ID {
+                0
+            } else {
+                *DEFAULT_GENESIS_EPOCH
+            }
         );
         verify_empty_map(rt, st.subnets.cid());
         verify_empty_map(rt, st.bottomup_checkpoints.cid());

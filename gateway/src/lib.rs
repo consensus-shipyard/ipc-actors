@@ -22,9 +22,9 @@ use fvm_shared::econ::TokenAmount;
 use fvm_shared::error::ExitCode;
 use fvm_shared::METHOD_SEND;
 use fvm_shared::{MethodNum, METHOD_CONSTRUCTOR};
-use ipc_actor_common::vote::Voting;
 pub use ipc_sdk::address::IPCAddress;
 pub use ipc_sdk::subnet_id::SubnetID;
+use ipc_sdk::subnet_id::ROOTNET_ID;
 use ipc_sdk::ValidatorSet;
 use lazy_static::lazy_static;
 use num_derive::FromPrimitive;
@@ -76,12 +76,16 @@ impl Actor {
     fn constructor(rt: &mut impl Runtime, params: ConstructorParams) -> Result<(), ActorError> {
         rt.validate_immediate_caller_is(std::iter::once(&INIT_ACTOR_ADDR))?;
 
-        let st = State::new(rt.store(), params).map_err(|e| {
+        let mut st = State::new(rt.store(), params).map_err(|e| {
             e.downcast_default(
                 ExitCode::USR_ILLEGAL_STATE,
                 "Failed to create gateway actor state",
             )
         })?;
+        // the root doesn't need to be explicitly initialized
+        if st.network_name == *ROOTNET_ID {
+            st.init_gateway(rt.store(), 0)?;
+        }
         rt.create(&st)?;
         Ok(())
     }
@@ -693,14 +697,10 @@ impl Actor {
     ) -> Result<RawBytes, ActorError> {
         rt.validate_immediate_caller_is([&SYSTEM_ACTOR_ADDR as &Address])?;
         rt.transaction(|st: &mut State, rt| {
-            st.require_initialized()?;
-            st.topdown_checkpoint_voting = Voting::<TopDownCheckpoint>::new(
-                rt.store(),
-                params.genesis_epoch,
-                st.topdown_check_period,
-            )
-            .map_err(|e| actor_error!(illegal_state, e.to_string()))?;
-            st.initialized = true;
+            if st.initialized {
+                return Err(actor_error!(illegal_state, "subnet already initialized"));
+            }
+            st.init_gateway(rt.store(), params.genesis_epoch)?;
             Ok(RawBytes::default())
         })
     }

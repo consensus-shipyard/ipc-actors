@@ -83,18 +83,38 @@ impl State {
             // This way we ensure that the first message to execute has nonce= 0, if not it would expect 1 and fail for the first nonce
             // We first increase to the subsequent and then execute for bottom-up messages
             applied_topdown_nonce: Default::default(),
-            topdown_checkpoint_voting: Voting::<TopDownCheckpoint>::default(),
+            // initializing any voting to avoid TCid::default() inside the voting
+            // from corrupting the actor state.
+            topdown_checkpoint_voting: Voting::<TopDownCheckpoint>::new(
+                store,
+                0,
+                params.topdown_check_period,
+            )?,
             validators: Validators::new(ValidatorSet::default()),
             initialized: false,
         })
     }
 
+    /// Initializes the gateway of the subnet actor and initializates
+    /// the top-down voting
+    pub(crate) fn init_gateway<BS: Blockstore>(
+        &mut self,
+        store: &BS,
+        genesis_epoch: ChainEpoch,
+    ) -> Result<(), ActorError> {
+        self.topdown_checkpoint_voting =
+            Voting::<TopDownCheckpoint>::new(store, genesis_epoch, self.topdown_check_period)
+                .map_err(|e| actor_error!(illegal_state, e.to_string()))?;
+        self.initialized = true;
+        Ok(())
+    }
+
     /// requires that the subnet is initialized before continuing
-    pub(crate) fn require_initialized(&mut self) -> Result<(), ActorError> {
+    pub(crate) fn require_initialized(&self) -> Result<(), ActorError> {
         if !self.initialized {
             return Err(actor_error!(
                 illegal_state,
-                "error initializing top-down voting"
+                "require subnet initialized failed"
             ));
         }
         Ok(())
