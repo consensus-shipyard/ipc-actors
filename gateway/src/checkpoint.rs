@@ -3,6 +3,7 @@ use anyhow::anyhow;
 use cid::multihash::Code;
 use cid::multihash::MultihashDigest;
 use cid::Cid;
+use fil_actors_runtime::runtime::Runtime;
 use fvm_ipld_encoding::DAG_CBOR;
 use fvm_ipld_encoding::{serde_bytes, to_vec};
 use fvm_shared::address::Address;
@@ -239,11 +240,15 @@ impl Validators {
     }
 
     /// Get the weight of a validator
-    pub fn get_validator_weight(&self, addr: &Address) -> Option<TokenAmount> {
+    /// It expects ID addresses as an input
+    pub fn get_validator_weight(&self, rt: &impl Runtime, addr: &Address) -> Option<TokenAmount> {
         self.validators
             .validators()
             .iter()
-            .find(|x| x.addr == *addr)
+            .find(|x| match rt.resolve_address(&x.addr) {
+                Some(id) => id == *addr,
+                None => return false,
+            })
             .map(|v| v.weight.clone())
     }
 }
