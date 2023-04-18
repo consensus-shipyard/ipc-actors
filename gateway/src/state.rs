@@ -52,6 +52,10 @@ pub struct State {
     pub applied_topdown_nonce: u64,
     pub topdown_checkpoint_voting: Voting<TopDownCheckpoint>,
     pub validators: Validators,
+    /// `initialized` determines if validators have initialized the subnet
+    /// to start accepting top-down checkpoints and messages. No cross-net messages
+    /// and checkpoints can be triggered if the subnet is not initialized yet.
+    pub initialized: bool,
 }
 
 lazy_static! {
@@ -79,13 +83,41 @@ impl State {
             // This way we ensure that the first message to execute has nonce= 0, if not it would expect 1 and fail for the first nonce
             // We first increase to the subsequent and then execute for bottom-up messages
             applied_topdown_nonce: Default::default(),
+            // initializing any voting to avoid TCid::default() inside the voting
+            // from corrupting the actor state.
             topdown_checkpoint_voting: Voting::<TopDownCheckpoint>::new(
                 store,
-                params.genesis_epoch,
+                0,
                 params.topdown_check_period,
             )?,
             validators: Validators::new(ValidatorSet::default()),
+            initialized: false,
         })
+    }
+
+    /// Initializes the gateway of the subnet actor and initializates
+    /// the top-down voting
+    pub(crate) fn init_gateway<BS: Blockstore>(
+        &mut self,
+        store: &BS,
+        genesis_epoch: ChainEpoch,
+    ) -> Result<(), ActorError> {
+        self.topdown_checkpoint_voting =
+            Voting::<TopDownCheckpoint>::new(store, genesis_epoch, self.topdown_check_period)
+                .map_err(|e| actor_error!(illegal_state, e.to_string()))?;
+        self.initialized = true;
+        Ok(())
+    }
+
+    /// requires that the subnet is initialized before continuing
+    pub(crate) fn require_initialized(&self) -> Result<(), ActorError> {
+        if !self.initialized {
+            return Err(actor_error!(
+                illegal_state,
+                "require subnet initialized failed"
+            ));
+        }
+        Ok(())
     }
 
     /// Get content for a child subnet as mut.
@@ -123,6 +155,7 @@ impl State {
                     topdown_nonce: 0,
                     prev_checkpoint: None,
                     applied_bottomup_nonce: 0,
+                    genesis_epoch: rt.curr_epoch(),
                 };
                 set_subnet(subnets, id, subnet)?;
                 Ok(true)

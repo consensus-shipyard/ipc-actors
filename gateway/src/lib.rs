@@ -24,6 +24,7 @@ use fvm_shared::METHOD_SEND;
 use fvm_shared::{MethodNum, METHOD_CONSTRUCTOR};
 pub use ipc_sdk::address::IPCAddress;
 pub use ipc_sdk::subnet_id::SubnetID;
+use ipc_sdk::subnet_id::ROOTNET_ID;
 use ipc_sdk::ValidatorSet;
 use lazy_static::lazy_static;
 use num_derive::FromPrimitive;
@@ -61,7 +62,10 @@ pub enum Method {
     Propagate = frc42_dispatch::method_hash!("Propagate"),
     WhiteListPropagator = frc42_dispatch::method_hash!("WhiteListPropagator"),
     SubmitTopDownCheckpoint = frc42_dispatch::method_hash!("SubmitTopDownCheckpoint"),
+    // FIXME: These two methods should probably not used FRC42 method numbers
+    // and be in the range where only builtin-actors can call them.
     SetMembership = frc42_dispatch::method_hash!("SetMembership"),
+    InitGenesisEpoch = frc42_dispatch::method_hash!("InitGenesisEpoch"),
 }
 
 /// Gateway Actor
@@ -72,12 +76,16 @@ impl Actor {
     fn constructor(rt: &mut impl Runtime, params: ConstructorParams) -> Result<(), ActorError> {
         rt.validate_immediate_caller_is(std::iter::once(&INIT_ACTOR_ADDR))?;
 
-        let st = State::new(rt.store(), params).map_err(|e| {
+        let mut st = State::new(rt.store(), params).map_err(|e| {
             e.downcast_default(
                 ExitCode::USR_ILLEGAL_STATE,
                 "Failed to create gateway actor state",
             )
         })?;
+        // the root doesn't need to be explicitly initialized
+        if st.network_name == *ROOTNET_ID {
+            st.init_gateway(rt.store(), 0)?;
+        }
         rt.create(&st)?;
         Ok(())
     }
@@ -292,6 +300,8 @@ impl Actor {
         }
 
         let (fee, cross_msgs) = rt.transaction(|st: &mut State, rt| {
+            st.require_initialized()?;
+
             let shid = SubnetID::new_from_parent(&st.network_name, subnet_addr);
             let sub = st.get_subnet(rt.store(), &shid).map_err(|e| {
                 e.downcast_default(ExitCode::USR_ILLEGAL_STATE, "failed to load subnet")
@@ -666,6 +676,9 @@ impl Actor {
     }
 
     /// Set the memberships of the validators
+    ///
+    /// This call is expected to be performed implicitly by all validators
+    /// when a reconfiguration is triggered in a subnet.
     fn set_membership(
         rt: &mut impl Runtime,
         validator_set: ValidatorSet,
@@ -673,6 +686,21 @@ impl Actor {
         rt.validate_immediate_caller_is([&SYSTEM_ACTOR_ADDR as &Address])?;
         rt.transaction(|st: &mut State, _| {
             st.set_membership(validator_set);
+            Ok(RawBytes::default())
+        })
+    }
+
+    /// Set the memberships of the validators
+    fn init_genesis_epoch(
+        rt: &mut impl Runtime,
+        params: InitGenesisEpoch,
+    ) -> Result<RawBytes, ActorError> {
+        rt.validate_immediate_caller_is([&SYSTEM_ACTOR_ADDR as &Address])?;
+        rt.transaction(|st: &mut State, rt| {
+            if st.initialized {
+                return Err(actor_error!(illegal_state, "subnet already initialized"));
+            }
+            st.init_gateway(rt.store(), params.genesis_epoch)?;
             Ok(RawBytes::default())
         })
     }
@@ -693,6 +721,7 @@ impl Actor {
         rt.validate_immediate_caller_type(CALLER_TYPES_SIGNABLE.iter())?;
 
         let to_execute = rt.transaction(|st: &mut State, rt| {
+            st.require_initialized()?;
             let submitter = rt.message().caller();
             let submitter_weight = Self::validate_submitter(st, &submitter)?;
             let store = rt.store();
@@ -1021,5 +1050,6 @@ impl ActorCode for Actor {
         WhiteListPropagator => whitelist_propagator,
         SubmitTopDownCheckpoint => submit_topdown_check,
         SetMembership => set_membership,
+        InitGenesisEpoch => init_genesis_epoch,
     }
 }

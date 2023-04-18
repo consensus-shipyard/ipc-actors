@@ -16,7 +16,7 @@ use ipc_gateway::{
     get_topdown_msg, BottomUpCheckpoint, CrossMsg, IPCAddress, PostBoxItem, State, StorableMsg,
     TopDownCheckpoint, CROSS_MSG_FEE, SUBNET_ACTOR_REWARD_METHOD,
 };
-use ipc_sdk::subnet_id::SubnetID;
+use ipc_sdk::subnet_id::{SubnetID, ROOTNET_ID};
 use ipc_sdk::{epoch_key, Validator, ValidatorSet};
 use primitives::TCid;
 use std::collections::BTreeSet;
@@ -1328,13 +1328,15 @@ fn setup_membership(h: &Harness, rt: &mut MockRuntime) {
 #[test]
 fn test_submit_topdown_check_checking_errors() {
     let (h, mut rt) = setup_root();
+    let st: State = rt.get_state();
+    let genesis_epoch = st.topdown_checkpoint_voting.genesis_epoch;
 
     setup_membership(&h, &mut rt);
 
     let submitter = Address::new_id(10000);
 
     let checkpoint = TopDownCheckpoint {
-        epoch: *DEFAULT_GENESIS_EPOCH + *DEFAULT_TOPDOWN_PERIOD,
+        epoch: genesis_epoch + *DEFAULT_TOPDOWN_PERIOD,
         top_down_msgs: vec![],
     };
     let r = h.submit_topdown_check(&mut rt, submitter, checkpoint);
@@ -1343,7 +1345,7 @@ fn test_submit_topdown_check_checking_errors() {
 
     let submitter = Address::new_id(0);
     let checkpoint = TopDownCheckpoint {
-        epoch: *DEFAULT_GENESIS_EPOCH + 1,
+        epoch: genesis_epoch + 1,
         top_down_msgs: vec![],
     };
     let r = h.submit_topdown_check(&mut rt, submitter, checkpoint);
@@ -1351,7 +1353,7 @@ fn test_submit_topdown_check_checking_errors() {
     assert_eq!(r.unwrap_err().msg(), "epoch not allowed");
 
     let checkpoint = TopDownCheckpoint {
-        epoch: *DEFAULT_GENESIS_EPOCH,
+        epoch: genesis_epoch,
         top_down_msgs: vec![],
     };
     let r = h.submit_topdown_check(&mut rt, submitter, checkpoint);
@@ -1376,10 +1378,12 @@ fn get_epoch_submissions(
 #[test]
 fn test_submit_topdown_check_works_with_execution() {
     let (h, mut rt) = setup_root();
+    let st: State = rt.get_state();
+    let genesis_epoch = st.topdown_checkpoint_voting.genesis_epoch;
 
     setup_membership(&h, &mut rt);
 
-    let epoch = *DEFAULT_GENESIS_EPOCH + *DEFAULT_TOPDOWN_PERIOD;
+    let epoch = genesis_epoch + *DEFAULT_TOPDOWN_PERIOD;
     let msg = cross_msg(0);
     let checkpoint = TopDownCheckpoint {
         epoch,
@@ -1401,7 +1405,7 @@ fn test_submit_topdown_check_works_with_execution() {
     let st: State = rt.get_state();
     assert_eq!(
         st.topdown_checkpoint_voting.last_voting_executed_epoch(),
-        *DEFAULT_GENESIS_EPOCH
+        genesis_epoch
     ); // not executed yet
 
     // already submitted
@@ -1425,7 +1429,7 @@ fn test_submit_topdown_check_works_with_execution() {
     let st: State = rt.get_state();
     assert_eq!(
         st.topdown_checkpoint_voting.last_voting_executed_epoch(),
-        *DEFAULT_GENESIS_EPOCH
+        genesis_epoch
     ); // not executed yet
 
     // third submission
@@ -1443,7 +1447,7 @@ fn test_submit_topdown_check_works_with_execution() {
     let st: State = rt.get_state();
     assert_eq!(
         st.topdown_checkpoint_voting.last_voting_executed_epoch(),
-        *DEFAULT_GENESIS_EPOCH
+        genesis_epoch
     ); // not executed yet
 
     // fourth submission, executed
@@ -1484,10 +1488,12 @@ fn cross_msg(nonce: u64) -> CrossMsg {
 #[test]
 fn test_submit_topdown_check_abort() {
     let (h, mut rt) = setup_root();
+    let st: State = rt.get_state();
+    let genesis_epoch = st.topdown_checkpoint_voting.genesis_epoch;
 
     setup_membership(&h, &mut rt);
 
-    let epoch = *DEFAULT_GENESIS_EPOCH + *DEFAULT_TOPDOWN_PERIOD;
+    let epoch = genesis_epoch + *DEFAULT_TOPDOWN_PERIOD;
 
     // first submission
     let submitter = Address::new_id(0);
@@ -1529,7 +1535,7 @@ fn test_submit_topdown_check_abort() {
     let st: State = rt.get_state();
     assert_eq!(
         st.topdown_checkpoint_voting.last_voting_executed_epoch(),
-        *DEFAULT_GENESIS_EPOCH
+        genesis_epoch
     ); // not executed yet
     let submission = get_epoch_submissions(&mut rt, epoch).unwrap();
     for i in 0..4 {
@@ -1547,8 +1553,10 @@ fn test_submit_topdown_check_sequential_execution() {
     let (h, mut rt) = setup_root();
 
     setup_membership(&h, &mut rt);
+    let st: State = rt.get_state();
+    let genesis_epoch = st.topdown_checkpoint_voting.genesis_epoch;
 
-    let pending_epoch = *DEFAULT_GENESIS_EPOCH + *DEFAULT_TOPDOWN_PERIOD * 2;
+    let pending_epoch = genesis_epoch + *DEFAULT_TOPDOWN_PERIOD * 2;
     let checkpoint = TopDownCheckpoint {
         epoch: pending_epoch,
         top_down_msgs: vec![],
@@ -1576,7 +1584,7 @@ fn test_submit_topdown_check_sequential_execution() {
     let st: State = rt.get_state();
     assert_eq!(
         st.topdown_checkpoint_voting.last_voting_executed_epoch(),
-        *DEFAULT_GENESIS_EPOCH
+        genesis_epoch
     ); // not executed yet
     assert_eq!(
         *st.topdown_checkpoint_voting.executable_epoch_queue(),
@@ -1585,7 +1593,7 @@ fn test_submit_topdown_check_sequential_execution() {
 
     // now we execute the previous epoch
     let msg = cross_msg(0);
-    let epoch = *DEFAULT_GENESIS_EPOCH + *DEFAULT_TOPDOWN_PERIOD;
+    let epoch = genesis_epoch + *DEFAULT_TOPDOWN_PERIOD;
     let checkpoint = TopDownCheckpoint {
         epoch,
         top_down_msgs: vec![msg.clone()],
@@ -1625,7 +1633,7 @@ fn test_submit_topdown_check_sequential_execution() {
     );
 
     // now we submit to the next epoch
-    let epoch = *DEFAULT_GENESIS_EPOCH + *DEFAULT_TOPDOWN_PERIOD * 3;
+    let epoch = genesis_epoch + *DEFAULT_TOPDOWN_PERIOD * 3;
     let checkpoint = TopDownCheckpoint {
         epoch,
         top_down_msgs: vec![],
