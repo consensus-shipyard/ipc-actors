@@ -723,7 +723,7 @@ impl Actor {
         let to_execute = rt.transaction(|st: &mut State, rt| {
             st.require_initialized()?;
             let submitter = rt.message().caller();
-            let submitter_weight = Self::validate_submitter(st, &submitter)?;
+            let submitter_weight = Self::validate_submitter(st, rt, &submitter)?;
             let store = rt.store();
 
             let epoch = checkpoint.epoch;
@@ -855,9 +855,13 @@ impl Actor {
 /// All the validator code for the actor calls
 impl Actor {
     /// Validate the submitter's submission against the state, also returns the weight of the validator
-    fn validate_submitter(st: &State, submitter: &Address) -> Result<TokenAmount, ActorError> {
+    fn validate_submitter(
+        st: &State,
+        rt: &impl Runtime,
+        submitter: &Address,
+    ) -> Result<TokenAmount, ActorError> {
         st.validators
-            .get_validator_weight(submitter)
+            .get_validator_weight(rt, submitter)
             .ok_or_else(|| actor_error!(illegal_argument, "caller not validator"))
     }
 }
