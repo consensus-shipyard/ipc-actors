@@ -247,7 +247,7 @@ impl Validators {
             .iter()
             .find(|x| match rt.resolve_address(&x.addr) {
                 Some(id) => id == *addr,
-                None => return false,
+                None => false,
             })
             .map(|v| v.weight.clone())
     }
