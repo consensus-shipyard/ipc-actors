@@ -40,9 +40,10 @@ mod state;
 pub mod subnet;
 mod types;
 
-// TODO: make this into constructor!
 lazy_static! {
+    // TODO: make this into constructor!
     pub static ref CROSS_MSG_FEE: TokenAmount = TokenAmount::from_nano(100);
+    pub static ref INITIAL_VALIDATOR_FUNDS: TokenAmount = TokenAmount::from_whole(1);
 }
 
 /// Gateway actor methods available
@@ -685,9 +686,23 @@ impl Actor {
     ) -> Result<RawBytes, ActorError> {
         rt.validate_immediate_caller_is([&SYSTEM_ACTOR_ADDR as &Address])?;
         rt.transaction(|st: &mut State, _| {
-            st.set_membership(validator_set);
-            Ok(RawBytes::default())
-        })
+            st.set_membership(validator_set.clone());
+            Ok(())
+        })?;
+
+        // initial validators need to be conveniently funded with at least
+        // 1 FIL for them to be able to commit the first few top-down messages.
+        // They should use this FIL to fund their own addresses in the subnet
+        // so they can keep committing top-down messages. If they don't do this,
+        // they won't be able to send cross-net messages in their subnet.
+        // TODO: Once account abstraction is conveniently supported, there will be
+        // no need for this initial funding of validators.
+        if rt.curr_epoch() == 1 {
+            for v in validator_set.validators().iter() {
+                rt.send(&v.addr, METHOD_SEND, None, INITIAL_VALIDATOR_FUNDS.clone())?;
+            }
+        }
+        Ok(RawBytes::default())
     }
 
     /// Set the memberships of the validators
