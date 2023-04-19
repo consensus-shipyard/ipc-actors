@@ -1278,7 +1278,8 @@ fn test_commit_child_check_tp_not_target_subnet() {
 
 #[test]
 fn test_set_membership() {
-    let (h, mut rt) = setup_root();
+    let shid = SubnetID::new_from_parent(&ROOTNET_ID, *SUBNET_ONE);
+    let (h, mut rt) = setup(shid.clone());
 
     let weights = vec![1000, 2000];
     let mut index = 0;

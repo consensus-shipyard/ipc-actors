@@ -685,9 +685,9 @@ impl Actor {
         validator_set: ValidatorSet,
     ) -> Result<RawBytes, ActorError> {
         rt.validate_immediate_caller_is([&SYSTEM_ACTOR_ADDR as &Address])?;
-        rt.transaction(|st: &mut State, _| {
+        let network_name = rt.transaction(|st: &mut State, _| {
             st.set_membership(validator_set.clone());
-            Ok(())
+            Ok(st.network_name.clone())
         })?;
 
         // initial validators need to be conveniently funded with at least
@@ -695,9 +695,12 @@ impl Actor {
         // They should use this FIL to fund their own addresses in the subnet
         // so they can keep committing top-down messages. If they don't do this,
         // they won't be able to send cross-net messages in their subnet.
+        // Funds are only distributed in child subnets, where top-down checkpoints need
+        // to be committed. This doesn't apply to the root.
         // TODO: Once account abstraction is conveniently supported, there will be
         // no need for this initial funding of validators.
-        if rt.curr_epoch() == 1 {
+
+        if rt.curr_epoch() == 1 && network_name != *ROOTNET_ID {
             for v in validator_set.validators().iter() {
                 rt.send(&v.addr, METHOD_SEND, None, INITIAL_VALIDATOR_FUNDS.clone())?;
             }
