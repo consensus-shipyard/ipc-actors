@@ -80,7 +80,7 @@ impl Subnet {
     pub(crate) fn release_supply(&mut self, value: &TokenAmount) -> anyhow::Result<()> {
         if &self.circ_supply < value {
             return Err(anyhow!(
-                "wtf! we can't release funds below circ, supply. something went really wrong"
+                "funds can't be released over the circulating supply of the subnet. You may be releasing tokens that haven't been injected to the subnet yet"
             ));
         }
         self.circ_supply -= value;
