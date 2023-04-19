@@ -14,7 +14,7 @@ use ipc_gateway::checkpoint::{window_epoch, BatchCrossMsgs};
 use ipc_gateway::Status::{Active, Inactive};
 use ipc_gateway::{
     get_topdown_msg, BottomUpCheckpoint, CrossMsg, IPCAddress, PostBoxItem, State, StorableMsg,
-    TopDownCheckpoint, CROSS_MSG_FEE, SUBNET_ACTOR_REWARD_METHOD,
+    TopDownCheckpoint, CROSS_MSG_FEE, INITIAL_VALIDATOR_FUNDS, SUBNET_ACTOR_REWARD_METHOD,
 };
 use ipc_sdk::subnet_id::{SubnetID, ROOTNET_ID};
 use ipc_sdk::{epoch_key, Validator, ValidatorSet};
@@ -1282,6 +1282,10 @@ fn test_set_membership() {
 
     let weights = vec![1000, 2000];
     let mut index = 0;
+    // in the first epoch, the validators should receive
+    // some initial funds for the first few top-down messages
+    rt.set_balance(2 * INITIAL_VALIDATOR_FUNDS.clone());
+    rt.set_epoch(1);
     let validators = weights
         .iter()
         .map(|weight| {
@@ -1291,6 +1295,14 @@ fn test_set_membership() {
                 weight: TokenAmount::from_atto(*weight),
             };
             index += 1;
+            rt.expect_send(
+                v.addr.clone(),
+                METHOD_SEND,
+                None,
+                INITIAL_VALIDATOR_FUNDS.clone(),
+                None,
+                ExitCode::OK,
+            );
             v
         })
         .collect();
