@@ -476,7 +476,9 @@ mod tests {
         let store = MemoryBlockstore::new();
         let mut submission = EpochVoteSubmissions::<DummyVote>::new(&store).unwrap();
 
-        let checkpoint = DummyVote { key: UniqueBytesKey(vec![0]) };
+        let checkpoint = DummyVote {
+            key: UniqueBytesKey(vec![0]),
+        };
 
         let hash = checkpoint.unique_key().unwrap();
 

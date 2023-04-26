@@ -1,14 +1,11 @@
-
 mod submission;
 mod voting;
 
-
-use fvm_ipld_encoding::{serde_bytes};
+use fvm_ipld_encoding::serde_bytes;
 use serde::{Deserialize, Deserializer, Serialize, Serializer};
 
 pub use crate::vote::submission::EpochVoteSubmissions;
 pub use crate::vote::voting::Voting;
-
 
 /// The vote trait that requires each vote to be unique by `unique_key`.
 pub trait UniqueVote: PartialEq + Clone {
@@ -25,13 +22,13 @@ impl UniqueBytesKey {
         Self(Vec::new())
     }
 
-    pub fn as_slice(&self) -> &[u8]{
+    pub fn as_slice(&self) -> &[u8] {
         self.0.as_slice()
-    }   
+    }
 
-    pub fn is_empty(&self) -> bool{
+    pub fn is_empty(&self) -> bool {
         self.0.is_empty()
-    }   
+    }
 }
 
 impl PartialEq<Vec<u8>> for UniqueBytesKey {

@@ -280,7 +280,9 @@ impl UniqueVote for TopDownCheckpoint {
         // TODO: to avoid serialization again, maybe we should perform deserialization in the actor
         // TODO: dispatch call to save gas? The actor dispatching contains the raw serialized data,
         // TODO: which we dont have to serialize here again
-        Ok(UniqueBytesKey(mh_code.digest(&to_vec(self).unwrap()).to_bytes()))
+        Ok(UniqueBytesKey(
+            mh_code.digest(&to_vec(self).unwrap()).to_bytes(),
+        ))
     }
 }
 
