@@ -386,7 +386,7 @@ mod tests {
 
         let dummy_submissions = DummySubmissions {
             total_submission_weight: TokenAmount::from_atto(100),
-            most_voted_key: vec![1, 2, 3],
+            most_voted_key: UniqueBytesKey(vec![1, 2, 3]),
             submitters: Default::default(),
             submission_weights: Default::default(),
             submissions: Default::default(),
@@ -394,7 +394,7 @@ mod tests {
 
         let submissions = EpochVoteSubmissions::<DummyVote> {
             total_submission_weight: TokenAmount::from_atto(100),
-            most_voted_key: Some(vec![1, 2, 3]),
+            most_voted_key: Some(UniqueBytesKey(vec![1, 2, 3])),
             submitters: Default::default(),
             submission_weights: Default::default(),
             submissions: Default::default(),
@@ -406,7 +406,7 @@ mod tests {
 
         let dummy_submissions = DummySubmissions {
             total_submission_weight: TokenAmount::from_atto(100),
-            most_voted_key: vec![],
+            most_voted_key: UniqueBytesKey::new(),
             submitters: Default::default(),
             submission_weights: Default::default(),
             submissions: Default::default(),
@@ -432,7 +432,7 @@ mod tests {
 
         let submissions = EpochVoteSubmissions::<DummyVote> {
             total_submission_weight: TokenAmount::from_atto(100),
-            most_voted_key: Some(vec![1, 2, 3, 4]),
+            most_voted_key: Some(UniqueBytesKey(vec![1, 2, 3, 4])),
             submitters: Default::default(),
             submission_weights: Default::default(),
             submissions: Default::default(),
@@ -476,7 +476,7 @@ mod tests {
         let store = MemoryBlockstore::new();
         let mut submission = EpochVoteSubmissions::<DummyVote>::new(&store).unwrap();
 
-        let checkpoint = DummyVote { key: vec![0] };
+        let checkpoint = DummyVote { key: UniqueBytesKey(vec![0]) };
 
         let hash = checkpoint.unique_key().unwrap();
 
@@ -495,8 +495,8 @@ mod tests {
         let store = MemoryBlockstore::new();
         let mut submission = EpochVoteSubmissions::<DummyVote>::new(&store).unwrap();
 
-        let hash1 = vec![1, 2, 1];
-        let hash2 = vec![1, 2, 2];
+        let hash1 = UniqueBytesKey(vec![1, 2, 1]);
+        let hash2 = UniqueBytesKey(vec![1, 2, 2]);
 
         // insert hash1, should have only one item
         assert_eq!(submission.most_voted_key, None);
