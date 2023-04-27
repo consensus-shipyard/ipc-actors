@@ -18,10 +18,6 @@ pub trait UniqueVote: PartialEq + Clone {
 pub struct UniqueBytesKey(pub Vec<u8>);
 
 impl UniqueBytesKey {
-    pub fn new() -> Self {
-        Self(Vec::new())
-    }
-
     pub fn as_slice(&self) -> &[u8] {
         self.0.as_slice()
     }
@@ -29,6 +25,12 @@ impl UniqueBytesKey {
     pub fn is_empty(&self) -> bool {
         self.0.is_empty()
     }
+}
+
+impl Default for UniqueBytesKey {
+  fn default() -> Self {
+     Self(Vec::new())
+ }
 }
 
 impl PartialEq<Vec<u8>> for UniqueBytesKey {

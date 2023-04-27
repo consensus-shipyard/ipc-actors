@@ -310,7 +310,7 @@ impl<T: Serialize> Serialize for EpochVoteSubmissions<T> {
         } else {
             let inner = (
                 &self.total_submission_weight,
-                &UniqueBytesKey::new(),
+                &UniqueBytesKey::default(),
                 &self.submitters,
                 &self.submission_weights,
                 &self.submissions,
@@ -406,7 +406,7 @@ mod tests {
 
         let dummy_submissions = DummySubmissions {
             total_submission_weight: TokenAmount::from_atto(100),
-            most_voted_key: UniqueBytesKey::new(),
+            most_voted_key: UniqueBytesKey::default(),
             submitters: Default::default(),
             submission_weights: Default::default(),
             submissions: Default::default(),
