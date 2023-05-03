@@ -697,7 +697,7 @@ impl Actor {
                     .iter()
                     .any(|x| x.addr == v.addr)
                 {
-                    pre_fund.push(v.addr.clone());
+                    pre_fund.push(v.addr);
                 }
             }
 
@@ -726,7 +726,7 @@ impl Actor {
             // non-initial validators.
             if rt.curr_epoch() > 1 && validator_set.validators().len() < 4 {
                 for v in pre_fund.iter() {
-                    rt.send(&v, METHOD_SEND, None, INITIAL_VALIDATOR_FUNDS.clone())?;
+                    rt.send(v, METHOD_SEND, None, INITIAL_VALIDATOR_FUNDS.clone())?;
                 }
             }
         }
