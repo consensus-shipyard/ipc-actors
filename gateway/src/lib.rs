@@ -690,11 +690,17 @@ impl Actor {
             // Get validators that are different from the existing validator set
             let mut pre_fund = vec![];
             for v in validator_set.validators().iter() {
-                if !st.validators.validators.validators().iter().any(|x| x.addr == v.addr) {
+                if !st
+                    .validators
+                    .validators
+                    .validators()
+                    .iter()
+                    .any(|x| x.addr == v.addr)
+                {
                     pre_fund.push(v.addr.clone());
                 }
             }
-                
+
             Ok((st.network_name.clone(), pre_fund))
         })?;
 
@@ -707,24 +713,23 @@ impl Actor {
         // to be committed. This doesn't apply to the root.
         // TODO: Once account abstraction is conveniently supported, there will be
         // no need for this initial funding of validators.
-        if  network_name != *ROOTNET_ID {
+        if network_name != *ROOTNET_ID {
             if rt.curr_epoch() == 1 {
-            for v in validator_set.validators().iter() {
-                rt.send(&v.addr, METHOD_SEND, None, INITIAL_VALIDATOR_FUNDS.clone())?;
+                for v in validator_set.validators().iter() {
+                    rt.send(&v.addr, METHOD_SEND, None, INITIAL_VALIDATOR_FUNDS.clone())?;
+                }
+            }
+
+            // to prevent top-down checkpoint submissions from being stuck when the number of validators
+            // is too small (< 3), where if a new validator join and it doesn't have funds
+            // no new top-down checkpoints can be submitted, we add some balance also for
+            // non-initial validators.
+            if rt.curr_epoch() > 1 && validator_set.validators().len() < 4 {
+                for v in pre_fund.iter() {
+                    rt.send(&v, METHOD_SEND, None, INITIAL_VALIDATOR_FUNDS.clone())?;
+                }
             }
         }
-
-        // to prevent top-down checkpoint submissions from being stuck when the number of validators
-        // is too small (< 3), where if a new validator join and it doesn't have funds
-        // no new top-down checkpoints can be submitted, we add some balance also for
-        // non-initial validators.
-        if rt.curr_epoch() > 1 && validator_set.validators().len() < 4 {
-            for v in pre_fund.iter() {
-                rt.send(&v, METHOD_SEND, None, INITIAL_VALIDATOR_FUNDS.clone())?;
-            }
-        }
-    }
-
 
         Ok(RawBytes::default())
     }
