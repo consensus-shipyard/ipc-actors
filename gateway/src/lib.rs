@@ -24,7 +24,6 @@ use fvm_shared::METHOD_SEND;
 use fvm_shared::{MethodNum, METHOD_CONSTRUCTOR};
 pub use ipc_sdk::address::IPCAddress;
 pub use ipc_sdk::subnet_id::SubnetID;
-use ipc_sdk::subnet_id::ROOTNET_ID;
 use ipc_sdk::ValidatorSet;
 use lazy_static::lazy_static;
 use num_derive::FromPrimitive;
@@ -84,7 +83,7 @@ impl Actor {
             )
         })?;
         // the root doesn't need to be explicitly initialized
-        if st.network_name == *ROOTNET_ID {
+        if st.network_name.is_root() {
             st.init_gateway(rt.store(), 0)?;
         }
         rt.create(&st)?;
@@ -700,7 +699,7 @@ impl Actor {
         // TODO: Once account abstraction is conveniently supported, there will be
         // no need for this initial funding of validators.
 
-        if rt.curr_epoch() == 1 && network_name != *ROOTNET_ID {
+        if rt.curr_epoch() == 1 && !network_name.is_root() {
             for v in validator_set.validators().iter() {
                 rt.send(&v.addr, METHOD_SEND, None, INITIAL_VALIDATOR_FUNDS.clone())?;
             }

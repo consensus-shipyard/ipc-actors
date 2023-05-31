@@ -1,116 +1,122 @@
+use fil_actors_runtime::cbor;
 use fvm_shared::address::Address;
 use lazy_static::lazy_static;
 use serde_tuple::{Deserialize_tuple, Serialize_tuple};
 use std::fmt;
-use std::path::{Path, PathBuf};
 use std::str::FromStr;
 
 use crate::error::Error;
-use crate::set_network_from_env;
 
+const SUBNET_ERR_TAG: &str = "subnetID";
+
+/// SubnetID is a unique identifier for a subnet.
+/// It is composed of the chainID of the root network, and the address of
+/// all the subnet actors from the root to the corresponding level in the
+/// hierarchy where the subnet is spawned.
 #[derive(PartialEq, Eq, Hash, Clone, Debug, Serialize_tuple, Deserialize_tuple)]
 pub struct SubnetID {
-    parent: String,
-    actor: Address,
+    root: u64,
+    children: Vec<Address>,
 }
 
 lazy_static! {
-    pub static ref ROOTNET_ID: SubnetID = SubnetID {
-        parent: String::from("/root"),
-        actor: Address::new_id(0)
-    };
     pub static ref UNDEF: SubnetID = SubnetID {
-        parent: String::from("/"),
-        actor: Address::new_id(0)
+        root: 0,
+        children: vec![],
     };
 }
 
 impl SubnetID {
-    pub fn new_from_parent(parent: &SubnetID, subnet_act: Address) -> Self {
+    pub fn new(root_id: u64, children: Vec<Address>) -> Self {
         Self {
-            parent: parent.to_string(),
-            actor: subnet_act,
+            root: root_id,
+            children,
+        }
+    }
+    /// Create a new subnet id from the root network id and the subnet actor
+    pub fn new_from_parent(parent: &SubnetID, subnet_act: Address) -> Self {
+        let mut children = parent.children();
+        children.push(subnet_act);
+        Self {
+            root: parent.root_id(),
+            children,
         }
     }
 
-    pub fn to_bytes(&self) -> Vec<u8> {
-        let str_id = self.to_string();
-        str_id.into_bytes()
+    /// Returns true if the current subnet is the root network
+    pub fn is_root(&self) -> bool {
+        self.children_as_ref().len() == 0
     }
 
-    /// Returns the address of the actor governing the subnet in th eparent
+    /// Returns the chainID of the root network.
+    pub fn root_id(&self) -> u64 {
+        self.root
+    }
+
+    /// Returns the route from the root to the current subnet
+    pub fn children(&self) -> Vec<Address> {
+        self.children.clone()
+    }
+
+    /// Returns the route from the root to the current subnet
+    pub fn children_as_ref(&self) -> &Vec<Address> {
+        &self.children
+    }
+
+    /// Returns the serialized version of the subnet id
+    pub fn to_bytes(&self) -> Vec<u8> {
+        cbor::serialize(self, SUBNET_ERR_TAG).unwrap().into()
+    }
+
+    /// Returns the address of the actor governing the subnet in the parent
     pub fn subnet_actor(&self) -> Address {
-        self.actor
+        self.children_as_ref().last().unwrap().clone()
     }
 
     /// Returns the parenet of the current subnet
     pub fn parent(&self) -> Option<SubnetID> {
-        if *self == *ROOTNET_ID {
+        // if the subnet is the root, it has no parent
+        if self.children_as_ref().len() == 0 {
             return None;
         }
-        match SubnetID::from_str(&self.parent) {
-            Ok(id) => Some(id),
-            Err(_) => None,
-        }
+
+        let children = self.children();
+        Some(SubnetID::new(
+            self.root_id(),
+            children[..children.len() - 1].to_vec(),
+        ))
     }
 
     /// Computes the common parent of the current subnet and the one given
-    /// as argument
+    /// as argument. It returns the number of common children and the subnet.
     pub fn common_parent(&self, other: &SubnetID) -> Option<(usize, SubnetID)> {
-        let a = self.to_string();
-        let b = other.to_string();
-        let a = Path::new(&a).components();
-        let b = Path::new(&b).components();
-        let mut ret = PathBuf::new();
-        let mut found = false;
-        let mut index = 0;
-        for (i, (one, two)) in a.zip(b).enumerate() {
-            if one == two {
-                ret.push(one);
-                found = true;
-                index = i;
-            } else {
-                break;
-            }
+        // check if we have the same root first
+        if self.root_id() != other.root_id() {
+            return None;
         }
-        if found {
-            return match SubnetID::from_str(ret.to_str()?) {
-                Ok(p) => Some((index, p)),
-                Err(_) => None,
-            };
-        }
-        Some((index, ROOTNET_ID.clone()))
+
+        let common = self
+            .children_as_ref()
+            .iter()
+            .zip(other.children_as_ref())
+            .take_while(|(a, b)| a == b)
+            .count();
+        let children = self.children()[..common].to_vec();
+        Some((common, SubnetID::new(self.root_id(), children)))
     }
 
     /// In the path determined by the current subnet id, it moves
     /// down in the path from the subnet id given as argument.
     pub fn down(&self, from: &SubnetID) -> Option<SubnetID> {
-        let a = self.to_string();
-        let a = Path::new(&a).components();
-        let mut cl_a = a.clone();
-        let b = from.to_string();
-        let b = Path::new(&b).components();
-        let mut cl_b = b.clone();
-        let mut ret = PathBuf::new();
-        let mut found = false;
-        let mut index = 0;
-        for (i, (one, two)) in a.zip(b).enumerate() {
-            if one == two {
-                ret.push(one);
-                found = true;
-                index = i;
-            } else {
-                break;
-            }
+        // check if the current network's path is larger than
+        // the one to be traversed.
+        if self.children_as_ref().len() <= from.children_as_ref().len() {
+            return None;
         }
 
-        // the from needs to be a subset of the current subnet id
-        if found && cl_b.nth(index + 1).is_none() {
-            ret.push(cl_a.nth(index + 1)?);
-            return match SubnetID::from_str(ret.to_str()?) {
-                Ok(p) => Some(p),
-                Err(_) => None,
-            };
+        if let Some((i, _)) = self.common_parent(from) {
+            let children = self.children()[..i + 1].to_vec();
+            return Some(SubnetID::new(self.root_id(), children));
         }
         None
     }
@@ -118,36 +124,15 @@ impl SubnetID {
     /// In the path determined by the current subnet id, it moves
     /// up in the path from the subnet id given as argument.
     pub fn up(&self, from: &SubnetID) -> Option<SubnetID> {
-        // we can't go upper than the root.
-        if self == &*ROOTNET_ID || from == &*ROOTNET_ID {
+        // check if the current network's path is larger than
+        // the one to be traversed.
+        if self.children_as_ref().len() < from.children_as_ref().len() {
             return None;
         }
-        let a = format!("{}", self);
-        let a = Path::new(&a).components();
-        let b = format!("{}", from);
-        let b = Path::new(&b).components();
-        let mut cl_b = b.clone();
-        let mut ret = PathBuf::new();
-        let mut found = false;
-        let mut index = 0;
-        for (i, (one, two)) in a.zip(b).enumerate() {
-            if one == two {
-                ret.push(one);
-                found = true;
-                index = i;
-            } else {
-                break;
-            }
-        }
 
-        // the from needs to be a subset of the current subnet id
-        if found && cl_b.nth(index + 1).is_none() {
-            // pop to go up
-            ret.pop();
-            return match SubnetID::from_str(ret.to_str()?) {
-                Ok(p) => Some(p),
-                Err(_) => None,
-            };
+        if let Some((i, _)) = self.common_parent(from) {
+            let children = self.children()[..i - 1].to_vec();
+            return Some(SubnetID::new(self.root_id(), children));
         }
         None
     }
@@ -155,157 +140,129 @@ impl SubnetID {
 
 impl fmt::Display for SubnetID {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        // FIXME: This is a horrible hack, and it makes me feel dirty,
-        // but it is the only way to ensure that we are picking up
-        // the right network address for the environment.
-        // Future fix being tracked here:
-        // https://github.com/consensus-shipyard/ipc-actors/issues/78
-        set_network_from_env();
+        let children_str = self
+            .children_as_ref()
+            .iter()
+            .map(|s| format!("/{}", s))
+            .collect::<String>();
 
-        if self.parent == "/root" && self.actor == Address::new_id(0) {
-            return write!(f, "{}", self.parent);
-        }
-        match Path::join(
-            Path::new(&self.parent),
-            Path::new(&format!("{}", self.actor)),
-        )
-        .to_str()
-        {
-            Some(r) => write!(f, "{}", r),
-            None => Err(fmt::Error),
-        }
+        write!(f, "/r{}{}", self.root_id(), children_str)
     }
 }
 
 impl Default for SubnetID {
     fn default() -> Self {
-        Self {
-            parent: String::from(""),
-            actor: Address::new_id(0),
-        }
+        UNDEF.clone()
     }
 }
 
 impl FromStr for SubnetID {
     type Err = Error;
-    fn from_str(addr: &str) -> Result<Self, Error> {
-        if addr == ROOTNET_ID.to_string() {
-            return Ok(ROOTNET_ID.clone());
+    fn from_str(id: &str) -> Result<Self, Error> {
+        let l: Vec<&str> = id.split('/').filter(|&elem| !elem.is_empty()).collect();
+        let root = l[0][1..].parse::<u64>().map_err(|_| Error::InvalidID)?;
+        let children: Result<Vec<_>, _> = l[1..].iter().map(|s| Address::from_str(s)).collect();
+        if let Ok(children) = children {
+            return Ok(Self { root, children });
         }
-
-        let id = Path::new(addr);
-        let act = match Path::file_name(id) {
-            Some(act_str) => Address::from_str(act_str.to_str().unwrap_or("")),
-            None => return Err(Error::InvalidID),
-        };
-
-        let mut anc = id.ancestors();
-        let _ = anc.next();
-        let par = match anc.next() {
-            Some(par_str) => par_str.to_str(),
-            None => return Err(Error::InvalidID),
-        }
-        .ok_or(Error::InvalidID)
-        .unwrap();
-
-        Ok(Self {
-            parent: String::from(par),
-            actor: match act {
-                Ok(addr) => addr,
-                Err(_) => return Err(Error::InvalidID),
-            },
-        })
+        Err(Error::InvalidID)
     }
 }
 
 #[cfg(test)]
 mod tests {
-    use crate::subnet_id::{SubnetID, ROOTNET_ID};
+    use crate::subnet_id::SubnetID;
     use fvm_shared::address::Address;
     use std::str::FromStr;
 
     #[test]
     fn test_subnet_id() {
         let act = Address::new_id(1001);
-        let sub_id = SubnetID::new_from_parent(&ROOTNET_ID.clone(), act);
+        let sub_id = SubnetID::new(123, vec![act]);
         let sub_id_str = sub_id.to_string();
-        assert_eq!(sub_id_str, "/root/t01001");
+        assert_eq!(sub_id_str, "/r123/f01001");
 
         let rtt_id = SubnetID::from_str(&sub_id_str).unwrap();
         assert_eq!(sub_id, rtt_id);
 
-        let rootnet = ROOTNET_ID.clone();
-        assert_eq!(rootnet.to_string(), "/root");
+        let rootnet = SubnetID::new(123, vec![]);
+        assert_eq!(rootnet.to_string(), "/r123");
         let root_sub = SubnetID::from_str(&rootnet.to_string()).unwrap();
         assert_eq!(root_sub, rootnet);
     }
 
     #[test]
     fn test_common_parent() {
-        common_parent("/root/t01", "/root/t01/t02", "/root/t01", 2);
-        common_parent("/root/t01/t02/t03", "/root/t01/t02", "/root/t01/t02", 3);
-        common_parent("/root/t01/t03/t04", "/root/t02/t03/t04", "/root", 1);
+        common_parent("/r123/f01", "/r123/f01/f02", "/r123/f01", 1);
+        common_parent("/r123/f01/f02/f03", "/r123/f01/f02", "/r123/f01/f02", 2);
+        common_parent("/r123/f01/f03/f04", "/r123/f02/f03/f04", "/r123", 0);
         common_parent(
-            "/root/t01/t03/t04",
-            "/root/t01/t03/t04/t05",
-            "/root/t01/t03/t04",
-            4,
+            "/r123/f01/f03/f04",
+            "/r123/f01/f03/f04/f05",
+            "/r123/f01/f03/f04",
+            3,
         );
         // The common parent of the same subnet is the current subnet
         common_parent(
-            "/root/t01/t03/t04",
-            "/root/t01/t03/t04",
-            "/root/t01/t03/t04",
-            4,
+            "/r123/f01/f03/f04",
+            "/r123/f01/f03/f04",
+            "/r123/f01/f03/f04",
+            3,
         );
+    }
+
+    #[test]
+    #[should_panic]
+    fn test_panic_different_root() {
+        common_parent("/r122/f01", "/r123/f01/f02", "/r123/f01", 1);
     }
 
     #[test]
     fn test_down() {
         down(
-            "/root/t01/t02/t03",
-            "/root/t01",
-            Some(SubnetID::from_str("/root/t01/t02").unwrap()),
+            "/r123/f01/f02/f03",
+            "/r123/f01",
+            Some(SubnetID::from_str("/r123/f01/f02").unwrap()),
         );
         down(
-            "/root/t01/t02/t03",
-            "/root/t01/t02",
-            Some(SubnetID::from_str("/root/t01/t02/t03").unwrap()),
+            "/r123/f01/f02/f03",
+            "/r123/f01/f02",
+            Some(SubnetID::from_str("/r123/f01/f02/f03").unwrap()),
         );
         down(
-            "/root/t01/t03/t04",
-            "/root/t01/t03",
-            Some(SubnetID::from_str("/root/t01/t03/t04").unwrap()),
+            "/r123/f01/f03/f04",
+            "/r123/f01/f03",
+            Some(SubnetID::from_str("/r123/f01/f03/f04").unwrap()),
         );
-        down("/root", "/root/t01", None);
-        down("/root/t01", "/root/t01", None);
-        down("/root/t02/t03", "/root/t01/t03/t04", None);
-        down("/root", "/root/t01", None);
+        down("/r123", "/r123/f01", None);
+        down("/r123/f01", "/r123/f01", None);
+        down("/r123/f02/f03", "/r123/f01/f03/f04", None);
+        down("/r123", "/r123/f01", None);
     }
 
     #[test]
     fn test_up() {
         up(
-            "/root/t01/t02/t03",
-            "/root/t01",
-            Some(SubnetID::from_str("/root").unwrap()),
+            "/r123/f01/f02/f03",
+            "/r123/f01",
+            Some(SubnetID::from_str("/r123").unwrap()),
         );
         up(
-            "/root/t01/t02/t03",
-            "/root/t01/t02",
-            Some(SubnetID::from_str("/root/t01").unwrap()),
+            "/r123/f01/f02/f03",
+            "/r123/f01/f02",
+            Some(SubnetID::from_str("/r123/f01").unwrap()),
         );
-        up("/root", "/root/t01", None);
-        up("/root/t02/t03", "/root/t01/t03/t04", None);
+        up("/r123", "/r123/f01", None);
+        up("/r123/f02/f03", "/r123/f01/f03/f04", None);
         up(
-            "/root/t01/t02/t03",
-            "/root/t01/t02",
-            Some(SubnetID::from_str("/root/t01").unwrap()),
+            "/r123/f01/f02/f03",
+            "/r123/f01/f02",
+            Some(SubnetID::from_str("/r123/f01").unwrap()),
         );
         up(
-            "/root/t01/t02/t03",
-            "/root/t01/t02/t03",
-            Some(SubnetID::from_str("/root/t01/t02").unwrap()),
+            "/r123/f01/f02/f03",
+            "/r123/f01/f02/f03",
+            Some(SubnetID::from_str("/r123/f01/f02").unwrap()),
         );
     }
 

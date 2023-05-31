@@ -14,7 +14,6 @@ use fvm_shared::METHOD_SEND;
 use ipc_sdk::address::IPCAddress;
 use ipc_sdk::subnet_id::SubnetID;
 use serde_tuple::{Deserialize_tuple, Serialize_tuple};
-use std::path::Path;
 
 /// StorableMsg stores all the relevant information required
 /// to execute cross-messages.
@@ -150,8 +149,8 @@ pub fn is_bottomup(from: &SubnetID, to: &SubnetID) -> bool {
         Some((ind, _)) => ind,
         None => return false,
     };
-    let a = from.to_string();
-    Path::new(&a).components().count() - 1 > index
+    // more children than the common parent
+    from.children_as_ref().len() > index
 }
 
 #[derive(PartialEq, Eq, Clone, Debug, Default, Serialize_tuple, Deserialize_tuple)]
@@ -224,13 +223,14 @@ mod tests {
 
     #[test]
     fn test_is_bottomup() {
-        bottom_up("/root/t01", "/root/t01/t02", false);
-        bottom_up("/root/t01", "/root", true);
-        bottom_up("/root/t01", "/root/t01/t02", false);
-        bottom_up("/root/t01", "/root/t02/t02", true);
-        bottom_up("/root/t01/t02", "/root/t01/t02", false);
-        bottom_up("/root/t01/t02", "/root/t01/t02/t03", false);
+        bottom_up("/r123/f01", "/r123/f01/f02", false);
+        bottom_up("/r123/f01", "/r123", true);
+        bottom_up("/r123/f01", "/r123/f01/f02", false);
+        bottom_up("/r123/f01", "/r123/f02/f02", true);
+        bottom_up("/r123/f01/f02", "/r123/f01/f02", false);
+        bottom_up("/r123/f01/f02", "/r123/f01/f02/f03", false);
     }
+
     fn bottom_up(a: &str, b: &str, res: bool) {
         assert_eq!(
             is_bottomup(
