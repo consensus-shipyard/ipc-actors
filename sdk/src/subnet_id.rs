@@ -45,7 +45,7 @@ impl SubnetID {
 
     /// Returns true if the current subnet is the root network
     pub fn is_root(&self) -> bool {
-        self.children_as_ref().len() == 0
+        self.children_as_ref().is_empty()
     }
 
     /// Returns the chainID of the root network.
@@ -70,13 +70,13 @@ impl SubnetID {
 
     /// Returns the address of the actor governing the subnet in the parent
     pub fn subnet_actor(&self) -> Address {
-        self.children_as_ref().last().unwrap().clone()
+        *self.children_as_ref().last().unwrap()
     }
 
     /// Returns the parenet of the current subnet
     pub fn parent(&self) -> Option<SubnetID> {
         // if the subnet is the root, it has no parent
-        if self.children_as_ref().len() == 0 {
+        if self.children_as_ref().is_empty() {
             return None;
         }
 
