@@ -69,8 +69,14 @@ impl SubnetID {
     }
 
     /// Returns the address of the actor governing the subnet in the parent
+    /// If there is no subnet actor it returns the address ID=0
     pub fn subnet_actor(&self) -> Address {
-        *self.children_as_ref().last().unwrap()
+        if let Some(addr) = self.children.last() {
+            *addr
+        } else {
+            // protect against the case that the children slice is empty
+            Address::new_id(0)
+        }
     }
 
     /// Returns the parenet of the current subnet
