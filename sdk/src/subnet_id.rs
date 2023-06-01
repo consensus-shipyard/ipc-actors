@@ -2,12 +2,17 @@ use fil_actors_runtime::cbor;
 use fvm_shared::address::Address;
 use lazy_static::lazy_static;
 use serde_tuple::{Deserialize_tuple, Serialize_tuple};
+use std::collections::hash_map::DefaultHasher;
 use std::fmt;
+use std::hash::{Hash, Hasher};
 use std::str::FromStr;
 
 use crate::error::Error;
 
 const SUBNET_ERR_TAG: &str = "subnetID";
+/// MaxChainID is the maximum chain ID value
+/// possible.
+const MAX_CHAIN_ID: u64 = 0xffffffffffffffff;
 
 /// SubnetID is a unique identifier for a subnet.
 /// It is composed of the chainID of the root network, and the address of
@@ -51,6 +56,13 @@ impl SubnetID {
     /// Returns the chainID of the root network.
     pub fn root_id(&self) -> u64 {
         self.root
+    }
+
+    /// Returns the chainID of the current subnet
+    pub fn chain_id(&self) -> u64 {
+        let mut hasher = DefaultHasher::new();
+        self.to_bytes().hash(&mut hasher);
+        hasher.finish() % MAX_CHAIN_ID
     }
 
     /// Returns the route from the root to the current subnet
