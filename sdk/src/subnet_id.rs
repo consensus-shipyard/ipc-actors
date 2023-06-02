@@ -1,8 +1,8 @@
 use fil_actors_runtime::cbor;
+use fnv::FnvHasher;
 use fvm_shared::address::Address;
 use lazy_static::lazy_static;
 use serde_tuple::{Deserialize_tuple, Serialize_tuple};
-use std::collections::hash_map::DefaultHasher;
 use std::fmt;
 use std::hash::{Hash, Hasher};
 use std::str::FromStr;
@@ -60,8 +60,12 @@ impl SubnetID {
 
     /// Returns the chainID of the current subnet
     pub fn chain_id(&self) -> u64 {
-        let mut hasher = DefaultHasher::new();
-        self.to_bytes().hash(&mut hasher);
+        if self.is_root() {
+            return self.root_id();
+        }
+        let mut hasher = FnvHasher::default();
+
+        hasher.write(self.to_string().as_bytes());
         hasher.finish() % MAX_CHAIN_ID
     }
 
@@ -207,6 +211,18 @@ mod tests {
         assert_eq!(rootnet.to_string(), "/r123");
         let root_sub = SubnetID::from_str(&rootnet.to_string()).unwrap();
         assert_eq!(root_sub, rootnet);
+    }
+
+    #[test]
+    fn test_chain_id() {
+        let act = Address::new_id(1001);
+        let sub_id = SubnetID::new(123, vec![act]);
+        let chain_id = sub_id.chain_id();
+        assert_eq!(chain_id, 2185257692569594473);
+
+        let root = sub_id.parent().unwrap();
+        let chain_id = root.chain_id();
+        assert_eq!(chain_id, 123);
     }
 
     #[test]

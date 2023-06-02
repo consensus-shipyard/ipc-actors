@@ -18,6 +18,7 @@ num-traits = "0.2.14"
 fvm_ipld_blockstore = "0.1.1"
 fvm_ipld_encoding = "0.3.3"
 lazy_static = "1.4.0"
+fnv = "1.0.7"
 serde_tuple = "0.5"
 serde = { version = "1.0.136", features = ["derive"] }
 fvm_shared = { version = "=3.0.0-alpha.17", default-features = false }
