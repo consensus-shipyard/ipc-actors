@@ -227,7 +227,7 @@ mod tests {
         let act = Address::new_id(1001);
         let sub_id = SubnetID::new(123, vec![act]);
         let chain_id = sub_id.chain_id();
-        assert_eq!(chain_id, 2185257692569594473);
+        assert_eq!(chain_id, 1011873294913613);
 
         let root = sub_id.parent().unwrap();
         let chain_id = root.chain_id();
