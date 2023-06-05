@@ -48,6 +48,14 @@ impl SubnetID {
         }
     }
 
+    /// Creates a new rootnet SubnetID
+    pub fn new_root(root_id: u64) -> Self {
+        Self {
+            root: root_id,
+            children: vec![],
+        }
+    }
+
     /// Returns true if the current subnet is the root network
     pub fn is_root(&self) -> bool {
         self.children_as_ref().is_empty()
