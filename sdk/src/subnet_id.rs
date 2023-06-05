@@ -11,8 +11,9 @@ use crate::error::Error;
 
 const SUBNET_ERR_TAG: &str = "subnetID";
 /// MaxChainID is the maximum chain ID value
-/// possible.
-const MAX_CHAIN_ID: u64 = 0xffffffffffffffff;
+/// possible. This is the MAX_CHAIN_ID currently
+/// supported by Ethereum chains.
+pub const MAX_CHAIN_ID: u64 = 4503599627370476;
 
 /// SubnetID is a unique identifier for a subnet.
 /// It is composed of the chainID of the root network, and the address of
