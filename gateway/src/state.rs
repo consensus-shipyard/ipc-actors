@@ -123,11 +123,14 @@ impl State {
     /// Get content for a child subnet as mut.
     pub fn get_subnet<BS: Blockstore>(
         &mut self,
+        rt: &impl Runtime,
         store: &BS,
         id: &SubnetID,
     ) -> anyhow::Result<Option<Subnet>> {
+        // resolve the underlying f0-based representation of the subnetID
+        let id = from_f2_to_f0_id(rt, id);
         let subnets = self.subnets.load(store)?;
-        let subnet = get_subnet(&subnets, id)?;
+        let subnet = get_subnet(&subnets, &id)?;
         Ok(subnet.cloned())
     }
 
@@ -251,9 +254,9 @@ impl State {
     }
 
     /// commit topdown messages for their execution in the subnet
-    pub(crate) fn commit_topdown_msg<BS: Blockstore>(
+    pub(crate) fn commit_topdown_msg(
         &mut self,
-        store: &BS,
+        rt: &impl Runtime,
         cross_msg: &mut CrossMsg,
     ) -> anyhow::Result<()> {
         let msg = &cross_msg.msg;
@@ -261,7 +264,8 @@ impl State {
 
         let sub = self
             .get_subnet(
-                store,
+                rt,
+                rt.store(),
                 match &sto.down(&self.network_name) {
                     Some(sub) => sub,
                     None => return Err(anyhow!("couldn't compute the next subnet in route")),
@@ -273,10 +277,10 @@ impl State {
         match sub {
             Some(mut sub) => {
                 cross_msg.msg.nonce = sub.topdown_nonce;
-                sub.store_topdown_msg(store, cross_msg)?;
+                sub.store_topdown_msg(rt.store(), cross_msg)?;
                 sub.topdown_nonce += 1;
                 sub.circ_supply += &cross_msg.msg.value;
-                self.flush_subnet(store, &sub)?;
+                self.flush_subnet(rt.store(), &sub)?;
             }
             None => {
                 return Err(anyhow!(
@@ -461,4 +465,17 @@ pub fn get_topdown_msg<'m, BS: Blockstore>(
         .map_err(|e| anyhow!("failed to get msg by nonce: {:?}", e))?
         .map(|c| &c.msg);
     Ok(r)
+}
+
+/// Translate the SubnetID from an f2-based address to its
+/// corresponding f0 address used throughout the actor.
+fn from_f2_to_f0_id(rt: &impl Runtime, sn: &SubnetID) -> SubnetID {
+    let children = sn
+        .children_as_ref()
+        .iter()
+        // FIXME: I guess it is OK if we panic the actor here, but should we handle it more elegantly?
+        .map(|a| rt.resolve_address(a).unwrap())
+        .collect();
+
+    SubnetID::new(sn.root_id(), children)
 }
