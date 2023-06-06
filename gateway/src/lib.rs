@@ -99,7 +99,7 @@ impl Actor {
         let mut shid = SubnetID::default();
         rt.transaction(|st: &mut State, rt| {
             shid = SubnetID::new_from_parent(&st.network_name, subnet_addr);
-            let sub = st.get_subnet(rt, rt.store(), &shid).map_err(|e| {
+            let sub = st.get_subnet(rt, &shid).map_err(|e| {
                 e.downcast_default(ExitCode::USR_ILLEGAL_STATE, "failed to load subnet")
             })?;
             match sub {
@@ -140,7 +140,7 @@ impl Actor {
 
         rt.transaction(|st: &mut State, rt| {
             let shid = SubnetID::new_from_parent(&st.network_name, subnet_addr);
-            let sub = st.get_subnet(rt, rt.store(), &shid).map_err(|e| {
+            let sub = st.get_subnet(rt, &shid).map_err(|e| {
                 e.downcast_default(ExitCode::USR_ILLEGAL_STATE, "failed to load subnet")
             })?;
             match sub {
@@ -184,7 +184,7 @@ impl Actor {
 
         rt.transaction(|st: &mut State, rt| {
             let shid = SubnetID::new_from_parent(&st.network_name, subnet_addr);
-            let sub = st.get_subnet(rt,rt.store(), &shid).map_err(|e| {
+            let sub = st.get_subnet(rt, &shid).map_err(|e| {
                 e.downcast_default(ExitCode::USR_ILLEGAL_STATE, "failed to load subnet")
             })?;
             match sub {
@@ -235,7 +235,7 @@ impl Actor {
 
         rt.transaction(|st: &mut State, rt| {
             let shid = SubnetID::new_from_parent(&st.network_name, subnet_addr);
-            let sub = st.get_subnet(rt,rt.store(), &shid).map_err(|e| {
+            let sub = st.get_subnet(rt, &shid).map_err(|e| {
                 e.downcast_default(ExitCode::USR_ILLEGAL_STATE, "failed to load subnet")
             })?;
             match sub {
@@ -303,7 +303,7 @@ impl Actor {
             st.require_initialized()?;
 
             let shid = SubnetID::new_from_parent(&st.network_name, subnet_addr);
-            let sub = st.get_subnet(rt, rt.store(), &shid).map_err(|e| {
+            let sub = st.get_subnet(rt, &shid).map_err(|e| {
                 e.downcast_default(ExitCode::USR_ILLEGAL_STATE, "failed to load subnet")
             })?;
 
@@ -922,7 +922,7 @@ impl Actor {
                 if sto == st.network_name {
                     rt.transaction(|st: &mut State, rt| {
                         // get applied bottom-up nonce from subnet
-                        match st.get_subnet(rt,rt.store(), forwarder)
+                        match st.get_subnet(rt, forwarder)
                             .map_err(|_| actor_error!(illegal_argument, "error getting subnet from store in bottom-up execution"))?{
                                 Some(mut sub) => {
                                     if sub.applied_bottomup_nonce != cross_msg.msg.nonce {

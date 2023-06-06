@@ -64,11 +64,12 @@ pub struct State {
 /// and have load and save methods automatically generated for them as part of a
 /// StateObject trait (i.e. impl StateObject for State).
 impl State {
-    pub fn new<BS: Blockstore>(
-        store: &BS,
+    pub fn new(
+        rt: &mut impl Runtime,
         params: ConstructParams,
         current_epoch: ChainEpoch,
     ) -> anyhow::Result<State> {
+        let store = rt.store();
         let min_stake = TokenAmount::from_atto(MIN_COLLATERAL_AMOUNT);
         let bottomup_check_period = if params.bottomup_check_period < DEFAULT_CHECKPOINT_PERIOD {
             DEFAULT_CHECKPOINT_PERIOD
@@ -82,7 +83,7 @@ impl State {
         };
         let state = State {
             name: params.name,
-            parent_id: params.parent,
+            parent_id: params.parent.f0_id(rt),
             ipc_gateway_addr: Address::new_id(params.ipc_gateway_addr),
             consensus: params.consensus,
             total_stake: TokenAmount::zero(),

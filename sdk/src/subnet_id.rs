@@ -1,4 +1,5 @@
 use fil_actors_runtime::cbor;
+use fil_actors_runtime::runtime::Runtime;
 use fnv::FnvHasher;
 use fvm_shared::address::Address;
 use lazy_static::lazy_static;
@@ -47,6 +48,20 @@ impl SubnetID {
             root: parent.root_id(),
             children,
         }
+    }
+
+    /// Ensures that the SubnetID only uses f0 addresses in its route.
+    /// When encountering an f2 address, it is translated to its underlying
+    /// f0 address.
+    pub fn f0_id(&self, rt: &impl Runtime) -> SubnetID {
+        let children = self
+            .children_as_ref()
+            .iter()
+            // FIXME: I guess it is OK if we panic the actor here, but should we handle it more elegantly?
+            .map(|a| rt.resolve_address(a).unwrap())
+            .collect();
+
+        SubnetID::new(self.root_id(), children)
     }
 
     /// Creates a new rootnet SubnetID

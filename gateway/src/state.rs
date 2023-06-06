@@ -121,16 +121,14 @@ impl State {
     }
 
     /// Get content for a child subnet as mut.
-    pub fn get_subnet<BS: Blockstore>(
+    pub fn get_subnet(
         &mut self,
         rt: &impl Runtime,
-        store: &BS,
         id: &SubnetID,
     ) -> anyhow::Result<Option<Subnet>> {
         // resolve the underlying f0-based representation of the subnetID
-        let id = from_f2_to_f0_id(rt, id);
-        let subnets = self.subnets.load(store)?;
-        let subnet = get_subnet(&subnets, &id)?;
+        let subnets = self.subnets.load(rt.store())?;
+        let subnet = get_subnet(&subnets, &id.f0_id(rt))?;
         Ok(subnet.cloned())
     }
 
@@ -265,7 +263,6 @@ impl State {
         let sub = self
             .get_subnet(
                 rt,
-                rt.store(),
                 match &sto.down(&self.network_name) {
                     Some(sub) => sub,
                     None => return Err(anyhow!("couldn't compute the next subnet in route")),
@@ -465,17 +462,4 @@ pub fn get_topdown_msg<'m, BS: Blockstore>(
         .map_err(|e| anyhow!("failed to get msg by nonce: {:?}", e))?
         .map(|c| &c.msg);
     Ok(r)
-}
-
-/// Translate the SubnetID from an f2-based address to its
-/// corresponding f0 address used throughout the actor.
-fn from_f2_to_f0_id(rt: &impl Runtime, sn: &SubnetID) -> SubnetID {
-    let children = sn
-        .children_as_ref()
-        .iter()
-        // FIXME: I guess it is OK if we panic the actor here, but should we handle it more elegantly?
-        .map(|a| rt.resolve_address(a).unwrap())
-        .collect();
-
-    SubnetID::new(sn.root_id(), children)
 }

@@ -87,7 +87,7 @@ impl SubnetActor for Actor {
         // useful once we support the docking of subnets to new parents, etc.
         // let genesis_epoch = rt.curr_epoch();
         let genesis_epoch = 0;
-        let st = State::new(rt.store(), params, genesis_epoch).map_err(|e| {
+        let st = State::new(rt, params, genesis_epoch).map_err(|e| {
             e.downcast_default(ExitCode::USR_ILLEGAL_STATE, "Failed to create actor state")
         })?;
 
