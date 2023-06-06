@@ -59,7 +59,7 @@ impl SubnetID {
 
         // replace the resolved child (if any)
         if let Some(actor_addr) = children.last_mut() {
-            if let Some(f0) = rt.resolve_address(&actor_addr) {
+            if let Some(f0) = rt.resolve_address(actor_addr) {
                 *actor_addr = f0;
             }
         }
