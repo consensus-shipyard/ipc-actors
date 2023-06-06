@@ -50,16 +50,19 @@ impl SubnetID {
         }
     }
 
-    /// Ensures that the SubnetID only uses f0 addresses in its route.
-    /// When encountering an f2 address, it is translated to its underlying
-    /// f0 address.
+    /// Ensures that the SubnetID only uses f0 addresses for the subnet actor
+    /// hosted in the current network address. The rest of the route is left
+    /// as-is. We only have information to translate from f2 to f0 for the
+    /// last subnet actor in the root.
     pub fn f0_id(&self, rt: &impl Runtime) -> SubnetID {
-        let children = self
-            .children_as_ref()
-            .iter()
-            // FIXME: I guess it is OK if we panic the actor here, but should we handle it more elegantly?
-            .map(|a| rt.resolve_address(a).unwrap())
-            .collect();
+        let mut children = self.children();
+
+        // replace the resolved child (if any)
+        if let Some(actor_addr) = children.last_mut() {
+            if let Some(f0) = rt.resolve_address(&actor_addr) {
+                *actor_addr = f0;
+            }
+        }
 
         SubnetID::new(self.root_id(), children)
     }

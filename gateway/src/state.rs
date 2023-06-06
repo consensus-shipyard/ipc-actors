@@ -126,7 +126,6 @@ impl State {
         rt: &impl Runtime,
         id: &SubnetID,
     ) -> anyhow::Result<Option<Subnet>> {
-        // resolve the underlying f0-based representation of the subnetID
         let subnets = self.subnets.load(rt.store())?;
         let subnet = get_subnet(&subnets, &id.f0_id(rt))?;
         Ok(subnet.cloned())
