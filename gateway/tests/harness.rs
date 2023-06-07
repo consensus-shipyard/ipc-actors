@@ -29,7 +29,6 @@ use ipc_gateway::{
     StorableMsg, Subnet, SubnetID, TopDownCheckpoint, CROSS_MSG_FEE, DEFAULT_CHECKPOINT_PERIOD,
     MIN_COLLATERAL_AMOUNT, SUBNET_ACTOR_REWARD_METHOD,
 };
-use ipc_sdk::subnet_id::ROOTNET_ID;
 use ipc_sdk::ValidatorSet;
 use lazy_static::lazy_static;
 use primitives::{TCid, TCidContent};
@@ -44,6 +43,7 @@ lazy_static! {
     pub static ref SIG_TYPES: Vec<Cid> = vec![*ACCOUNT_ACTOR_CODE_ID, *MULTISIG_ACTOR_CODE_ID];
     pub static ref DEFAULT_TOPDOWN_PERIOD: ChainEpoch = 20;
     pub static ref DEFAULT_GENESIS_EPOCH: ChainEpoch = 1;
+    pub static ref ROOTNET_ID: SubnetID = SubnetID::new(123, vec![]);
 }
 
 pub fn new_runtime() -> MockRuntime {

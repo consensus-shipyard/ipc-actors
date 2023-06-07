@@ -83,7 +83,10 @@ mod tests {
     use super::*;
     use fvm_ipld_blockstore::MemoryBlockstore;
     use ipc_gateway::{IPCAddress, SubnetID};
-    use ipc_sdk::subnet_id::ROOTNET_ID;
+
+    lazy_static::lazy_static! {
+        static ref ROOTNET_ID: SubnetID = SubnetID::new(123, vec![]);
+    }
 
     #[test]
     fn state_works() {

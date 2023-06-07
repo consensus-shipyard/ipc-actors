@@ -330,7 +330,7 @@ mod tests {
 
     #[test]
     fn test_serialization() {
-        let mut checkpoint = BottomUpCheckpoint::new(SubnetID::from_str("/root").unwrap(), 10);
+        let mut checkpoint = BottomUpCheckpoint::new(SubnetID::from_str("/r123").unwrap(), 10);
         checkpoint.data.prev_check = TCid::from(
             Cid::from_str("bafy2bzacecnamqgqmifpluoeldx7zzglxcljo6oja4vrmtj7432rphldpdmm2")
                 .unwrap(),

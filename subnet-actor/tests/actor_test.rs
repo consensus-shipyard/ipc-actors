@@ -33,13 +33,14 @@ mod test {
     const IPC_GATEWAY_ADDR: u64 = 1024;
     const NETWORK_NAME: &'static str = "test";
     const DEFAULT_GENESIS_EPOCH: ChainEpoch = 0;
+    const ROOT_STR_ID: &str = "/r123";
 
     lazy_static! {
         pub static ref SIG_TYPES: Vec<Cid> = vec![*ACCOUNT_ACTOR_CODE_ID, *MULTISIG_ACTOR_CODE_ID];
     }
     fn std_construct_param() -> ConstructParams {
         ConstructParams {
-            parent: SubnetID::from_str("/root").unwrap(),
+            parent: SubnetID::from_str(ROOT_STR_ID).unwrap(),
             name: NETWORK_NAME.to_string(),
             ipc_gateway_addr: IPC_GATEWAY_ADDR,
             consensus: ConsensusType::Dummy,
@@ -703,7 +704,7 @@ mod test {
         assert_eq!(st.status, Status::Active);
 
         // Generate the check point
-        let root_subnet = SubnetID::from_str("/root").unwrap();
+        let root_subnet = SubnetID::from_str(ROOT_STR_ID).unwrap();
         let subnet = SubnetID::new_from_parent(&root_subnet, test_actor_address);
         // we are targeting the next submission period
         let epoch = DEFAULT_GENESIS_EPOCH + st.bottomup_checkpoint_voting.submission_period;
@@ -854,7 +855,7 @@ mod test {
         let st: State = runtime.get_state();
 
         // Generate the check point
-        let root_subnet = SubnetID::from_str("/root").unwrap();
+        let root_subnet = SubnetID::from_str(ROOT_STR_ID).unwrap();
         let subnet = SubnetID::new_from_parent(&root_subnet, test_actor_address);
         // we are targeting the next submission period
         let epoch = DEFAULT_GENESIS_EPOCH + st.bottomup_checkpoint_voting.submission_period;
@@ -963,7 +964,7 @@ mod test {
             i += 1;
         }
 
-        let root_subnet = SubnetID::from_str("/root").unwrap();
+        let root_subnet = SubnetID::from_str(ROOT_STR_ID).unwrap();
         let subnet = SubnetID::new_from_parent(&root_subnet, test_actor_address);
 
         // Step 2

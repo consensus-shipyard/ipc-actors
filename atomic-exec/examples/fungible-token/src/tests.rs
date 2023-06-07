@@ -14,9 +14,12 @@ use fvm_shared::{address::Address, econ::TokenAmount, error::ExitCode, MethodNum
 use ipc_atomic_execution::AtomicExecID;
 use ipc_atomic_execution_primitives::{AtomicExecRegistry, AtomicInputID};
 use ipc_gateway::{CrossMsg, IPCAddress, StorableMsg, SubnetID};
-use ipc_sdk::subnet_id::ROOTNET_ID;
 use num_traits::Zero;
 use std::collections::HashMap;
+
+lazy_static::lazy_static! {
+    static ref ROOTNET_ID: SubnetID = SubnetID::new(123, vec![]);
+}
 
 #[test]
 fn test_constructor() {

@@ -7,7 +7,6 @@ use fvm_ipld_encoding::{ipld_block::IpldBlock, RawBytes};
 use fvm_shared::{address::Address, econ::TokenAmount, error::ExitCode, MethodNum};
 use ipc_atomic_execution::{Actor, AtomicExecID, ConstructorParams, Method, PreCommitParams};
 use ipc_gateway::{ApplyMsgParams, CrossMsg, IPCAddress, StorableMsg, SubnetID};
-use ipc_sdk::subnet_id::ROOTNET_ID;
 
 #[test]
 fn test_pre_commit_wrong_origin() {
@@ -81,12 +80,12 @@ lazy_static::lazy_static! {
         ipc_gateway_address: *IPC_GATEWAY_ADDR,
     };
 
-    static ref COORD_ACTOR: IPCAddress = IPCAddress::new(&ROOTNET_ID, &Address::new_id(1)).unwrap();
+    pub static ref ROOTNET_ID: SubnetID = SubnetID::new(123, vec![]);
 
+    static ref COORD_ACTOR: IPCAddress = IPCAddress::new(&ROOTNET_ID, &Address::new_id(1)).unwrap();
     static ref SUBNET_A: SubnetID = SubnetID::new_from_parent(&ROOTNET_ID, Address::new_id('A' as u64));
     static ref ACTOR_A1: IPCAddress = IPCAddress::new(&SUBNET_A, &Address::new_id(1)).unwrap();
     static ref ACTOR_A2: IPCAddress = IPCAddress::new(&SUBNET_A, &Address::new_id(2)).unwrap();
-
     static ref SUBNET_B: SubnetID = SubnetID::new_from_parent(&ROOTNET_ID, Address::new_id('B' as u64));
     static ref ACTOR_B1: IPCAddress = IPCAddress::new(&SUBNET_B, &Address::new_id(1)).unwrap();
     static ref ACTOR_B2: IPCAddress = IPCAddress::new(&SUBNET_B, &Address::new_id(2)).unwrap();
