@@ -1,4 +1,5 @@
 use fil_actors_runtime::cbor;
+use fil_actors_runtime::runtime::Runtime;
 use fnv::FnvHasher;
 use fvm_shared::address::Address;
 use lazy_static::lazy_static;
@@ -47,6 +48,23 @@ impl SubnetID {
             root: parent.root_id(),
             children,
         }
+    }
+
+    /// Ensures that the SubnetID only uses f0 addresses for the subnet actor
+    /// hosted in the current network. The rest of the route is left
+    /// as-is. We only have information to translate from f2 to f0 for the
+    /// last subnet actor in the root.
+    pub fn f0_id(&self, rt: &impl Runtime) -> SubnetID {
+        let mut children = self.children();
+
+        // replace the resolved child (if any)
+        if let Some(actor_addr) = children.last_mut() {
+            if let Some(f0) = rt.resolve_address(actor_addr) {
+                *actor_addr = f0;
+            }
+        }
+
+        SubnetID::new(self.root_id(), children)
     }
 
     /// Creates a new rootnet SubnetID

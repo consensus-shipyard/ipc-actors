@@ -99,7 +99,7 @@ impl Actor {
         let mut shid = SubnetID::default();
         rt.transaction(|st: &mut State, rt| {
             shid = SubnetID::new_from_parent(&st.network_name, subnet_addr);
-            let sub = st.get_subnet(rt.store(), &shid).map_err(|e| {
+            let sub = st.get_subnet(rt, &shid).map_err(|e| {
                 e.downcast_default(ExitCode::USR_ILLEGAL_STATE, "failed to load subnet")
             })?;
             match sub {
@@ -140,7 +140,7 @@ impl Actor {
 
         rt.transaction(|st: &mut State, rt| {
             let shid = SubnetID::new_from_parent(&st.network_name, subnet_addr);
-            let sub = st.get_subnet(rt.store(), &shid).map_err(|e| {
+            let sub = st.get_subnet(rt, &shid).map_err(|e| {
                 e.downcast_default(ExitCode::USR_ILLEGAL_STATE, "failed to load subnet")
             })?;
             match sub {
@@ -184,7 +184,7 @@ impl Actor {
 
         rt.transaction(|st: &mut State, rt| {
             let shid = SubnetID::new_from_parent(&st.network_name, subnet_addr);
-            let sub = st.get_subnet(rt.store(), &shid).map_err(|e| {
+            let sub = st.get_subnet(rt, &shid).map_err(|e| {
                 e.downcast_default(ExitCode::USR_ILLEGAL_STATE, "failed to load subnet")
             })?;
             match sub {
@@ -235,7 +235,7 @@ impl Actor {
 
         rt.transaction(|st: &mut State, rt| {
             let shid = SubnetID::new_from_parent(&st.network_name, subnet_addr);
-            let sub = st.get_subnet(rt.store(), &shid).map_err(|e| {
+            let sub = st.get_subnet(rt, &shid).map_err(|e| {
                 e.downcast_default(ExitCode::USR_ILLEGAL_STATE, "failed to load subnet")
             })?;
             match sub {
@@ -303,7 +303,7 @@ impl Actor {
             st.require_initialized()?;
 
             let shid = SubnetID::new_from_parent(&st.network_name, subnet_addr);
-            let sub = st.get_subnet(rt.store(), &shid).map_err(|e| {
+            let sub = st.get_subnet(rt, &shid).map_err(|e| {
                 e.downcast_default(ExitCode::USR_ILLEGAL_STATE, "failed to load subnet")
             })?;
 
@@ -436,7 +436,7 @@ impl Actor {
             log::debug!("fund cross msg is: {:?}", f_msg);
 
             // Commit top-down message.
-            st.commit_topdown_msg(rt.store(), &mut f_msg).map_err(|e| {
+            st.commit_topdown_msg(rt, &mut f_msg).map_err(|e| {
                 e.downcast_default(
                     ExitCode::USR_ILLEGAL_STATE,
                     "error committing top-down message",
@@ -838,7 +838,7 @@ impl Actor {
                 // then we need to start propagating it down to the destination.
                 let r = if nearest_common_parent == st.network_name {
                     top_down_fee = fee;
-                    st.commit_topdown_msg(rt.store(), cross_msg)
+                    st.commit_topdown_msg(rt, cross_msg)
                 } else {
                     if cross_msg.msg.value > TokenAmount::zero() {
                         do_burn = true;
@@ -857,7 +857,7 @@ impl Actor {
             }
             IPCMsgType::TopDown => {
                 st.applied_topdown_nonce += 1;
-                st.commit_topdown_msg(rt.store(), cross_msg).map_err(|e| {
+                st.commit_topdown_msg(rt, cross_msg).map_err(|e| {
                     e.downcast_default(
                         ExitCode::USR_ILLEGAL_STATE,
                         "error committing top-down message while applying it",
@@ -922,7 +922,7 @@ impl Actor {
                 if sto == st.network_name {
                     rt.transaction(|st: &mut State, rt| {
                         // get applied bottom-up nonce from subnet
-                        match st.get_subnet(rt.store(), forwarder)
+                        match st.get_subnet(rt, forwarder)
                             .map_err(|_| actor_error!(illegal_argument, "error getting subnet from store in bottom-up execution"))?{
                                 Some(mut sub) => {
                                     if sub.applied_bottomup_nonce != cross_msg.msg.nonce {
