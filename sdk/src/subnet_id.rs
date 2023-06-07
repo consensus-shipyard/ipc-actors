@@ -51,7 +51,7 @@ impl SubnetID {
     }
 
     /// Ensures that the SubnetID only uses f0 addresses for the subnet actor
-    /// hosted in the current network address. The rest of the route is left
+    /// hosted in the current network. The rest of the route is left
     /// as-is. We only have information to translate from f2 to f0 for the
     /// last subnet actor in the root.
     pub fn f0_id(&self, rt: &impl Runtime) -> SubnetID {
