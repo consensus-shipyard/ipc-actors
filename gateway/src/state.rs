@@ -121,13 +121,13 @@ impl State {
     }
 
     /// Get content for a child subnet as mut.
-    pub fn get_subnet<BS: Blockstore>(
+    pub fn get_subnet(
         &mut self,
-        store: &BS,
+        rt: &impl Runtime,
         id: &SubnetID,
     ) -> anyhow::Result<Option<Subnet>> {
-        let subnets = self.subnets.load(store)?;
-        let subnet = get_subnet(&subnets, id)?;
+        let subnets = self.subnets.load(rt.store())?;
+        let subnet = get_subnet(&subnets, &id.f0_id(rt))?;
         Ok(subnet.cloned())
     }
 
@@ -251,9 +251,9 @@ impl State {
     }
 
     /// commit topdown messages for their execution in the subnet
-    pub(crate) fn commit_topdown_msg<BS: Blockstore>(
+    pub(crate) fn commit_topdown_msg(
         &mut self,
-        store: &BS,
+        rt: &impl Runtime,
         cross_msg: &mut CrossMsg,
     ) -> anyhow::Result<()> {
         let msg = &cross_msg.msg;
@@ -261,7 +261,7 @@ impl State {
 
         let sub = self
             .get_subnet(
-                store,
+                rt,
                 match &sto.down(&self.network_name) {
                     Some(sub) => sub,
                     None => return Err(anyhow!("couldn't compute the next subnet in route")),
@@ -273,10 +273,10 @@ impl State {
         match sub {
             Some(mut sub) => {
                 cross_msg.msg.nonce = sub.topdown_nonce;
-                sub.store_topdown_msg(store, cross_msg)?;
+                sub.store_topdown_msg(rt.store(), cross_msg)?;
                 sub.topdown_nonce += 1;
                 sub.circ_supply += &cross_msg.msg.value;
-                self.flush_subnet(store, &sub)?;
+                self.flush_subnet(rt.store(), &sub)?;
             }
             None => {
                 return Err(anyhow!(
