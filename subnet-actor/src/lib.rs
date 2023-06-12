@@ -266,6 +266,11 @@ impl SubnetActor for Actor {
             return Err(actor_error!(illegal_state, "not validator"));
         }
 
+        // always translate to f0-based SubnetID
+        let mut ch = ch;
+        ch.enforce_f0_source(rt)
+            .map_err(|_| actor_error!(illegal_argument, "cannot translate source subnetID"))?;
+
         state
             .verify_checkpoint(rt, &ch)
             .map_err(|e| actor_error!(illegal_state, format!("checkpoint failed: {}", e)))?;

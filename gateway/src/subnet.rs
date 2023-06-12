@@ -47,6 +47,8 @@ impl Subnet {
         self.stake += value;
         if self.stake < st.min_stake {
             self.status = Status::Inactive;
+        } else {
+            self.status = Status::Active;
         }
         st.flush_subnet(rt.store(), self)?;
         Ok(())

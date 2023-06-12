@@ -208,6 +208,11 @@ fn release_stake() {
         ExitCode::USR_ILLEGAL_STATE,
     )
     .unwrap();
+
+    // Add some stake to see if we activate again
+    h.add_stake(&mut rt, &shid, &value, ExitCode::OK).unwrap();
+    let subnet = h.get_subnet(&rt, &shid).unwrap();
+    assert_eq!(subnet.status, Active);
 }
 
 #[test]
