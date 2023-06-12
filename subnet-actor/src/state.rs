@@ -84,7 +84,7 @@ impl State {
         let state = State {
             name: params.name,
             parent_id: params.parent.f0_id(rt),
-            ipc_gateway_addr: Address::new_id(params.ipc_gateway_addr),
+            ipc_gateway_addr: params.ipc_gateway_addr,
             consensus: params.consensus,
             total_stake: TokenAmount::zero(),
             min_validator_stake: if params.min_validator_stake < min_stake {
