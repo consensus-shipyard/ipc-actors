@@ -267,7 +267,7 @@ impl SubnetActor for Actor {
         }
 
         // always translate to f0-based SubnetID
-        let mut ch = ch.clone();
+        let mut ch = ch;
         ch.enforce_f0_source(rt)
             .map_err(|_| actor_error!(illegal_argument, "cannot translate source subnetID"))?;
 
