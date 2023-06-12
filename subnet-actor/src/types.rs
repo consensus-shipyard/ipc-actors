@@ -111,7 +111,7 @@ pub enum Status {
 pub struct ConstructParams {
     pub parent: SubnetID,
     pub name: String,
-    pub ipc_gateway_addr: u64,
+    pub ipc_gateway_addr: Address,
     pub consensus: ConsensusType,
     pub min_validator_stake: TokenAmount,
     pub min_validators: u64,

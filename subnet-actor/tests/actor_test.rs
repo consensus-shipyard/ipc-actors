@@ -42,7 +42,7 @@ mod test {
         ConstructParams {
             parent: SubnetID::from_str(ROOT_STR_ID).unwrap(),
             name: NETWORK_NAME.to_string(),
-            ipc_gateway_addr: IPC_GATEWAY_ADDR,
+            ipc_gateway_addr: Address::new_id(IPC_GATEWAY_ADDR),
             consensus: ConsensusType::Dummy,
             min_validator_stake: Default::default(),
             min_validators: 0,
