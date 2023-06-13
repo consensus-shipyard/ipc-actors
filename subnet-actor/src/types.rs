@@ -89,12 +89,7 @@ pub struct Votes {
 #[derive(PartialEq, Eq, Clone, Copy, Debug, Deserialize_repr, Serialize_repr)]
 #[repr(u64)]
 pub enum ConsensusType {
-    Delegated,
-    PoW,
-    Tendermint,
     Mir,
-    FilecoinEC,
-    Dummy,
 }
 
 #[derive(PartialEq, Eq, Clone, Copy, Debug, Deserialize_repr, Serialize_repr)]

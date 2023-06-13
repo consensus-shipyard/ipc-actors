@@ -43,7 +43,7 @@ mod test {
             parent: SubnetID::from_str(ROOT_STR_ID).unwrap(),
             name: NETWORK_NAME.to_string(),
             ipc_gateway_addr: Address::new_id(IPC_GATEWAY_ADDR),
-            consensus: ConsensusType::Dummy,
+            consensus: ConsensusType::Mir,
             min_validator_stake: Default::default(),
             min_validators: 0,
             topdown_check_period: 0,
