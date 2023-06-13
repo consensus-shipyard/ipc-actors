@@ -154,8 +154,6 @@ impl State {
                     .validators()
                     .iter()
                     .any(|x| x.addr == *addr)
-                    && (self.consensus != ConsensusType::Delegated
-                        || self.validator_set.validators().is_empty())
                 {
                     self.validator_set.push(Validator {
                         addr: *addr,
@@ -344,7 +342,7 @@ impl Default for State {
             name: String::new(),
             parent_id: SubnetID::default(),
             ipc_gateway_addr: Address::new_id(0),
-            consensus: ConsensusType::Delegated,
+            consensus: ConsensusType::Mir,
             min_validator_stake: TokenAmount::from_atto(MIN_COLLATERAL_AMOUNT),
             total_stake: TokenAmount::zero(),
             bottomup_check_period: 0,
