@@ -330,7 +330,7 @@ impl Actor {
                     // if this is not the first checkpoint we need to perform some
                     // additional verifications.
                     if let Some(ref prev_checkpoint) = sub.prev_checkpoint {
-                        if prev_checkpoint.epoch() > commit.epoch() {
+                        if prev_checkpoint.epoch() >= commit.epoch() {
                             return Err(actor_error!(
                                 illegal_argument,
                                 "checkpoint being committed belongs to the past"

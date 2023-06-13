@@ -10,7 +10,7 @@ use fvm_shared::econ::TokenAmount;
 use fvm_shared::error::ExitCode;
 use fvm_shared::METHOD_SEND;
 use ipc_actor_common::vote::{EpochVoteSubmissions, UniqueVote};
-use ipc_gateway::checkpoint::{window_epoch, BatchCrossMsgs};
+use ipc_gateway::checkpoint::{window_epoch, BatchCrossMsgs, ChildCheck};
 use ipc_gateway::Status::{Active, Inactive};
 use ipc_gateway::{
     get_topdown_msg, BottomUpCheckpoint, CrossMsg, IPCAddress, PostBoxItem, State, StorableMsg,
@@ -281,6 +281,15 @@ fn checkpoint_commit() {
     // check that the checkpoint was committed successfully in the subnet as previous checkpoint.
     let subnet = h.get_subnet(&rt, &shid).unwrap();
     assert_eq!(subnet.prev_checkpoint.unwrap(), ch);
+
+    // Commit a different checkpoint for the same epoch shouldn't be allowed
+    let mut other_ch = BottomUpCheckpoint::new(shid.clone(), epoch + 9);
+    other_ch.data.children.push(ChildCheck {
+        source: shid.clone(),
+        checks: vec![ch.cid().into()],
+    });
+    h.commit_child_check(&mut rt, &shid, &ch, ExitCode::USR_ILLEGAL_ARGUMENT)
+        .unwrap();
 
     // Commit a checkpoint for subnet twice
     h.commit_child_check(&mut rt, &shid, &ch, ExitCode::USR_ILLEGAL_ARGUMENT)
