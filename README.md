@@ -1,5 +1,7 @@
 # IPC Actors
 
+**‼️ The IPC Agent, the IPC actors, and eudico haven't been audited, tested in depth, or otherwise verified. Moreover, the system is missing critical recovery functionality in case of crashes. There are multiple ways in which you may lose funds moved into an IPC subnet, and we strongly advise against deploying IPC on mainnet and/or using it with tokens with real value.**
+
 This repository includes the reference implementation of all the actors responsible for the operation of the IPC (InterPlanerary Consensus) protocol. These actors are written in Rust to be compiled in web assembly, and they target the FVM. This project is conformed by the following crates:
 - `gateway`: Implementation of the IPC gateway.
 - `subnet-actor`: Reference implementation of an IPC subnet actor.
