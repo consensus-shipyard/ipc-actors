@@ -14,7 +14,7 @@ use fvm_ipld_encoding::RawBytes;
 use fvm_shared::econ::TokenAmount;
 use fvm_shared::error::ExitCode;
 use fvm_shared::{MethodNum, METHOD_CONSTRUCTOR, METHOD_SEND};
-use ipc_gateway::{BottomUpCheckpoint, FundParams, MIN_COLLATERAL_AMOUNT};
+use ipc_gateway::{AmountParams, BottomUpCheckpoint, MIN_COLLATERAL_AMOUNT};
 use num::BigInt;
 use num_derive::FromPrimitive;
 use num_traits::{FromPrimitive, Zero};
@@ -171,7 +171,7 @@ impl SubnetActor for Actor {
                 msg = Some(CrossActorPayload::new(
                     st.ipc_gateway_addr,
                     ipc_gateway::Method::ReleaseStake as u64,
-                    IpldBlock::serialize_cbor(&FundParams {
+                    IpldBlock::serialize_cbor(&AmountParams {
                         value: stake.clone(),
                     })?,
                     TokenAmount::zero(),

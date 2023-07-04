@@ -14,7 +14,7 @@ use fil_actors_runtime::{
 };
 use fvm_ipld_encoding::ipld_block::IpldBlock;
 use fvm_ipld_encoding::RawBytes;
-use fvm_shared::address::Address;
+use fvm_shared::address::{Address, Protocol};
 use fvm_shared::bigint::bigint_ser::BigIntDe;
 use fvm_shared::bigint::Zero;
 use fvm_shared::clock::ChainEpoch;
@@ -24,10 +24,10 @@ use fvm_shared::MethodNum;
 use fvm_shared::METHOD_SEND;
 use ipc_gateway::checkpoint::ChildCheck;
 use ipc_gateway::{
-    get_topdown_msg, is_bottomup, Actor, BottomUpCheckpoint, ConstructorParams, CrossMsg,
-    CrossMsgParams, FundParams, IPCAddress, InitGenesisEpoch, Method, PropagateParams, State,
-    StorableMsg, Subnet, SubnetID, TopDownCheckpoint, CROSS_MSG_FEE, DEFAULT_CHECKPOINT_PERIOD,
-    MIN_COLLATERAL_AMOUNT, SUBNET_ACTOR_REWARD_METHOD,
+    get_topdown_msg, is_bottomup, Actor, AmountParams, BottomUpCheckpoint, ConstructorParams,
+    CrossMsg, CrossMsgParams, FundParams, IPCAddress, InitGenesisEpoch, Method, PropagateParams,
+    ReleaseParams, State, StorableMsg, Subnet, SubnetID, TopDownCheckpoint, CROSS_MSG_FEE,
+    DEFAULT_CHECKPOINT_PERIOD, MIN_COLLATERAL_AMOUNT, SUBNET_ACTOR_REWARD_METHOD,
 };
 use ipc_sdk::ValidatorSet;
 use lazy_static::lazy_static;
@@ -201,7 +201,7 @@ impl Harness {
         rt.set_caller(*SUBNET_ACTOR_CODE_ID, id.subnet_actor());
         rt.expect_validate_caller_any();
 
-        let params = FundParams {
+        let params = AmountParams {
             value: value.clone(),
         };
 
@@ -300,6 +300,7 @@ impl Harness {
         &self,
         rt: &mut MockRuntime,
         funder: &Address,
+        to: &Address,
         id: &SubnetID,
         code: ExitCode,
         value: TokenAmount,
@@ -312,26 +313,42 @@ impl Harness {
         // set value and include the cross_msg_fee
         set_rt_value_with_cross_fee(rt, &value);
 
+        let params = FundParams {
+            subnet: id.clone(),
+            to: to.clone(),
+        };
+
         if code != ExitCode::OK {
             expect_abort(
                 code,
                 rt.call::<Actor>(
                     Method::Fund as MethodNum,
-                    IpldBlock::serialize_cbor(&id).unwrap(),
+                    IpldBlock::serialize_cbor(&params).unwrap(),
                 ),
             );
             rt.verify();
             return Ok(());
         }
-
-        rt.expect_send(
-            *funder,
-            PUBLIC_RESOLVE_ADDRESS_METHOD,
-            None,
-            TokenAmount::zero(),
-            IpldBlock::serialize_cbor(&*TEST_BLS).unwrap(),
-            ExitCode::OK,
-        );
+        if to.protocol() == Protocol::ID {
+            rt.expect_send(
+                *to,
+                PUBLIC_RESOLVE_ADDRESS_METHOD,
+                None,
+                TokenAmount::zero(),
+                IpldBlock::serialize_cbor(&*TEST_BLS).unwrap(),
+                ExitCode::OK,
+            );
+        }
+        if funder.protocol() == Protocol::ID && funder != to {
+            rt.expect_send(
+                *funder,
+                PUBLIC_RESOLVE_ADDRESS_METHOD,
+                None,
+                TokenAmount::zero(),
+                IpldBlock::serialize_cbor(&*TEST_BLS).unwrap(),
+                ExitCode::OK,
+            );
+        }
         rt.expect_send(
             id.subnet_actor(),
             SUBNET_ACTOR_REWARD_METHOD,
@@ -342,7 +359,7 @@ impl Harness {
         );
         rt.call::<Actor>(
             Method::Fund as MethodNum,
-            IpldBlock::serialize_cbor(&id).unwrap(),
+            IpldBlock::serialize_cbor(&params).unwrap(),
         )
         .unwrap();
         rt.verify();
@@ -354,10 +371,16 @@ impl Harness {
             .unwrap();
         assert_eq!(&sub.circ_supply, expected_circ_sup);
         assert_eq!(sub.topdown_nonce, expected_nonce);
-        let from = IPCAddress::new(&self.net_name, &*TEST_BLS).unwrap();
-        let to = IPCAddress::new(&id, &TEST_BLS).unwrap();
+        let mut from = IPCAddress::new(&self.net_name, &funder).unwrap();
+        if funder.protocol() == Protocol::ID {
+            from = IPCAddress::new(&self.net_name, &*TEST_BLS).unwrap();
+        }
+        let mut comp_to = IPCAddress::new(&id, &to).unwrap();
+        if to.protocol() == Protocol::ID {
+            comp_to = IPCAddress::new(&id, &TEST_BLS).unwrap();
+        }
         assert_eq!(msg.from, from);
-        assert_eq!(msg.to, to);
+        assert_eq!(msg.to, comp_to);
         assert_eq!(msg.nonce, expected_nonce - 1);
         assert_eq!(msg.value, value);
 
@@ -368,6 +391,7 @@ impl Harness {
         &self,
         rt: &mut MockRuntime,
         releaser: &Address,
+        to: &Address,
         code: ExitCode,
         value: TokenAmount,
         epoch: ChainEpoch,
@@ -381,20 +405,40 @@ impl Harness {
 
         rt.set_epoch(epoch);
 
+        let params = ReleaseParams { to: to.clone() };
+
         if code != ExitCode::OK {
-            expect_abort(code, rt.call::<Actor>(Method::Release as MethodNum, None));
+            expect_abort(
+                code,
+                rt.call::<Actor>(
+                    Method::Release as MethodNum,
+                    IpldBlock::serialize_cbor(&params).unwrap(),
+                ),
+            );
             rt.verify();
             return Ok(Cid::default());
         }
 
-        rt.expect_send(
-            *releaser,
-            PUBLIC_RESOLVE_ADDRESS_METHOD,
-            None,
-            TokenAmount::zero(),
-            IpldBlock::serialize_cbor(&*TEST_BLS).unwrap(),
-            ExitCode::OK,
-        );
+        if to.protocol() == Protocol::ID {
+            rt.expect_send(
+                *to,
+                PUBLIC_RESOLVE_ADDRESS_METHOD,
+                None,
+                TokenAmount::zero(),
+                IpldBlock::serialize_cbor(&*TEST_BLS).unwrap(),
+                ExitCode::OK,
+            );
+        }
+        if releaser.protocol() == Protocol::ID && releaser != to {
+            rt.expect_send(
+                *releaser,
+                PUBLIC_RESOLVE_ADDRESS_METHOD,
+                None,
+                TokenAmount::zero(),
+                IpldBlock::serialize_cbor(&*TEST_BLS).unwrap(),
+                ExitCode::OK,
+            );
+        }
         rt.expect_send(
             BURNT_FUNDS_ACTOR_ADDR,
             METHOD_SEND,
@@ -403,23 +447,33 @@ impl Harness {
             None,
             ExitCode::OK,
         );
-        rt.call::<Actor>(Method::Release as MethodNum, None)
-            .unwrap();
+        rt.call::<Actor>(
+            Method::Release as MethodNum,
+            IpldBlock::serialize_cbor(&params).unwrap(),
+        )
+        .unwrap();
         rt.verify();
 
         let st: State = rt.get_state();
 
         let parent = &self.net_name.parent().unwrap();
-        let from = IPCAddress::new(&self.net_name, &BURNT_FUNDS_ACTOR_ADDR).unwrap();
-        let to = IPCAddress::new(&parent, &TEST_BLS).unwrap();
         let ch = st.get_window_checkpoint(rt.store(), epoch).unwrap();
         // check that is included in the next checkpoint to be committed and not
         // in a checkpoint template of the past
         assert_eq!(ch.data.epoch > epoch, true);
 
         let msg = ch.data.cross_msgs.cross_msgs.unwrap()[expected_msg_index].clone();
+
+        let mut from = IPCAddress::new(&self.net_name, &releaser).unwrap();
+        if releaser.protocol() == Protocol::ID {
+            from = IPCAddress::new(&self.net_name, &*TEST_BLS).unwrap();
+        }
+        let mut comp_to = IPCAddress::new(&parent, &to).unwrap();
+        if to.protocol() == Protocol::ID {
+            comp_to = IPCAddress::new(&parent, &TEST_BLS).unwrap();
+        }
         assert_eq!(msg.msg.from, from);
-        assert_eq!(msg.msg.to, to);
+        assert_eq!(msg.msg.to, comp_to);
         assert_eq!(msg.msg.nonce, expected_nonce);
         assert_eq!(msg.msg.value, value);
 

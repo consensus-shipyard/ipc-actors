@@ -2,7 +2,7 @@ use crate::error::Error;
 use crate::subnet_id::SubnetID;
 use fil_actors_runtime::cbor;
 use fvm_ipld_encoding::RawBytes;
-use fvm_shared::address::Address;
+use fvm_shared::address::{Address, Protocol};
 use serde_tuple::{Deserialize_tuple, Serialize_tuple};
 use std::str::FromStr;
 
@@ -48,6 +48,28 @@ impl IPCAddress {
             "{}{}{}",
             self.subnet_id, IPC_SEPARATOR_ADDR, self.raw_address
         ))
+    }
+
+    /// Checks if a raw address has a valid Filecoin address protocol
+    /// compatible with cross-net messages targetting a contract
+    pub fn is_valid_contract_address(addr: &Address) -> bool {
+        match addr.protocol() {
+            Protocol::Delegated | Protocol::Actor => true,
+            _ => false,
+        }
+    }
+
+    /// Checks if a raw address has a valid Filecoin address protocol
+    /// compatible with cross-net messages targetting a user account
+    pub fn is_valid_account_address(addr: &Address) -> bool {
+        match addr.protocol() {
+            // we support `Delegated` as a type for a valid account address
+            // so we can send funds to eth addresses using cross-net primitives.
+            // this may require additional care when executing in FEVM so we don't
+            // send funds to a smart contract.
+            Protocol::Delegated | Protocol::BLS | Protocol::Secp256k1 | Protocol::ID => true,
+            _ => false,
+        }
     }
 }
 

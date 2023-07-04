@@ -9,7 +9,6 @@ pub use self::subnet::*;
 pub use self::types::*;
 pub use checkpoint::TopDownCheckpoint;
 use cross::{burn_bu_funds, cross_msg_side_effects, distribute_crossmsg_fee};
-use fil_actors_runtime::runtime::fvm::resolve_secp_bls;
 use fil_actors_runtime::runtime::{ActorCode, Runtime};
 use fil_actors_runtime::{
     actor_dispatch, actor_error, restrict_internal_api, ActorDowncast, ActorError,
@@ -168,7 +167,7 @@ impl Actor {
     }
 
     /// Release stake recovers some collateral of the subnet
-    fn release_stake(rt: &mut impl Runtime, params: FundParams) -> Result<(), ActorError> {
+    fn release_stake(rt: &mut impl Runtime, params: AmountParams) -> Result<(), ActorError> {
         rt.validate_immediate_caller_accept_any()?;
 
         let subnet_addr = rt.message().caller();
@@ -405,7 +404,7 @@ impl Actor {
     /// - A new fund cross-message is created and stored to propagate it to the subnet. It will be
     /// picked up by miners to include it in the next possible block.
     /// - The cross-message nonce is updated.
-    fn fund(rt: &mut impl Runtime, params: SubnetID) -> Result<(), ActorError> {
+    fn fund(rt: &mut impl Runtime, params: FundParams) -> Result<(), ActorError> {
         // funds can only be moved between subnets by signable addresses
         rt.validate_immediate_caller_type(CALLER_TYPES_SIGNABLE.iter())?;
 
@@ -417,19 +416,29 @@ impl Actor {
             ));
         }
 
-        let sig_addr = resolve_secp_bls(rt, &rt.message().caller())?;
+        if !IPCAddress::is_valid_account_address(&params.to) {
+            return Err(actor_error!(
+                illegal_argument,
+                "invalid account address in fund message"
+            ));
+        };
+
+        let sub_id = params.subnet;
+        let (from_sig_addr, to_sig_addr) =
+            resolved_from_to(rt, &rt.message().caller(), &params.to)?;
 
         let fee = CROSS_MSG_FEE.clone();
         rt.transaction(|st: &mut State, rt| {
             st.collect_cross_fee(&mut value, &fee)?;
             // Create fund message
             let mut f_msg = CrossMsg {
-                msg: StorableMsg::new_fund_msg(&params, &sig_addr, value).map_err(|e| {
-                    e.downcast_default(
-                        ExitCode::USR_ILLEGAL_STATE,
-                        "error creating fund cross-message",
-                    )
-                })?,
+                msg: StorableMsg::new_fund_msg(&sub_id, &from_sig_addr, &to_sig_addr, value)
+                    .map_err(|e| {
+                        e.downcast_default(
+                            ExitCode::USR_ILLEGAL_STATE,
+                            "error creating fund cross-message",
+                        )
+                    })?,
                 wrapped: false,
             };
 
@@ -446,7 +455,7 @@ impl Actor {
         })?;
 
         // distribute top-down message fee to validators.
-        distribute_crossmsg_fee(rt, &params.subnet_actor(), fee)
+        distribute_crossmsg_fee(rt, &sub_id.subnet_actor(), fee)
     }
 
     /// Release creates a new check message to release funds in parent chain
@@ -454,7 +463,7 @@ impl Actor {
     /// This function burns the funds that will be released in the current subnet
     /// and propagates a new checkpoint message to the parent chain to signal
     /// the amount of funds that can be released for a specific address.
-    fn release(rt: &mut impl Runtime) -> Result<(), ActorError> {
+    fn release(rt: &mut impl Runtime, params: ReleaseParams) -> Result<(), ActorError> {
         // funds can only be moved between subnets by signable addresses
         rt.validate_immediate_caller_type(CALLER_TYPES_SIGNABLE.iter())?;
 
@@ -466,7 +475,15 @@ impl Actor {
             ));
         }
 
-        let sig_addr = resolve_secp_bls(rt, &rt.message().caller())?;
+        if !IPCAddress::is_valid_account_address(&params.to) {
+            return Err(actor_error!(
+                illegal_argument,
+                "invalid account address in fund message"
+            ));
+        };
+
+        let (from_sig_addr, to_sig_addr) =
+            resolved_from_to(rt, &rt.message().caller(), &params.to)?;
 
         rt.transaction(|st: &mut State, rt| {
             let fee = &CROSS_MSG_FEE;
@@ -475,13 +492,18 @@ impl Actor {
 
             // Create release message
             let r_msg = CrossMsg {
-                msg: StorableMsg::new_release_msg(&st.network_name, &sig_addr, value.clone())
-                    .map_err(|e| {
-                        e.downcast_default(
-                            ExitCode::USR_ILLEGAL_STATE,
-                            "error creating release cross-message",
-                        )
-                    })?,
+                msg: StorableMsg::new_release_msg(
+                    &st.network_name,
+                    &from_sig_addr,
+                    &to_sig_addr,
+                    value.clone(),
+                )
+                .map_err(|e| {
+                    e.downcast_default(
+                        ExitCode::USR_ILLEGAL_STATE,
+                        "error creating release cross-message",
+                    )
+                })?,
                 wrapped: false,
             };
 

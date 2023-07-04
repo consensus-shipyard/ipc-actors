@@ -1,10 +1,12 @@
 use anyhow::anyhow;
 use cid::multihash::Code;
 use cid::{multihash, Cid};
+use fil_actors_runtime::runtime::fvm::{equal_account_id, resolve_secp_bls};
+use fil_actors_runtime::runtime::Runtime;
 use fil_actors_runtime::{cbor, ActorError, Array};
 use fvm_ipld_encoding::tuple::{Deserialize_tuple, Serialize_tuple};
 use fvm_ipld_encoding::{RawBytes, DAG_CBOR};
-use fvm_shared::address::Address;
+use fvm_shared::address::{Address, Protocol};
 use fvm_shared::clock::ChainEpoch;
 use fvm_shared::econ::TokenAmount;
 use ipc_sdk::subnet_id::SubnetID;
@@ -39,8 +41,19 @@ pub struct ConstructorParams {
 }
 
 #[derive(Serialize_tuple, Deserialize_tuple, Clone)]
-pub struct FundParams {
+pub struct AmountParams {
     pub value: TokenAmount,
+}
+
+#[derive(Serialize_tuple, Deserialize_tuple, Clone)]
+pub struct FundParams {
+    pub subnet: SubnetID,
+    pub to: Address,
+}
+
+#[derive(Serialize_tuple, Deserialize_tuple, Clone)]
+pub struct ReleaseParams {
+    pub to: Address,
 }
 
 #[derive(Serialize_tuple, Deserialize_tuple, Clone)]
@@ -85,6 +98,37 @@ impl CodeType for PostBoxItem {
     fn code() -> Code {
         Code::Blake2b256
     }
+}
+
+/// Resolves the from and to to the higher-level cross-net
+/// ammenable address
+pub(crate) fn resolved_from_to(
+    rt: &mut impl Runtime,
+    from: &Address,
+    to: &Address,
+) -> Result<(Address, Address), ActorError> {
+    let mut from_sig_addr = from.clone();
+    let mut to_sig_addr = to.clone();
+    let mut resolved = false;
+
+    if to.protocol() != Protocol::Delegated {
+        to_sig_addr = resolve_secp_bls(rt, &to_sig_addr)?;
+        resolved = true;
+    }
+
+    // Check if they are equal to save ourselves a resolution
+    if resolved {
+        if !equal_account_id(rt, &from_sig_addr, &to)? {
+            from_sig_addr = resolve_secp_bls(rt, &from_sig_addr)?;
+        } else {
+            from_sig_addr = to_sig_addr;
+        }
+    } else {
+        if from.protocol() != Protocol::Delegated {
+            from_sig_addr = resolve_secp_bls(rt, &from_sig_addr)?;
+        }
+    }
+    Ok((from_sig_addr, to_sig_addr))
 }
 
 const POSTBOX_ITEM_DESCRIPTION: &str = "postbox";

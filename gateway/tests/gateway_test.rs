@@ -373,6 +373,7 @@ fn checkpoint_crossmsgs() {
     h.fund(
         &mut rt,
         &funder,
+        &funder,
         &shid,
         ExitCode::OK,
         amount.clone(),
@@ -439,10 +440,12 @@ fn test_fund() {
     h.check_state();
 
     let funder = Address::new_id(1001);
+    let other = Address::new_id(1002);
     let amount = TokenAmount::from_atto(10_u64.pow(18));
     h.fund(
         &mut rt,
         &funder,
+        &other,
         &shid,
         ExitCode::OK,
         amount.clone(),
@@ -455,6 +458,7 @@ fn test_fund() {
     h.fund(
         &mut rt,
         &funder,
+        &funder,
         &shid,
         ExitCode::OK,
         amount.clone(),
@@ -466,6 +470,7 @@ fn test_fund() {
     h.fund(
         &mut rt,
         &funder,
+        &funder,
         &shid,
         ExitCode::OK,
         amount.clone(),
@@ -476,6 +481,7 @@ fn test_fund() {
     // No funds sent
     h.fund(
         &mut rt,
+        &funder,
         &funder,
         &shid,
         ExitCode::USR_ILLEGAL_ARGUMENT,
@@ -489,10 +495,40 @@ fn test_fund() {
     h.fund(
         &mut rt,
         &funder,
+        &funder,
         &SubnetID::new_from_parent(&h.net_name, *SUBNET_TWO),
         ExitCode::USR_ILLEGAL_ARGUMENT,
         TokenAmount::zero(),
         3,
+        &exp_cs,
+    )
+    .unwrap();
+
+    // use delegated address
+    let other = Address::from_str("f410fnpq4z5siy5eaaoanauqnpf5bodearnren5fxyoi").unwrap();
+    exp_cs += amount.clone();
+    h.fund(
+        &mut rt,
+        &funder,
+        &other,
+        &shid,
+        ExitCode::OK,
+        amount.clone(),
+        4,
+        &exp_cs,
+    )
+    .unwrap();
+
+    // actor addresses not supported
+    let other = Address::from_str("f2xwzbdu7z5sam6hc57xxwkctciuaz7oe5omipwbq").unwrap();
+    h.fund(
+        &mut rt,
+        &funder,
+        &other,
+        &shid,
+        ExitCode::USR_ILLEGAL_ARGUMENT,
+        amount.clone(),
+        4,
         &exp_cs,
     )
     .unwrap();
@@ -504,17 +540,80 @@ fn test_release() {
     let (h, mut rt) = setup(shid.clone());
 
     let releaser = Address::new_id(1001);
+    let to = Address::new_id(1002);
     // Release funds
     let r_amount = TokenAmount::from_atto(5_u64.pow(18));
-    rt.set_balance(4 * r_amount.clone());
-    h.release(&mut rt, &releaser, ExitCode::OK, r_amount.clone(), 2, 0, 0)
-        .unwrap();
-    h.release(&mut rt, &releaser, ExitCode::OK, r_amount.clone(), 3, 1, 1)
-        .unwrap();
-    h.release(&mut rt, &releaser, ExitCode::OK, r_amount.clone(), 10, 2, 0)
-        .unwrap();
-    h.release(&mut rt, &releaser, ExitCode::OK, r_amount, 11, 3, 1)
-        .unwrap();
+    rt.set_balance(6 * r_amount.clone());
+    h.release(
+        &mut rt,
+        &releaser,
+        &to,
+        ExitCode::OK,
+        r_amount.clone(),
+        2,
+        0,
+        0,
+    )
+    .unwrap();
+    h.release(
+        &mut rt,
+        &releaser,
+        &to,
+        ExitCode::OK,
+        r_amount.clone(),
+        3,
+        1,
+        1,
+    )
+    .unwrap();
+    h.release(
+        &mut rt,
+        &releaser,
+        &to,
+        ExitCode::OK,
+        r_amount.clone(),
+        10,
+        2,
+        0,
+    )
+    .unwrap();
+    h.release(
+        &mut rt,
+        &releaser,
+        &to,
+        ExitCode::OK,
+        r_amount.clone(),
+        11,
+        3,
+        1,
+    )
+    .unwrap();
+
+    // use delegated address
+    let to = Address::from_str("f410fnpq4z5siy5eaaoanauqnpf5bodearnren5fxyoi").unwrap();
+    h.release(
+        &mut rt,
+        &releaser,
+        &to,
+        ExitCode::OK,
+        r_amount.clone(),
+        11,
+        4,
+        2,
+    )
+    .unwrap();
+    let to = Address::from_str("f2xwzbdu7z5sam6hc57xxwkctciuaz7oe5omipwbq").unwrap();
+    h.release(
+        &mut rt,
+        &releaser,
+        &to,
+        ExitCode::USR_ILLEGAL_ARGUMENT,
+        r_amount,
+        11,
+        4,
+        2,
+    )
+    .unwrap();
 }
 
 #[test]
@@ -637,6 +736,7 @@ fn test_commit_child_check_bu_target_subnet() {
     h.fund(
         &mut rt,
         &Address::new_id(1001),
+        &Address::new_id(1001),
         &shid,
         ExitCode::OK,
         TokenAmount::from_atto(10_u64.pow(18)),
@@ -721,6 +821,7 @@ fn test_commit_child_check_bu_not_target_subnet() {
     .unwrap();
     h.fund(
         &mut rt,
+        &Address::new_id(1001),
         &Address::new_id(1001),
         &shid,
         ExitCode::OK,
@@ -849,6 +950,7 @@ fn test_propagate_with_remainder() {
     .unwrap();
     h.fund(
         &mut rt,
+        &Address::new_id(1001),
         &Address::new_id(1001),
         &shid,
         ExitCode::OK,
@@ -1089,6 +1191,7 @@ fn test_commit_child_check_tp_target_subnet() {
     h.fund(
         &mut rt,
         &Address::new_id(1001),
+        &Address::new_id(1001),
         &shid,
         ExitCode::OK,
         TokenAmount::from_atto(10_u64.pow(18)),
@@ -1166,6 +1269,7 @@ fn test_commit_child_check_tp_not_target_subnet() {
     let funder = Address::new_id(1002);
     h.fund(
         &mut rt,
+        &funder,
         &funder,
         &sub,
         ExitCode::OK,
