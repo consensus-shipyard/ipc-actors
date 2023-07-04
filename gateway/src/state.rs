@@ -177,7 +177,7 @@ impl State {
         let deleted = self.subnets.modify(store, |subnets| {
             subnets
                 .delete(&id.to_bytes())
-                .map_err(|e| e.downcast_wrap(format!("failed to delete subnet for id {}", id)))
+                .map_err(|e| e.downcast_wrap(format!("failed to delete subnet for id {id}")))
                 .map(|x| x.is_some())
         })?;
         if deleted {
@@ -419,7 +419,7 @@ pub fn set_subnet<BS: Blockstore>(
 ) -> anyhow::Result<()> {
     subnets
         .set(id.to_bytes().into(), subnet)
-        .map_err(|e| e.downcast_wrap(format!("failed to set subnet for id {}", id)))?;
+        .map_err(|e| e.downcast_wrap(format!("failed to set subnet for id {id}")))?;
     Ok(())
 }
 
@@ -429,7 +429,7 @@ fn get_subnet<'m, BS: Blockstore>(
 ) -> anyhow::Result<Option<&'m Subnet>> {
     subnets
         .get(&id.to_bytes())
-        .map_err(|e| e.downcast_wrap(format!("failed to get subnet for id {}", id)))
+        .map_err(|e| e.downcast_wrap(format!("failed to get subnet for id {id}")))
 }
 
 pub fn set_checkpoint<BS: Blockstore>(
@@ -439,7 +439,7 @@ pub fn set_checkpoint<BS: Blockstore>(
     let epoch = ch.epoch();
     checkpoints
         .set(epoch_key(epoch), ch)
-        .map_err(|e| e.downcast_wrap(format!("failed to set checkpoint for epoch {}", epoch)))?;
+        .map_err(|e| e.downcast_wrap(format!("failed to set checkpoint for epoch {epoch}")))?;
     Ok(())
 }
 
@@ -449,7 +449,7 @@ pub fn get_checkpoint<'m, BS: Blockstore>(
 ) -> anyhow::Result<Option<&'m BottomUpCheckpoint>> {
     checkpoints
         .get(&epoch_key(epoch))
-        .map_err(|e| e.downcast_wrap(format!("failed to get checkpoint for id {}", epoch)))
+        .map_err(|e| e.downcast_wrap(format!("failed to get checkpoint for id {epoch}")))
 }
 
 pub fn get_topdown_msg<'m, BS: Blockstore>(

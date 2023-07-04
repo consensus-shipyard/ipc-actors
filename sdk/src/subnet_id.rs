@@ -192,7 +192,7 @@ impl fmt::Display for SubnetID {
         let children_str = self
             .children_as_ref()
             .iter()
-            .map(|s| format!("/{}", s))
+            .map(|s| format!("/{s}"))
             .collect::<String>();
 
         write!(f, "/r{}{}", self.root_id(), children_str)

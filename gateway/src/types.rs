@@ -107,8 +107,8 @@ pub(crate) fn resolved_from_to(
     from: &Address,
     to: &Address,
 ) -> Result<(Address, Address), ActorError> {
-    let mut from_sig_addr = from.clone();
-    let mut to_sig_addr = to.clone();
+    let mut from_sig_addr = *from;
+    let mut to_sig_addr = *to;
     let mut resolved = false;
 
     if to.protocol() != Protocol::Delegated {
@@ -118,16 +118,15 @@ pub(crate) fn resolved_from_to(
 
     // Check if they are equal to save ourselves a resolution
     if resolved {
-        if !equal_account_id(rt, &from_sig_addr, &to)? {
+        if !equal_account_id(rt, &from_sig_addr, to)? {
             from_sig_addr = resolve_secp_bls(rt, &from_sig_addr)?;
         } else {
             from_sig_addr = to_sig_addr;
         }
-    } else {
-        if from.protocol() != Protocol::Delegated {
-            from_sig_addr = resolve_secp_bls(rt, &from_sig_addr)?;
-        }
+    } else if from.protocol() != Protocol::Delegated {
+        from_sig_addr = resolve_secp_bls(rt, &from_sig_addr)?;
     }
+
     Ok((from_sig_addr, to_sig_addr))
 }
 

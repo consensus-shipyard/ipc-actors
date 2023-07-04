@@ -273,7 +273,7 @@ impl SubnetActor for Actor {
 
         state
             .verify_checkpoint(rt, &ch)
-            .map_err(|e| actor_error!(illegal_state, format!("checkpoint failed: {}", e)))?;
+            .map_err(|e| actor_error!(illegal_state, format!("checkpoint failed: {e}")))?;
 
         let msg = rt.transaction(|st: &mut State, rt| {
             let store = rt.store();

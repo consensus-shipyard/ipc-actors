@@ -187,8 +187,7 @@ impl State {
 
             if stake.lt(&ret_amount) {
                 return Err(anyhow!(format!(
-                    "address not enough stake to withdraw: {:?}",
-                    addr
+                    "address not enough stake to withdraw: {addr:?}"
                 )));
             }
 
