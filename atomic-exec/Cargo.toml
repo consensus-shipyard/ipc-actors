@@ -1,11 +1,11 @@
 [package]
-name = "ipc_atomic_execution"
-version = "0.0.1"
-license = "MIT OR Apache-2.0"
 authors = ["ConsensusLab", "Protocol Labs", "Filecoin Core Devs"]
 edition = "2021"
-repository = "https://github.com/consensus-shipyard/ipc-atomic-execution"
 keywords = ["filecoin", "web3", "wasm"]
+license = "MIT OR Apache-2.0"
+name = "ipc_atomic_execution"
+repository = "https://github.com/consensus-shipyard/ipc-atomic-execution"
+version = "0.0.1"
 
 [lib]
 ## lib is necessary for integration tests
@@ -13,32 +13,32 @@ keywords = ["filecoin", "web3", "wasm"]
 crate-type = ["cdylib", "lib"]
 
 [dependencies]
-ipc_gateway = { path = "../gateway", package = "ipc-gateway", features = [] }
+ipc_gateway = {path = "../gateway", package = "ipc-gateway", features = []}
 
-fil_actors_runtime = { git = "https://github.com/consensus-shipyard/fvm-utils", features = ["fil-actor"] }
-primitives = { git = "https://github.com/consensus-shipyard/fvm-utils" }
-fvm_shared = { version = "3.0.0-alpha.17", default-features = false }
-fvm_ipld_hamt = "0.5.1"
+fil_actors_runtime = {git = "https://github.com/consensus-shipyard/fvm-utils", features = ["fil-actor"]}
+frc42_dispatch = "3.2.0"
 fvm_ipld_blockstore = "0.1.1"
 fvm_ipld_encoding = "0.3.3"
-frc42_dispatch = "3.0.0"
+fvm_ipld_hamt = "0.5.1"
+fvm_shared = {version = "3.2.0", default-features = false}
+primitives = {git = "https://github.com/consensus-shipyard/fvm-utils"}
 
-num-traits = "0.2.14"
-num-derive = "0.3.3"
-log = "0.4.14"
-indexmap = { version = "1.8.0", features = ["serde-1"] }
-cid = { version = "0.8.3", default-features = false, features = ["serde-codec"] }
-integer-encoding = { version = "3.0.3", default-features = false }
-lazy_static = "1.4.0"
-serde_tuple = "0.5"
-serde = { version = "1.0.136", features = ["derive"] }
 anyhow = "1.0.56"
+cid = {version = "0.8.3", default-features = false, features = ["serde-codec"]}
+indexmap = {version = "1.8.0", features = ["serde-1"]}
+integer-encoding = {version = "3.0.3", default-features = false}
+lazy_static = "1.4.0"
+log = "0.4.14"
+num-derive = "0.3.3"
+num-traits = "0.2.14"
+serde = {version = "1.0.136", features = ["derive"]}
+serde_tuple = "0.5"
 thiserror = "1.0.38"
 unsigned-varint = "0.7.1"
 
 [dev-dependencies]
-fil_actors_runtime = { git = "https://github.com/consensus-shipyard/fvm-utils", features = ["fil-actor", "test_utils"] }
-ipc-sdk = { path = "../sdk" }
+fil_actors_runtime = {git = "https://github.com/consensus-shipyard/fvm-utils", features = ["fil-actor", "test_utils"]}
+ipc-sdk = {path = "../sdk"}
 
 [build-dependencies]
 wasm-builder = "3.0.1"

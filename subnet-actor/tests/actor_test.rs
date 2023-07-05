@@ -16,7 +16,7 @@ mod test {
     use fvm_shared::error::ExitCode;
     use fvm_shared::METHOD_SEND;
     use ipc_gateway::{
-        BottomUpCheckpoint, FundParams, SubnetID, CHECKPOINT_GENESIS_CID, MIN_COLLATERAL_AMOUNT,
+        AmountParams, BottomUpCheckpoint, SubnetID, CHECKPOINT_GENESIS_CID, MIN_COLLATERAL_AMOUNT,
     };
     use ipc_subnet_actor::{
         Actor, ConsensusType, ConstructParams, JoinParams, Method, State, Status,
@@ -515,7 +515,7 @@ mod test {
         runtime.expect_send(
             Address::new_id(IPC_GATEWAY_ADDR),
             ipc_gateway::Method::ReleaseStake as u64,
-            IpldBlock::serialize_cbor(&FundParams {
+            IpldBlock::serialize_cbor(&AmountParams {
                 value: value.clone(),
             })
             .unwrap(),
@@ -561,7 +561,7 @@ mod test {
         runtime.expect_send(
             Address::new_id(IPC_GATEWAY_ADDR),
             ipc_gateway::Method::ReleaseStake as u64,
-            IpldBlock::serialize_cbor(&FundParams {
+            IpldBlock::serialize_cbor(&AmountParams {
                 value: value.clone(),
             })
             .unwrap(),
@@ -599,7 +599,7 @@ mod test {
         runtime.expect_send(
             Address::new_id(IPC_GATEWAY_ADDR),
             ipc_gateway::Method::ReleaseStake as u64,
-            IpldBlock::serialize_cbor(&FundParams {
+            IpldBlock::serialize_cbor(&AmountParams {
                 value: value.clone(),
             })
             .unwrap(),

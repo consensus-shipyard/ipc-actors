@@ -78,7 +78,8 @@ impl CrossMsg {
 impl StorableMsg {
     pub fn new_release_msg(
         sub_id: &SubnetID,
-        sig_addr: &Address,
+        from: &Address,
+        to: &Address,
         value: TokenAmount,
     ) -> anyhow::Result<Self> {
         let to = IPCAddress::new(
@@ -86,9 +87,9 @@ impl StorableMsg {
                 Some(s) => s,
                 None => return Err(anyhow!("error getting parent for subnet addr")),
             },
-            sig_addr,
+            to,
         )?;
-        let from = IPCAddress::new(sub_id, &BURNT_FUNDS_ACTOR_ADDR)?;
+        let from = IPCAddress::new(sub_id, from)?;
         Ok(Self {
             from,
             to,
@@ -101,7 +102,8 @@ impl StorableMsg {
 
     pub fn new_fund_msg(
         sub_id: &SubnetID,
-        sig_addr: &Address,
+        from: &Address,
+        to: &Address,
         value: TokenAmount,
     ) -> anyhow::Result<Self> {
         let from = IPCAddress::new(
@@ -109,9 +111,9 @@ impl StorableMsg {
                 Some(s) => s,
                 None => return Err(anyhow!("error getting parent for subnet addr")),
             },
-            sig_addr,
+            from,
         )?;
-        let to = IPCAddress::new(sub_id, sig_addr)?;
+        let to = IPCAddress::new(sub_id, to)?;
         // the nonce and the rest of message fields are set when the message is committed.
         Ok(Self {
             from,
