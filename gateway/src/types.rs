@@ -90,7 +90,6 @@ pub struct WhitelistPropagatorParams {
 #[derive(Serialize_tuple, Deserialize_tuple, PartialEq, Eq, Clone, Debug)]
 pub struct PostBoxItem {
     pub cross_msg: CrossMsg,
-    pub owners: Option<Vec<Address>>,
 }
 
 // The implementation does not matter, we just need to extract the cid
@@ -133,8 +132,8 @@ pub(crate) fn resolved_from_to(
 const POSTBOX_ITEM_DESCRIPTION: &str = "postbox";
 
 impl PostBoxItem {
-    pub fn new(cross_msg: CrossMsg, owners: Option<Vec<Address>>) -> Self {
-        Self { cross_msg, owners }
+    pub fn new(cross_msg: CrossMsg) -> Self {
+        Self { cross_msg }
     }
 
     pub fn serialize_with_cid(&self) -> Result<(Cid, Vec<u8>), ActorError> {

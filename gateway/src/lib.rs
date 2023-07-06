@@ -59,7 +59,6 @@ pub enum Method {
     Release = frc42_dispatch::method_hash!("Release"),
     SendCross = frc42_dispatch::method_hash!("SendCross"),
     Propagate = frc42_dispatch::method_hash!("Propagate"),
-    WhiteListPropagator = frc42_dispatch::method_hash!("WhiteListPropagator"),
     SubmitTopDownCheckpoint = frc42_dispatch::method_hash!("SubmitTopDownCheckpoint"),
     // FIXME: These two methods should probably not used FRC42 method numbers
     // and be in the range where only builtin-actors can call them.
@@ -609,55 +608,6 @@ impl Actor {
         Ok(())
     }
 
-    /// Whitelist a series of addresses as propagator of a cross net message.
-    /// This is basically adding this list of addresses to the `PostBoxItem::owners`.
-    /// Only existing owners can perform this operation.
-    fn whitelist_propagator(
-        rt: &mut impl Runtime,
-        params: WhitelistPropagatorParams,
-    ) -> Result<(), ActorError> {
-        // does not really need check as we are checking against the PostboxItem.owners
-        rt.validate_immediate_caller_accept_any()?;
-
-        let caller = rt.message().caller();
-        let WhitelistPropagatorParams {
-            postbox_cid,
-            to_add,
-        } = params;
-
-        rt.transaction(|st: &mut State, rt| {
-            let mut postbox_item = st.load_from_postbox(rt.store(), postbox_cid).map_err(|e| {
-                log::error!("encountered error loading from postbox: {:?}", e);
-                actor_error!(unhandled_message, "cannot load from postbox")
-            })?;
-
-            // Currently we dont support adding owners if the owners field is None.
-            // This might change in the future.
-            if postbox_item.owners.is_none() {
-                return Err(actor_error!(
-                    illegal_state,
-                    "postbox item cannot add owner for now"
-                ));
-            }
-
-            let owners = postbox_item.owners.as_mut().unwrap();
-            if !owners.contains(&caller) {
-                return Err(actor_error!(illegal_state, "not owner"));
-            }
-            owners.extend(to_add);
-
-            st.swap_postbox_item(rt.store(), postbox_cid, postbox_item)
-                .map_err(|e| {
-                    log::error!("encountered error loading from postbox: {:?}", e);
-                    actor_error!(unhandled_message, "cannot load from postbox")
-                })?;
-
-            Ok(())
-        })?;
-
-        Ok(())
-    }
-
     fn propagate(rt: &mut impl Runtime, params: PropagateParams) -> Result<(), ActorError> {
         // does not really need check as we are checking against the PostboxItem.owners
         rt.validate_immediate_caller_accept_any()?;
@@ -672,10 +622,6 @@ impl Actor {
                 log::error!("encountered error loading from postbox: {:?}", e);
                 actor_error!(unhandled_message, "cannot load from postbox")
             })?;
-
-            if let Some(owners) = postbox_item.owners && !owners.contains(&owner) {
-                return Err(actor_error!(illegal_state, "owner not match"));
-            }
 
             // collect cross-fee
             let fee = CROSS_MSG_FEE.clone();
@@ -1017,13 +963,8 @@ impl Actor {
         };
 
         let cid = rt.transaction(|st: &mut State, rt| {
-            let owner = cross_msg
-                .msg
-                .from
-                .raw_addr()
-                .map_err(|_| actor_error!(illegal_argument, "invalid address"))?;
             let r = st
-                .insert_postbox(rt.store(), Some(vec![owner]), cross_msg)
+                .insert_postbox(rt.store(), cross_msg)
                 .map_err(|e| {
                     e.downcast_default(ExitCode::USR_ILLEGAL_STATE, "error save topdown messages")
                 })?;
@@ -1090,7 +1031,6 @@ impl ActorCode for Actor {
         Release => release,
         SendCross => send_cross,
         Propagate => propagate,
-        WhiteListPropagator => whitelist_propagator,
         SubmitTopDownCheckpoint => submit_topdown_check,
         SetMembership => set_membership,
         InitGenesisEpoch => init_genesis_epoch,

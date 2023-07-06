@@ -6,7 +6,6 @@ use fil_actors_runtime::runtime::Runtime;
 use fil_actors_runtime::{actor_error, ActorDowncast, ActorError, Map};
 use fvm_ipld_blockstore::Blockstore;
 use fvm_ipld_hamt::BytesKey;
-use fvm_shared::address::Address;
 use fvm_shared::clock::ChainEpoch;
 use fvm_shared::econ::TokenAmount;
 use fvm_shared::error::ExitCode;
@@ -312,10 +311,9 @@ impl State {
     pub fn insert_postbox<BS: Blockstore>(
         &mut self,
         st: &BS,
-        owners: Option<Vec<Address>>,
         msg: CrossMsg,
     ) -> anyhow::Result<Cid> {
-        let item = PostBoxItem::new(msg, owners);
+        let item = PostBoxItem::new(msg);
         let (cid, bytes) = item
             .serialize_with_cid()
             .map_err(|_| anyhow!("cannot serialize postbox item"))?;

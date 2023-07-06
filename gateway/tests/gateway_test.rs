@@ -887,7 +887,6 @@ fn test_commit_child_check_bu_not_target_subnet() {
     postbox
         .for_each(|k, v| {
             let item = PostBoxItem::deserialize(v.clone()).unwrap();
-            assert_eq!(item.owners, Some(vec![ff.clone().raw_addr().unwrap()]));
             let msg = item.cross_msg.msg;
             assert_eq!(msg.to, tt);
             // the nonce should not have changed at all
@@ -1018,7 +1017,6 @@ fn test_propagate_with_remainder() {
     postbox
         .for_each(|k, v| {
             let item = PostBoxItem::deserialize(v.clone()).unwrap();
-            assert_eq!(item.owners, Some(vec![ff.clone().raw_addr().unwrap()]));
             let msg = item.cross_msg.msg;
             assert_eq!(msg.to, tt);
             // the nonce should not have changed at all
@@ -1113,7 +1111,6 @@ fn test_commit_child_check_bu_switch_td() {
             Ok(st
                 .insert_postbox(
                     r.store(),
-                    Some(vec![caller.clone()]),
                     CrossMsg {
                         wrapped: false,
                         msg: params.clone(),
@@ -1330,7 +1327,6 @@ fn test_commit_child_check_tp_not_target_subnet() {
     postbox
         .for_each(|k, v| {
             let item = PostBoxItem::deserialize(v.clone()).unwrap();
-            assert_eq!(item.owners, Some(vec![ff.clone().raw_addr().unwrap()]));
             let msg = item.cross_msg.msg;
             assert_eq!(msg.to, tt);
             // the nonce should not have changed at all
