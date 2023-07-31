@@ -1,7 +1,5 @@
 use crate::error::Error;
 use crate::subnet_id::SubnetID;
-use fil_actors_runtime::cbor;
-use fvm_ipld_encoding::RawBytes;
 use fvm_shared::address::{Address, Protocol};
 use serde_tuple::{Deserialize_tuple, Serialize_tuple};
 use std::str::FromStr;
@@ -34,12 +32,17 @@ impl IPCAddress {
     }
 
     /// Returns encoded bytes of Address
+    #[cfg(feature = "fil-actor")]
     pub fn to_bytes(&self) -> Result<Vec<u8>, Error> {
-        Ok(cbor::serialize(self, "ipc-address")?.to_vec())
+        Ok(fil_actors_runtime::cbor::serialize(self, "ipc-address")?.to_vec())
     }
 
+    #[cfg(feature = "fil-actor")]
     pub fn from_bytes(bz: &[u8]) -> Result<Self, Error> {
-        let i: Self = cbor::deserialize(&RawBytes::new(bz.to_vec()), "ipc-address")?;
+        let i: Self = fil_actors_runtime::cbor::deserialize(
+            &fvm_ipld_encoding::RawBytes::new(bz.to_vec()),
+            "ipc-address",
+        )?;
         Ok(i)
     }
 
@@ -118,6 +121,7 @@ mod tests {
         assert_eq!(addr, addr_out);
     }
 
+    #[cfg(feature = "fil-actor")]
     #[test]
     fn test_ipc_serialization() {
         let sub_id = SubnetID::new(123, vec![Address::new_id(100)]);

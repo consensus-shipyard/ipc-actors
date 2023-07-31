@@ -1,5 +1,3 @@
-use fil_actors_runtime::cbor;
-use fil_actors_runtime::runtime::Runtime;
 use fnv::FnvHasher;
 use fvm_shared::address::Address;
 use lazy_static::lazy_static;
@@ -10,7 +8,6 @@ use std::str::FromStr;
 
 use crate::error::Error;
 
-const SUBNET_ERR_TAG: &str = "subnetID";
 /// MaxChainID is the maximum chain ID value
 /// possible. This is the MAX_CHAIN_ID currently
 /// supported by Ethereum chains.
@@ -54,7 +51,8 @@ impl SubnetID {
     /// hosted in the current network. The rest of the route is left
     /// as-is. We only have information to translate from f2 to f0 for the
     /// last subnet actor in the root.
-    pub fn f0_id(&self, rt: &impl Runtime) -> SubnetID {
+    #[cfg(feature = "fil-actor")]
+    pub fn f0_id(&self, rt: &impl fil_actors_runtime::runtime::Runtime) -> SubnetID {
         let mut children = self.children();
 
         // replace the resolved child (if any)
@@ -107,8 +105,11 @@ impl SubnetID {
     }
 
     /// Returns the serialized version of the subnet id
+    #[cfg(feature = "fil-actor")]
     pub fn to_bytes(&self) -> Vec<u8> {
-        cbor::serialize(self, SUBNET_ERR_TAG).unwrap().into()
+        fil_actors_runtime::cbor::serialize(self, "subnetID")
+            .unwrap()
+            .into()
     }
 
     /// Returns the address of the actor governing the subnet in the parent

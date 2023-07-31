@@ -1,4 +1,3 @@
-use fil_actors_runtime::fvm_ipld_hamt::BytesKey;
 use fvm_ipld_encoding::tuple::{Deserialize_tuple, Serialize_tuple};
 use fvm_shared::clock::ChainEpoch;
 use fvm_shared::{address::Address, econ::TokenAmount};
@@ -12,7 +11,7 @@ pub mod subnet_id;
 /// as a key of a HAMT. This serialization has been
 /// tested to be compatible with its go counter-part
 /// in github.com/consensus-shipyard/go-ipc-types
-pub fn epoch_key(k: ChainEpoch) -> BytesKey {
+pub fn epoch_key(k: ChainEpoch) -> fvm_ipld_hamt::BytesKey {
     let bz = k.encode_var_vec();
     bz.into()
 }
