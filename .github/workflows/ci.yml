@@ -22,6 +22,8 @@ jobs:
           override: true
       - run: cargo b --all
       - run: cargo t --all
+      # Check that the SDK compiles when default features are disabled.
+      - run: cargo check -p ipc-sdk --features ""
 
   fmt:
     name: Rustfmt
