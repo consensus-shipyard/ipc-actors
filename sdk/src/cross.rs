@@ -139,14 +139,21 @@ impl CrossMsgs {
 
 #[cfg(feature = "fil-actor")]
 impl CrossMsg {
-    pub fn send(self, rt: &mut impl fil_actors_runtime::runtime::Runtime, rto: &Address) -> Result<RawBytes, fil_actors_runtime::ActorError> {
+    pub fn send(
+        self,
+        rt: &mut impl fil_actors_runtime::runtime::Runtime,
+        rto: &Address,
+    ) -> Result<RawBytes, fil_actors_runtime::ActorError> {
         let blk = if !self.wrapped {
             let msg = self.msg;
             rt.send(rto, msg.method, msg.params.into(), msg.value)?
         } else {
             let method = self.msg.method;
             let value = self.msg.value.clone();
-            let params = fvm_ipld_encoding::ipld_block::IpldBlock::serialize_cbor(&ApplyMsgParams { cross_msg: self })?;
+            let params =
+                fvm_ipld_encoding::ipld_block::IpldBlock::serialize_cbor(&ApplyMsgParams {
+                    cross_msg: self,
+                })?;
             rt.send(rto, method, params, value)?
         };
 
