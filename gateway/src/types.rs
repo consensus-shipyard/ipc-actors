@@ -117,7 +117,7 @@ pub(crate) fn resolved_from_to(
 
     // Check if they are equal to save ourselves a resolution
     if resolved {
-        if !equal_account_id(rt, &from_sig_addr, to)? {
+        if !equal_account_id(rt, &from_sig_addr, to) {
             from_sig_addr = resolve_secp_bls(rt, &from_sig_addr)?;
         } else {
             from_sig_addr = to_sig_addr;

@@ -24,15 +24,15 @@ use fvm_shared::MethodNum;
 use fvm_shared::METHOD_SEND;
 use ipc_gateway::checkpoint::ChildCheck;
 use ipc_gateway::{
-    get_topdown_msg, Actor, AmountParams, BottomUpCheckpoint, ConstructorParams,
-    CrossMsg, CrossMsgParams, FundParams, IPCAddress, InitGenesisEpoch, Method, PropagateParams,
+    get_topdown_msg, Actor, AmountParams, BottomUpCheckpoint, ConstructorParams, CrossMsg,
+    CrossMsgParams, FundParams, IPCAddress, InitGenesisEpoch, Method, PropagateParams,
     ReleaseParams, State, StorableMsg, Subnet, SubnetID, TopDownCheckpoint, CROSS_MSG_FEE,
     DEFAULT_CHECKPOINT_PERIOD, MIN_COLLATERAL_AMOUNT, SUBNET_ACTOR_REWARD_METHOD,
 };
+use ipc_sdk::cross::is_bottomup;
 use ipc_sdk::ValidatorSet;
 use lazy_static::lazy_static;
 use primitives::{TCid, TCidContent};
-use ipc_sdk::cross::is_bottomup;
 
 lazy_static! {
     pub static ref SUBNET_ONE: Address = Address::new_id(101);
