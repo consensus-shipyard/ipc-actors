@@ -3,7 +3,6 @@
 extern crate core;
 
 pub use self::checkpoint::{BottomUpCheckpoint, CHECKPOINT_GENESIS_CID};
-pub use self::cross::{is_bottomup, CrossMsg, CrossMsgs, IPCMsgType, StorableMsg};
 pub use self::state::*;
 pub use self::subnet::*;
 pub use self::types::*;
@@ -22,6 +21,7 @@ use fvm_shared::error::ExitCode;
 use fvm_shared::METHOD_SEND;
 use fvm_shared::{MethodNum, METHOD_CONSTRUCTOR};
 pub use ipc_sdk::address::IPCAddress;
+pub use ipc_sdk::cross::{CrossMsg, IPCMsgType, StorableMsg};
 pub use ipc_sdk::subnet_id::SubnetID;
 use ipc_sdk::ValidatorSet;
 use lazy_static::lazy_static;

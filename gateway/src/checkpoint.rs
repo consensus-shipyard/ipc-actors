@@ -1,4 +1,4 @@
-use crate::{ensure_message_sorted, CrossMsg};
+use crate::ensure_message_sorted;
 use anyhow::anyhow;
 use cid::multihash::Code;
 use cid::multihash::MultihashDigest;
@@ -10,6 +10,7 @@ use fvm_shared::address::Address;
 use fvm_shared::clock::ChainEpoch;
 use fvm_shared::econ::TokenAmount;
 use ipc_actor_common::vote::{UniqueBytesKey, UniqueVote};
+use ipc_sdk::cross::CrossMsg;
 use ipc_sdk::subnet_id::SubnetID;
 use ipc_sdk::ValidatorSet;
 use lazy_static::lazy_static;
