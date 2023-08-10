@@ -102,12 +102,12 @@ mod tests {
         let exec_id = AtomicExecID::from(Vec::from("exec_id"));
         let actors = vec![
             IPCAddress::new(
-                &SubnetID::new_from_parent(&*ROOTNET_ID, Address::new_id('A' as u64)),
+                &SubnetID::new_from_parent(&ROOTNET_ID, Address::new_id('A' as u64)),
                 &Address::new_id(1),
             )
             .unwrap(),
             IPCAddress::new(
-                &SubnetID::new_from_parent(&*ROOTNET_ID, Address::new_id('B' as u64)),
+                &SubnetID::new_from_parent(&ROOTNET_ID, Address::new_id('B' as u64)),
                 &Address::new_id(1),
             )
             .unwrap(),

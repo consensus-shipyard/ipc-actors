@@ -4,6 +4,7 @@ use fvm_shared::{address::Address, econ::TokenAmount};
 use integer_encoding::VarInt;
 
 pub mod address;
+pub mod cross;
 pub mod error;
 pub mod subnet_id;
 

@@ -1,36 +1,13 @@
+use crate::ExecutableMessage;
 use crate::State;
 use crate::SUBNET_ACTOR_REWARD_METHOD;
-use crate::{ApplyMsgParams, ExecutableMessage};
-use anyhow::anyhow;
 use fil_actors_runtime::runtime::Runtime;
 use fil_actors_runtime::ActorError;
 use fil_actors_runtime::BURNT_FUNDS_ACTOR_ADDR;
-use fvm_ipld_encoding::ipld_block::IpldBlock;
-use fvm_ipld_encoding::RawBytes;
 use fvm_shared::address::Address;
 use fvm_shared::econ::TokenAmount;
-use fvm_shared::MethodNum;
 use fvm_shared::METHOD_SEND;
-use ipc_sdk::address::IPCAddress;
-use ipc_sdk::subnet_id::SubnetID;
-use serde_tuple::{Deserialize_tuple, Serialize_tuple};
-
-/// StorableMsg stores all the relevant information required
-/// to execute cross-messages.
-///
-/// We follow this approach because we can't directly store types.Message
-/// as we did in the actor's Go counter-part. Instead we just persist the
-/// information required to create the cross-messages and execute in the
-/// corresponding node implementation.
-#[derive(PartialEq, Eq, Clone, Debug, Serialize_tuple, Deserialize_tuple)]
-pub struct StorableMsg {
-    pub from: IPCAddress,
-    pub to: IPCAddress,
-    pub method: MethodNum,
-    pub params: RawBytes,
-    pub value: TokenAmount,
-    pub nonce: u64,
-}
+use ipc_sdk::cross::{CrossMsg, StorableMsg};
 
 impl ExecutableMessage for StorableMsg {
     fn nonce(&self) -> u64 {
@@ -38,133 +15,9 @@ impl ExecutableMessage for StorableMsg {
     }
 }
 
-#[derive(PartialEq, Eq, Clone, Debug, Serialize_tuple, Deserialize_tuple)]
-pub struct CrossMsg {
-    pub msg: StorableMsg,
-    pub wrapped: bool,
-}
-
 impl ExecutableMessage for CrossMsg {
     fn nonce(&self) -> u64 {
         self.msg.nonce()
-    }
-}
-
-#[derive(PartialEq, Eq)]
-pub enum IPCMsgType {
-    BottomUp,
-    TopDown,
-}
-
-impl CrossMsg {
-    pub fn send(self, rt: &mut impl Runtime, rto: &Address) -> Result<RawBytes, ActorError> {
-        let blk = if !self.wrapped {
-            let msg = self.msg;
-            rt.send(rto, msg.method, msg.params.into(), msg.value)?
-        } else {
-            let method = self.msg.method;
-            let value = self.msg.value.clone();
-            let params = IpldBlock::serialize_cbor(&ApplyMsgParams { cross_msg: self })?;
-            rt.send(rto, method, params, value)?
-        };
-
-        Ok(match blk {
-            Some(b) => b.data.into(), // FIXME: this assumes cbor serialization. We should maybe return serialized IpldBlock
-            None => RawBytes::default(),
-        })
-    }
-}
-
-impl StorableMsg {
-    pub fn new_release_msg(
-        sub_id: &SubnetID,
-        from: &Address,
-        to: &Address,
-        value: TokenAmount,
-    ) -> anyhow::Result<Self> {
-        let to = IPCAddress::new(
-            &match sub_id.parent() {
-                Some(s) => s,
-                None => return Err(anyhow!("error getting parent for subnet addr")),
-            },
-            to,
-        )?;
-        let from = IPCAddress::new(sub_id, from)?;
-        Ok(Self {
-            from,
-            to,
-            method: METHOD_SEND,
-            params: RawBytes::default(),
-            value,
-            nonce: 0,
-        })
-    }
-
-    pub fn new_fund_msg(
-        sub_id: &SubnetID,
-        from: &Address,
-        to: &Address,
-        value: TokenAmount,
-    ) -> anyhow::Result<Self> {
-        let from = IPCAddress::new(
-            &match sub_id.parent() {
-                Some(s) => s,
-                None => return Err(anyhow!("error getting parent for subnet addr")),
-            },
-            from,
-        )?;
-        let to = IPCAddress::new(sub_id, to)?;
-        // the nonce and the rest of message fields are set when the message is committed.
-        Ok(Self {
-            from,
-            to,
-            method: METHOD_SEND,
-            params: RawBytes::default(),
-            value,
-            nonce: 0,
-        })
-    }
-
-    pub fn ipc_type(&self) -> anyhow::Result<IPCMsgType> {
-        let sto = self.to.subnet()?;
-        let sfrom = self.from.subnet()?;
-        if is_bottomup(&sfrom, &sto) {
-            return Ok(IPCMsgType::BottomUp);
-        }
-        Ok(IPCMsgType::TopDown)
-    }
-
-    pub fn apply_type(&self, curr: &SubnetID) -> anyhow::Result<IPCMsgType> {
-        let sto = self.to.subnet()?;
-        let sfrom = self.from.subnet()?;
-        if curr.common_parent(&sto) == sfrom.common_parent(&sto)
-            && self.ipc_type()? == IPCMsgType::BottomUp
-        {
-            return Ok(IPCMsgType::BottomUp);
-        }
-        Ok(IPCMsgType::TopDown)
-    }
-}
-
-pub fn is_bottomup(from: &SubnetID, to: &SubnetID) -> bool {
-    let index = match from.common_parent(to) {
-        Some((ind, _)) => ind,
-        None => return false,
-    };
-    // more children than the common parent
-    from.children_as_ref().len() > index
-}
-
-#[derive(PartialEq, Eq, Clone, Debug, Default, Serialize_tuple, Deserialize_tuple)]
-pub struct CrossMsgs {
-    // FIXME: Consider to make this an AMT if we expect
-    // a lot of cross-messages to be propagated.
-    pub msgs: Vec<CrossMsg>,
-}
-
-impl CrossMsgs {
-    pub fn new() -> Self {
-        Self::default()
     }
 }
 
@@ -216,30 +69,4 @@ pub(crate) fn distribute_crossmsg_fee(
 pub(crate) fn burn_bu_funds(rt: &mut impl Runtime, value: TokenAmount) -> Result<(), ActorError> {
     rt.send(&BURNT_FUNDS_ACTOR_ADDR, METHOD_SEND, None, value)?;
     Ok(())
-}
-
-#[cfg(test)]
-mod tests {
-    use crate::cross::*;
-    use std::str::FromStr;
-
-    #[test]
-    fn test_is_bottomup() {
-        bottom_up("/r123/f01", "/r123/f01/f02", false);
-        bottom_up("/r123/f01", "/r123", true);
-        bottom_up("/r123/f01", "/r123/f01/f02", false);
-        bottom_up("/r123/f01", "/r123/f02/f02", true);
-        bottom_up("/r123/f01/f02", "/r123/f01/f02", false);
-        bottom_up("/r123/f01/f02", "/r123/f01/f02/f03", false);
-    }
-
-    fn bottom_up(a: &str, b: &str, res: bool) {
-        assert_eq!(
-            is_bottomup(
-                &SubnetID::from_str(a).unwrap(),
-                &SubnetID::from_str(b).unwrap()
-            ),
-            res
-        );
-    }
 }

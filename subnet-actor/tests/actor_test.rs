@@ -799,7 +799,7 @@ mod test {
     #[test]
     fn test_submit_checkpoint_aborts_not_chained_early_termination() {
         let test_actor_address = Address::new_id(9999);
-        let mut runtime = construct_runtime_with_receiver(test_actor_address.clone());
+        let mut runtime = construct_runtime_with_receiver(test_actor_address);
 
         let miners = vec![
             Address::new_id(10),
@@ -811,11 +811,10 @@ mod test {
         // first miner joins the subnet
         let value = TokenAmount::from_atto(MIN_COLLATERAL_AMOUNT);
 
-        let mut i = 0;
-        for caller in &miners {
+        for (i, caller) in miners.iter().enumerate() {
             runtime.set_value(value.clone());
             runtime.set_balance(TokenAmount::from_atto(MIN_COLLATERAL_AMOUNT));
-            runtime.set_caller(*ACCOUNT_ACTOR_CODE_ID, caller.clone());
+            runtime.set_caller(*ACCOUNT_ACTOR_CODE_ID, *caller);
             runtime.expect_validate_caller_type(SIG_TYPES.clone());
             if i == 0 {
                 runtime.expect_send(
@@ -847,8 +846,6 @@ mod test {
                     IpldBlock::serialize_cbor(&params).unwrap(),
                 )
                 .unwrap();
-
-            i += 1;
         }
 
         // verify that we have an active subnet with 3 validators.
@@ -870,7 +867,7 @@ mod test {
 
         // Reject the submission as checkpoints are not chained
         let s = Address::new_id(10);
-        runtime.set_caller(*ACCOUNT_ACTOR_CODE_ID, s.clone());
+        runtime.set_caller(*ACCOUNT_ACTOR_CODE_ID, s);
         runtime.expect_validate_caller_type(SIG_TYPES.clone());
         expect_abort_contains_message(
             ExitCode::USR_ILLEGAL_STATE,
@@ -911,7 +908,7 @@ mod test {
     #[test]
     fn test_submit_checkpoint_aborts_not_chained_reset_epoch() {
         let test_actor_address = Address::new_id(9999);
-        let mut runtime = construct_runtime_with_receiver(test_actor_address.clone());
+        let mut runtime = construct_runtime_with_receiver(test_actor_address);
 
         // Step 1
         let miners = vec![
@@ -924,11 +921,10 @@ mod test {
         // first miner joins the subnet
         let value = TokenAmount::from_atto(MIN_COLLATERAL_AMOUNT);
 
-        let mut i = 0;
-        for caller in &miners {
+        for (i, caller) in miners.iter().enumerate() {
             runtime.set_value(value.clone());
             runtime.set_balance(TokenAmount::from_atto(MIN_COLLATERAL_AMOUNT));
-            runtime.set_caller(*ACCOUNT_ACTOR_CODE_ID, caller.clone());
+            runtime.set_caller(*ACCOUNT_ACTOR_CODE_ID, *caller);
             runtime.expect_validate_caller_type(SIG_TYPES.clone());
             if i == 0 {
                 runtime.expect_send(
@@ -960,8 +956,6 @@ mod test {
                     IpldBlock::serialize_cbor(&params).unwrap(),
                 )
                 .unwrap();
-
-            i += 1;
         }
 
         let root_subnet = SubnetID::from_str(ROOT_STR_ID).unwrap();
@@ -980,9 +974,9 @@ mod test {
                 .to_vec(),
         );
 
-        send_checkpoint(&mut runtime, miners[0].clone(), &checkpoint_2, false).unwrap();
-        send_checkpoint(&mut runtime, miners[1].clone(), &checkpoint_2, false).unwrap();
-        send_checkpoint(&mut runtime, miners[2].clone(), &checkpoint_2, false).unwrap();
+        send_checkpoint(&mut runtime, miners[0], &checkpoint_2, false).unwrap();
+        send_checkpoint(&mut runtime, miners[1], &checkpoint_2, false).unwrap();
+        send_checkpoint(&mut runtime, miners[2], &checkpoint_2, false).unwrap();
 
         // performing checks
         let st: State = runtime.get_state();
@@ -1012,8 +1006,8 @@ mod test {
         );
 
         // Step 3
-        let epoch_1 = DEFAULT_GENESIS_EPOCH + st.bottomup_checkpoint_voting.submission_period * 1;
-        let mut checkpoint_1 = BottomUpCheckpoint::new(subnet.clone(), epoch_1);
+        let epoch_1 = st.bottomup_checkpoint_voting.submission_period;
+        let mut checkpoint_1 = BottomUpCheckpoint::new(subnet, epoch_1);
         checkpoint_1.set_signature(
             RawBytes::serialize(Signature::new_secp256k1(vec![1, 2, 3, 4]))
                 .unwrap()
@@ -1021,9 +1015,9 @@ mod test {
                 .to_vec(),
         );
 
-        send_checkpoint(&mut runtime, miners[0].clone(), &checkpoint_1, false).unwrap();
-        send_checkpoint(&mut runtime, miners[1].clone(), &checkpoint_1, false).unwrap();
-        send_checkpoint(&mut runtime, miners[2].clone(), &checkpoint_1, true).unwrap();
+        send_checkpoint(&mut runtime, miners[0], &checkpoint_1, false).unwrap();
+        send_checkpoint(&mut runtime, miners[1], &checkpoint_1, false).unwrap();
+        send_checkpoint(&mut runtime, miners[2], &checkpoint_1, true).unwrap();
 
         // performing checks
         let st: State = runtime.get_state();
@@ -1053,7 +1047,7 @@ mod test {
 
         // Step 4
         checkpoint_2.data.prev_check = TCid::from(checkpoint_1.cid());
-        send_checkpoint(&mut runtime, miners[3].clone(), &checkpoint_2, false).unwrap();
+        send_checkpoint(&mut runtime, miners[3], &checkpoint_2, false).unwrap();
 
         // perform checks
         let st: State = runtime.get_state();
@@ -1071,7 +1065,7 @@ mod test {
         checkpoint: &BottomUpCheckpoint,
         is_commit: bool,
     ) -> Result<Option<IpldBlock>, ActorError> {
-        runtime.set_caller(*ACCOUNT_ACTOR_CODE_ID, sender.clone());
+        runtime.set_caller(*ACCOUNT_ACTOR_CODE_ID, sender);
         runtime.expect_validate_caller_type(SIG_TYPES.clone());
         // runtime.expect_send(
         //     sender.clone(),

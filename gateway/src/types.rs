@@ -9,12 +9,11 @@ use fvm_ipld_encoding::{RawBytes, DAG_CBOR};
 use fvm_shared::address::{Address, Protocol};
 use fvm_shared::clock::ChainEpoch;
 use fvm_shared::econ::TokenAmount;
+use ipc_sdk::cross::CrossMsg;
 use ipc_sdk::subnet_id::SubnetID;
 use multihash::MultihashDigest;
 use primitives::CodeType;
 use std::cmp::Ordering;
-
-use crate::cross::CrossMsg;
 
 /// ID used in the builtin-actors bundle manifest
 pub const MANIFEST_ID: &str = "ipc_gateway";

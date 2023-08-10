@@ -4,6 +4,7 @@ use fvm_ipld_blockstore::Blockstore;
 use fvm_ipld_encoding::repr::{Deserialize_repr, Serialize_repr};
 use fvm_shared::clock::ChainEpoch;
 use fvm_shared::econ::TokenAmount;
+use ipc_sdk::cross::CrossMsg;
 use primitives::{TAmt, TCid};
 use serde_tuple::{Deserialize_tuple, Serialize_tuple};
 
@@ -11,7 +12,6 @@ use crate::{State, CROSSMSG_AMT_BITWIDTH};
 use ipc_sdk::subnet_id::SubnetID;
 
 use super::checkpoint::*;
-use super::cross::CrossMsg;
 
 #[derive(PartialEq, Eq, Clone, Copy, Debug, Deserialize_repr, Serialize_repr)]
 #[repr(i32)]

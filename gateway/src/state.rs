@@ -20,11 +20,11 @@ use std::str::FromStr;
 use crate::checkpoint::Validators;
 use crate::TopDownCheckpoint;
 use ipc_actor_common::vote::Voting;
+use ipc_sdk::cross::{CrossMsg, StorableMsg};
 use ipc_sdk::subnet_id::SubnetID;
 use ipc_sdk::ValidatorSet;
 
 use super::checkpoint::*;
-use super::cross::*;
 use super::subnet::*;
 use super::types::*;
 
