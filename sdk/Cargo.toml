@@ -24,7 +24,6 @@ integer-encoding = { version = "3.0.3", default-features = false }
 lazy_static = "1.4.0"
 log = "0.4.17"
 num-traits = "0.2.14"
-primitives = { git = "https://github.com/consensus-shipyard/fvm-utils" }
 serde = { version = "1.0.136", features = ["derive"] }
 serde_tuple = "0.5"
 thiserror = "1.0.38"
