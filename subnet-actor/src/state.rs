@@ -65,7 +65,7 @@ pub struct State {
 /// StateObject trait (i.e. impl StateObject for State).
 impl State {
     pub fn new(
-        rt: &mut impl Runtime,
+        rt: &impl Runtime,
         params: ConstructParams,
         current_epoch: ChainEpoch,
     ) -> anyhow::Result<State> {

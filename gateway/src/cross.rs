@@ -24,7 +24,7 @@ impl ExecutableMessage for CrossMsg {
 /// Transaction side-effects from the commitment of a cross-net message. It burns funds
 /// and propagates the corresponding rewards.
 pub(crate) fn cross_msg_side_effects(
-    rt: &mut impl Runtime,
+    rt: &impl Runtime,
     cross_msg: &CrossMsg,
     do_burn: bool,
     top_down_fee: &TokenAmount,
@@ -56,7 +56,7 @@ pub(crate) fn cross_msg_side_effects(
 }
 
 pub(crate) fn distribute_crossmsg_fee(
-    rt: &mut impl Runtime,
+    rt: &impl Runtime,
     subnet_actor: &Address,
     fee: TokenAmount,
 ) -> Result<(), ActorError> {
@@ -66,7 +66,7 @@ pub(crate) fn distribute_crossmsg_fee(
     Ok(())
 }
 
-pub(crate) fn burn_bu_funds(rt: &mut impl Runtime, value: TokenAmount) -> Result<(), ActorError> {
+pub(crate) fn burn_bu_funds(rt: &impl Runtime, value: TokenAmount) -> Result<(), ActorError> {
     rt.send(&BURNT_FUNDS_ACTOR_ADDR, METHOD_SEND, None, value)?;
     Ok(())
 }

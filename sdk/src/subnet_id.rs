@@ -1,12 +1,12 @@
+use crate::error::Error;
 use fnv::FnvHasher;
 use fvm_shared::address::Address;
 use lazy_static::lazy_static;
 use serde_tuple::{Deserialize_tuple, Serialize_tuple};
 use std::fmt;
+use std::fmt::Write;
 use std::hash::{Hash, Hasher};
 use std::str::FromStr;
-
-use crate::error::Error;
 
 /// MaxChainID is the maximum chain ID value
 /// possible. This is the MAX_CHAIN_ID currently
@@ -193,8 +193,10 @@ impl fmt::Display for SubnetID {
         let children_str = self
             .children_as_ref()
             .iter()
-            .map(|s| format!("/{s}"))
-            .collect::<String>();
+            .fold(String::new(), |mut output, s| {
+                let _ = write!(&mut output, "{}", s);
+                output
+            });
 
         write!(f, "/r{}{}", self.root_id(), children_str)
     }

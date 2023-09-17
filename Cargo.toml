@@ -15,8 +15,7 @@ members = [
     "sdk",
     "common",
     "atomic-exec",
-    "atomic-exec/primitives",
-    "atomic-exec/examples/fungible-token",
+    "atomic-exec/primitives"
 ]
 
 # Uncomment to point to you local versions

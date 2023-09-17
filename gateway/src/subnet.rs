@@ -57,7 +57,7 @@ impl Subnet {
     /// Increase the applied bottom-up nonce after an execution.
     pub(crate) fn increase_applied_bottomup(
         &mut self,
-        rt: &mut impl Runtime,
+        rt: &impl Runtime,
         st: &mut State,
     ) -> anyhow::Result<()> {
         self.applied_bottomup_nonce += 1;

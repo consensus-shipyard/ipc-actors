@@ -1,5 +1,3 @@
-#![feature(let_chains)]
-
 extern crate core;
 
 pub use self::checkpoint::{BottomUpCheckpoint, CHECKPOINT_GENESIS_CID};
@@ -673,8 +671,10 @@ impl Actor {
                 actor_error!(unhandled_message, "cannot load from postbox")
             })?;
 
-            if let Some(owners) = postbox_item.owners && !owners.contains(&owner) {
-                return Err(actor_error!(illegal_state, "owner not match"));
+            if let Some(owners) = postbox_item.owners {
+                if !owners.contains(&owner) {
+                    return Err(actor_error!(illegal_state, "owner not match"));
+                }
             }
 
             // collect cross-fee
@@ -820,7 +820,7 @@ impl Actor {
     ///
     /// NOTE: This function should always be called inside an `rt.transaction`
     fn commit_cross_message(
-        rt: &mut impl Runtime,
+        rt: &impl Runtime,
         st: &mut State,
         cross_msg: &mut CrossMsg,
         fee: TokenAmount,
