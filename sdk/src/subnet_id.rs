@@ -194,7 +194,7 @@ impl fmt::Display for SubnetID {
             .children_as_ref()
             .iter()
             .fold(String::new(), |mut output, s| {
-                let _ = write!(&mut output, "{}", s);
+                let _ = write!(&mut output, "/{}", s);
                 output
             });
 

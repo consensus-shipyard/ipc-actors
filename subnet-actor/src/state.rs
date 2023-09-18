@@ -260,7 +260,7 @@ impl State {
     /// Do not call this function in transaction
     pub fn verify_checkpoint(
         &self,
-        rt: &mut impl Runtime,
+        rt: &impl Runtime,
         ch: &BottomUpCheckpoint,
     ) -> anyhow::Result<()> {
         // check that subnet is active
